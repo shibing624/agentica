@@ -67,9 +67,8 @@ and reply with the version and its headline changes. Otherwise reply with
 exactly `[NO_UPDATE]`."
 
 A job's agent has the CLI's file, shell, web, memory and `cronjob` tools, and
-no session of its own. It has no `list_agents` / `send_message` /
-`ask_user_question`: do not write a prompt that tells it to message a session
-or ask the user.
+no session of its own. It has no `ask_user_question`: do not write a prompt
+that tells it to message a session or ask the user.
 
 Jobs only fire on their schedule while the scheduler daemon is on. How the user
 turns it on depends on the surface:

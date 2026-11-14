@@ -266,41 +266,6 @@ class TestCLIToolRender(unittest.TestCase):
         fake.print.assert_not_called()
 
 
-    def test_list_agents_result_is_shown_in_full(self):
-        """Peer discovery is multi-line and must not be folded behind Ctrl+O."""
-        from agentica.cli.display import StreamDisplayManager, clear_truncated_blocks, get_truncated_blocks
-
-        clear_truncated_blocks()
-        body = "\n".join(
-            [
-                "1 other live session(s). You are 'nlp-5f' [peer=abc].",
-                "Your session_id: aaaa",
-                "",
-                "- payments [peer=def]",
-                "  session_id: bbbb",
-                "  cwd: /repos/payments",
-                "  project: /tmp/projects/payments-hash",
-                "  session_log: /tmp/projects/payments-hash/bbbb.jsonl",
-                "  log_file (INFO): /tmp/home/.agentica/logs/20260809-80403.log",
-                "  memory: /tmp/ws/users/default/MEMORY.md",
-                "  working on: adding keys",
-            ]
-        )
-        fake = MagicMock()
-        fake.width = 80
-        dm = StreamDisplayManager(fake)
-        dm.display_tool_result("list_agents", body, is_error=False, elapsed=0.004)
-
-        rendered = "\n".join(
-            str(call.args[0]) for call in fake.print.call_args_list if call.args
-        )
-        self.assertIn("session_log:", rendered)
-        self.assertIn("log_file (INFO):", rendered)
-        self.assertIn("MEMORY.md", rendered)
-        self.assertIn("working on: adding keys", rendered)
-        self.assertNotIn("more lines", rendered)
-        self.assertEqual(get_truncated_blocks(), [])
-
     ASK_PROMPT = (
         "实测发现 storage 不可复用（v2 用完即删，316 题记忆只剩 3 个残留）。"
         "方案 A 必须改为重跑 ingest。修正成本：方案 A' = 重跑 qwen ingest"
@@ -611,28 +576,6 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertIn("value-11", rendered)
         self.assertNotIn("Ctrl+O", rendered)
         self.assertEqual(disp.get_truncated_blocks(), [])
-
-    def test_send_message_call_shows_full_body(self):
-        """send_message must not hide the handoff behind the default 40-char truncate."""
-        from agentica.cli.display.tool_format import format_tool_display, _display_tool_impl
-
-        long_msg = (
-            "用户决定：合并 schema 改动，并说明这是用户的决定。"
-            "请对方在采纳前仍向其用户确认 agent 消息边界。"
-        )
-        display = format_tool_display(
-            "send_message",
-            {"target": "temp-af", "message": long_msg},
-        )
-        self.assertIn("→ temp-af", display)
-        self.assertIn(long_msg, display)
-        self.assertNotIn("...", display)
-
-        fake = MagicMock()
-        fake.width = 80
-        _display_tool_impl(fake, "send_message", {"target": "temp-af", "message": long_msg})
-        rendered = "\n".join(str(call.args[0]) for call in fake.print.call_args_list if call.args)
-        self.assertIn(long_msg, rendered)
 
     def test_read_file_negative_offset_display(self):
         """offset=-50 alone reads the last 50 lines; with limit=10 it keeps

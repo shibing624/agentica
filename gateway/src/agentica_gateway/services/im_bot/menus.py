@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from agentica.config.profiles import get_active_profile_name, get_profiles
 from agentica.memory.session_log import SessionLog, local_turn_stamp
-from agentica.peers import PeerInfo, list_live_peers
+from agentica.live import PeerInfo, list_live_peers
 from agentica.tools.background_processes import (
     count_running_session_jobs,
     load_session_job_views,

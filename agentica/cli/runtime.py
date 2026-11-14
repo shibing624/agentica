@@ -950,9 +950,9 @@ def create_agent(
     permission_mode: unified 3-tier tool permission ("ask"/"auto"/"allow-all",
         see agentica.agent.permissions). Falls back to ``agent_config["permissions"]``,
         then "allow-all" (the CLI's actual --permissions default; see parse_args()).
-    peer_session: optional ``agentica.peers.PeerSession`` for cross-session
-        messaging. When given, the agent gets the ``list_agents`` /
-        ``send_message`` tools and its inbox is drained between tool batches.
+    peer_session: optional ``agentica.live.PeerSession``. When given, messages
+        delivered to this session (cron, scheduler) are drained between tool
+        batches.
     worktree_binder: optional ``agentica.cli.worktree_binding.WorktreeBinder``.
         When given, the agent gets the ``worktree`` tool and can move this
         session into a per-task checkout on its own — including when the
@@ -1100,14 +1100,8 @@ def create_agent(
         CronTool(job_runner=cron_job_runner),
     ] + list(extra_tools or [])
 
-    if peer_session is not None:
-        from agentica.tools.peer_tool import PeerMessagingTool
-
-        cli_tools.insert(0, PeerMessagingTool(peer_session))
-
-    # Worktrees are the other half of peer messaging: list_agents shows that
-    # another session is dirty in the same directory, and this is what the agent
-    # does about it without asking a human to restart it somewhere else.
+    # A per-task checkout the agent can move this session into on its own, for
+    # when another session is dirty in the same directory.
     if worktree_binder is not None:
         from agentica.tools.worktree_tool import WorktreeTool
 

@@ -189,7 +189,7 @@ class TestRunUnderMandate:
         peer = SimpleNamespace(name="term", session_id="conv-1")
         sent = []
         with patch("agentica.cron.cli_runner.live_cli_peer", return_value=peer), \
-             patch("agentica.peers.send_message", side_effect=lambda p, **kw: sent.append((p, kw["text"]))):
+             patch("agentica.live.send_message", side_effect=lambda p, **kw: sent.append((p, kw["text"]))):
             out = asyncio.run(CliAgentRunner(lambda **kw: pytest.fail("must not build an agent")).run(
                 "p", {"job_id": "j1", "session_id": "conv-1"}))
         assert sent == [(peer, "p")] and out.session_id == "conv-1"

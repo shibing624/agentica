@@ -17,7 +17,7 @@ const BY_NAME: Record<string, Category> = {
   write_file: "write",
   execute: "commands", shell: "commands", bash: "commands", run_python: "commands", python: "commands",
   web_search: "webSearch", fetch_url: "webFetch", web_fetch: "webFetch",
-  task: "subagents", send_message: "subagents", list_agents: "subagents",
+  task: "subagents",
   write_todos: "plan", goal: "plan",
   ask_user_question: "questions",
 };

@@ -15,7 +15,7 @@
 """
 from __future__ import annotations
 
-from agentica.peers import send_message as send_peer_message
+from agentica.live import send_message as send_peer_message
 
 from ...config import settings
 from ..agent_service import ChatResult, is_system_temp_path

@@ -19,7 +19,7 @@ pytest.importorskip("agentica_gateway", reason="requires agentica_gateway")
 
 from fastapi.testclient import TestClient
 
-from agentica import peers
+from agentica import live as peers
 from agentica.cli.attach import AttachServer
 from agentica.memory.session_log import SessionLog
 from agentica_gateway import deps

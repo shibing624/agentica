@@ -698,7 +698,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self._undelivered_steer: List[SteerItem] = []
         self._steer_lock = threading.Lock()
 
-        # Cross-session peer channel (``agentica.peers.PeerSession``), set by the
+        # Cross-session peer channel (``agentica.live.PeerSession``), set by the
         # CLI when this agent belongs to an interactive session. Messages from
         # the user's other sessions are pulled from it between tool batches, on
         # the same "never interrupt a running tool" boundary as steering.

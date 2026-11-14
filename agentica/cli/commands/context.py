@@ -40,7 +40,7 @@ class CommandContext:
     bg_tasks: Dict[str, dict] = field(default_factory=dict)
     bg_task_counter: int = 0
     background_processes: Any = None
-    # Cross-session peer channel (agentica.peers.PeerSession). Shared with every
+    # Cross-session peer channel (agentica.live.PeerSession). Shared with every
     # rebuilt agent so /resume, /model and friends keep the messaging tools and
     # this terminal's mailbox identity.
     peer_session: Any = None

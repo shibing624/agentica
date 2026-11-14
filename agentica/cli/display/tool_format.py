@@ -314,21 +314,6 @@ def format_tool_display(
             model_label=model_label,
         )
 
-    # Peer messaging — show the full body; truncating here hides the handoff.
-    if tool_name == "send_message":
-        target = str(tool_args.get("target", "") or "")
-        message = str(tool_args.get("message", "") or "")
-        delivery = str(tool_args.get("delivery", "") or "").strip().lower()
-        dest = f"→ {target}" if target else ""
-        if delivery == "queue":
-            dest = f"{dest} [queue]" if dest else "[queue]"
-        if not message:
-            return dest
-        return f"{dest}\n    {message}" if dest else message
-
-    if tool_name == "list_agents":
-        return ""
-
     # Human-in-the-loop: the question and its options are rendered in full by
     # the TUI's prompt widget the moment this call parks. Repeating a clipped
     # copy on the call line shows the same question twice, neither in full.
@@ -385,7 +370,7 @@ def _display_tool_impl(console_instance, tool_name: str, tool_args: dict,
     elif tool_name == "write_todos" and "\n" in display_str:
         console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta]:")
         console_instance.print(f"    {display_str}", style="dim", highlight=False, markup=False)
-    elif tool_name in ("send_message", "task") and "\n" in display_str:
+    elif tool_name == "task" and "\n" in display_str:
         console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta]")
         for line in display_str.splitlines():
             console_instance.print(f"    {line}", style="dim", highlight=False, markup=False)

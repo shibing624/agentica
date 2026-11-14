@@ -19,7 +19,7 @@ import time
 import pytest
 
 from agentica.cli import attach
-from agentica import peers
+from agentica import live as peers
 from agentica.cli.attach import (
     ERR_METHOD_NOT_FOUND,
     ERR_PARSE,

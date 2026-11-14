@@ -103,7 +103,7 @@ class GatewayCronRunner:
                             "reported a result yet."
                         )
                 return CronRunOutput(content=answer, session_id=session_id)
-            from agentica.peers import send_message
+            from agentica.live import send_message
 
             send_message(peer, text=prompt, from_name="cron", from_peer_id="cron", from_kind="agent")
             return CronRunOutput(

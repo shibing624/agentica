@@ -116,7 +116,7 @@ class SessionState:
     bg_tasks: Dict[str, dict] = field(default_factory=dict)
     bg_task_counter: int = 0
     background_processes: BackgroundProcessRegistry = field(default_factory=BackgroundProcessRegistry)
-    # This terminal's end of the cross-session peer channel (agentica/peers/__init__.py).
+    # This terminal's end of the cross-session peer channel (agentica/live/__init__.py).
     peer_session: Any = None
     # Standing-goal loop (see agentica/agent/goals.py).
     goal_manager: Optional[GoalManager] = None

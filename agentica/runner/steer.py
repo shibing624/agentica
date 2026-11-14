@@ -156,7 +156,7 @@ class SteerMixin:
             return
         if not drained:
             return
-        from agentica.peers import format_for_model
+        from agentica.live import format_for_model
 
         marker = format_for_model(drained)
         last = messages[-1] if messages else None

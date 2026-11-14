@@ -40,7 +40,7 @@ from agentica.config import AGENTICA_CACHE_DIR
 from agentica.utils.log import logger
 
 if TYPE_CHECKING:
-    from agentica.peers.git_state import GitState
+    from agentica.git.state import GitState
 
 # A peer heartbeats while it lives; a record older than this is treated as a
 # crashed session even when its pid still resolves (pids get reused).
@@ -184,7 +184,7 @@ class PeerInfo:
     cwd: str
     session_id: Optional[str] = None
     git_branch: Optional[str] = None
-    # Where this session sits in the repository (agentica/peers/git_state.py).
+    # Where this session sits in the repository (agentica/git/state.py).
     # Published because the alternative is asking: "did you already touch that
     # file?" and "are you behind main?" cost a message, a turn on both sides,
     # and an answer that goes stale the moment a third session commits. Git
@@ -253,7 +253,7 @@ class PeerInfo:
         and readable, and an older record that never published these fields
         yields an empty state instead of a parse error.
         """
-        from agentica.peers.git_state import GitState
+        from agentica.git.state import GitState
 
         return GitState(
             branch=self.git_branch or "",
@@ -333,9 +333,8 @@ class PeerInfo:
     def detail_rows(self) -> List[Tuple[str, str]]:
         """``(label, value)`` pairs for this session, in display order.
 
-        The single source for both the plain text a model reads via
-        ``list_agents`` and the styled ``/list-agents`` listing — the two
-        drifted apart while they each hand-rolled the same field list.
+        The single source for the plain-text ``describe()`` and the styled
+        ``/list-agents`` listing, so the two cannot drift apart.
 
         Self and other peers use the same field set. When a live record is
         from an older agentica that omitted paths, fill what is deterministic
@@ -415,7 +414,7 @@ class PeerInfo:
         return rows
 
     def describe(self) -> str:
-        """Multi-line listing used by ``list_agents`` and ``/list-agents``.
+        """Multi-line plain-text listing of this session.
 
         Keep the addressable name on the first line; put the diggable paths
         underneath so a model (or a human scanning the terminal) can resume
@@ -678,7 +677,7 @@ class PeerSession:
         matches = match_peers(target, exclude_peer_id=self.peer_id)
         if not matches:
             raise PeerMessageRefused(
-                f"no live session matches '{target}'; call list_agents to see current names"
+                f"no live session matches '{target}'; run /list-agents to see current names"
             )
         if len(matches) > 1:
             names = ", ".join(info.name for info in matches)
@@ -778,7 +777,7 @@ class PeerMessage:
     ``from_kind`` separates the two things that can put a message in a mailbox,
     because they carry different authority: ``"agent"`` is another session's
     model talking (no authority — see the receiving-side policy), ``"user"`` is
-    the human relaying an instruction with ``/send-message``. Only a process running
+    the human's own instruction relayed through a channel (IM, cron). Only a process running
     as this user can write to the mailbox (mode 0700), so ``"user"`` is as
     trustworthy as a line typed into this terminal.
     """
@@ -958,13 +957,12 @@ def format_for_model(messages: List[PeerMessage]) -> str:
     receiver may act on: a relayed user instruction is the human talking and
     carries their authority, while another session's agent carries none.
 
-    Reply address is the sender's addressable name (what ``send_message`` /
-    ``/send-message`` take), not the opaque peer_id — same idea as Claude Code
+    Reply address is the sender's addressable name (what ``send_message`` takes), not the opaque peer_id — same idea as Claude Code
     telling the model to copy the peer's name into ``to``.
 
     **Reporting the outcome is not optional, and the header is where that is
-    decided.** The bundled ``multi-agent`` skill says work that is finished or
-    stuck goes back to whoever handed it over, but the header used to end in
+    decided.** Work that is finished or stuck goes back to whoever handed it
+    over, but the header used to end in
     "if needed" / "only if it is waiting on an answer" — a per-message
     instruction beats a standing one, and a dispatcher is never visibly
     "waiting", so the worker did the job and told nobody. That is what leaves

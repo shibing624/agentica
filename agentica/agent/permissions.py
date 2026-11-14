@@ -54,7 +54,6 @@ SANDBOX_MODES = ("off", "workspace-write")
 READ_ONLY_TOOLS: Set[str] = frozenset({
     "read_file", "glob", "grep", "web_search", "fetch_url",
     "write_todos", "task",
-    "list_agents",
     "search_memory",
     "search_session",
 })

@@ -127,7 +127,6 @@ def test_every_builtin_tool_property_has_description_and_clean_top_doc():
     from agentica.tools.builtin.vision_tool import BuiltinVisionTool
     from agentica.tools.cron_tool import CronTool
     from agentica.tools.goal_tool import GoalTool
-    from agentica.tools.peer_tool import PeerMessagingTool
     from agentica.tools.self_manage_tool import SelfManageTool
     from agentica.tools.skill_tool import SkillTool
     from agentica.tools.worktree_tool import WorktreeTool
@@ -138,7 +137,6 @@ def test_every_builtin_tool_property_has_description_and_clean_top_doc():
         SkillTool(),
         AskUserQuestionTool(),
         WorktreeTool(MagicMock()),
-        PeerMessagingTool(MagicMock()),
         CronTool(),
         SelfManageTool(),
         GoalTool(MagicMock()),

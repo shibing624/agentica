@@ -71,13 +71,11 @@ class TestAgentPermissionMode(unittest.TestCase):
         self.assertTrue(agent._is_tool_enabled("execute"))
         self.assertTrue(agent._is_tool_enabled("apply_patch"))
 
-    def test_ask_mode_keeps_listing_peers_and_memory_tools(self):
-        """Ask no longer hides writes: save_memory / send_message stay visible."""
+    def test_ask_mode_keeps_memory_tools(self):
+        """Ask no longer hides writes: save_memory stays visible."""
         agent = Agent(tool_config=ToolConfig(permission_mode="ask"))
-        self.assertTrue(agent._is_tool_enabled("list_agents"))
         self.assertTrue(agent._is_tool_enabled("search_memory"))
         self.assertTrue(agent._is_tool_enabled("save_memory"))
-        self.assertTrue(agent._is_tool_enabled("send_message"))
 
     def test_auto_mode_enables_sandbox_and_allows_all_tools(self):
         agent = Agent(tool_config=ToolConfig(permission_mode="auto"))

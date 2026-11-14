@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from agentica.peers import worktrees
-from agentica.peers.worktrees import WorktreeError, ensure, slug
+from agentica.git import worktree as worktrees
+from agentica.git.worktree import WorktreeError, ensure, slug
 
 
 class TestSlug:

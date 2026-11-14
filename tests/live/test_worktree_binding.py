@@ -8,11 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from agentica.peers import worktrees
+from agentica.git import worktree as worktrees
 from agentica.cli.commands.context import CommandContext
 from agentica.cli.commands.worktree_cmd import _cmd_worktree
 from agentica.cli.worktree_binding import WorktreeBinder
-from agentica.peers.worktrees import WorktreeError, ensure
+from agentica.git.worktree import WorktreeError, ensure
 
 
 def _git(cwd, *args):

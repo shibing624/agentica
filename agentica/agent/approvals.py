@@ -67,8 +67,6 @@ BENIGN_ALWAYS_ALLOW = frozenset({
     "list_skills",
     "get_skill_info",
     "self_manage",
-    "list_agents",
-    "send_message",
     "task",
     "wait",
     "cronjob",

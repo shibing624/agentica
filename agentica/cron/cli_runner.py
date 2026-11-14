@@ -83,7 +83,7 @@ def live_cli_peer(session_id: str):
     A run must not write a conversation's log while a terminal has it open:
     two writers interleave one JSONL. The terminal gets the prompt instead.
     """
-    from agentica.peers import list_live_peers
+    from agentica.live import list_live_peers
 
     for peer in list_live_peers():
         if peer.session_id == session_id:
@@ -127,7 +127,7 @@ class CliAgentRunner:
             )
             if answer is not None:
                 return CronRunOutput(content=answer, session_id=session_id)
-            from agentica.peers import send_message
+            from agentica.live import send_message
 
             send_message(peer, text=prompt, from_name="cron", from_peer_id="cron", from_kind="agent")
             return CronRunOutput(

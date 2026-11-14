@@ -14,7 +14,7 @@ from agentica.cli.approvals import (
     approval_decision_from_key,
     visible_approval_decisions,
 )
-from agentica.peers import PeerInfo
+from agentica.live import PeerInfo
 from agentica.utils.log import logger
 
 from ...card_page import CardItem, gateway_public_url, phone_card_base_url

@@ -120,7 +120,7 @@ Rules:
 - Do NOT re-implement scheduling/recurrence — the cron system already handles "every N minutes". Describe only what to do in ONE run.
 - Never ask the user questions in the prompt; it must be executable without clarification.
 - If the task watches for an end state (a run finishing, a file appearing, a process exiting), the prompt must say: once that state is reached, report it and pause this job with the cronjob tool (action='pause').
-- The job's agent has no tool to message other sessions or agents (no list_agents / send_message) and none to ask the user. Do not tell it to do either.
+- The job's agent has no tool to message other sessions or agents and none to ask the user. Do not tell it to do either.
 - Keep it concise (1-3 sentences)."""
 
 

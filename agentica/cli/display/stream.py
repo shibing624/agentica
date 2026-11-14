@@ -908,11 +908,11 @@ class StreamDisplayManager:
     # already tells the user what happened; errors are still surfaced.
     _SUPPRESS_RESULT_TOOLS = frozenset({"write_todos"})
 
-    # Peer discovery / delivery and wait: short multi-line status
+    # wait: short multi-line status
     # whose Log:/Command:/path lines must stay intact. Never fold behind Ctrl+O
     # or the default 120-char ellipsis. ``task`` is NOT here — its result is
     # JSON with a live-stream dedup path (``_display_task_result``).
-    _FULL_RESULT_TOOLS = frozenset({"list_agents", "send_message", "wait"})
+    _FULL_RESULT_TOOLS = frozenset({"wait"})
 
     # Human-in-the-loop. Their result is the only durable record of the
     # exchange — the question widget lives in the prompt_toolkit layout and is

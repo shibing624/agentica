@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author: XuMing(xuming624@qq.com)
-@description: Tests for agentica/peers/git_state.py — the git position a session publishes.
+@description: Tests for agentica/git/state.py — the git position a session publishes.
 
 Real repositories in tmp dirs, real git. The point of this module is that
 another session can answer "are you behind main?" and "did you touch that
@@ -11,8 +11,8 @@ import subprocess
 
 import pytest
 
-from agentica.peers import git_state
-from agentica.peers.git_state import GitState, collect
+from agentica.git import state as git_state
+from agentica.git.state import GitState, collect
 
 
 def _git(cwd, *args):
@@ -140,8 +140,8 @@ class TestPublishedThroughPresence:
     """What another session actually reads in `list_agents`."""
 
     def test_a_peer_listing_shows_branch_distance_and_dirty_paths(self, repo, tmp_path, monkeypatch):
-        from agentica import peers
-        from agentica.peers import PeerSession, list_live_peers
+        from agentica import live as peers
+        from agentica.live import PeerSession, list_live_peers
 
         monkeypatch.setattr(peers, "AGENTICA_CACHE_DIR", str(tmp_path / "cache"))
         _git(repo, "checkout", "-q", "-b", "wt/feature")
@@ -170,8 +170,8 @@ class TestPublishedThroughPresence:
         "clean" is what another session reads before deciding it is safe to
         rebase; an absent field must not be able to say it.
         """
-        from agentica import peers
-        from agentica.peers import PeerInfo
+        from agentica import live as peers
+        from agentica.live import PeerInfo
 
         monkeypatch.setattr(peers, "AGENTICA_CACHE_DIR", str(tmp_path / "cache"))
         info = PeerInfo.from_dict({
