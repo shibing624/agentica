@@ -409,8 +409,8 @@ agent = DeepAgent(
 )
 ```
 
-- 命令被沙箱挡住时，模型可以带 `escalate=true` 重跑到沙箱外：`ask` / `auto` 下一定走 `approve`；**没有 `approve` 的 Agent 出不了沙箱**。`allow-all` 不拦。
-- 机器上没有 `sandbox-exec` / `bwrap` 时构造直接报错，不会悄悄退回本机执行。
+- 命令被沙箱挡住时，模型可以带 `escalate=true` 重跑到沙箱外：`read-only` / `auto` 下一定走 `approve`；**没有 `approve` 的 Agent 出不了沙箱**。`allow-all` 不拦，但模型审查也不会替这条命令放行。
+- 沙箱可用性是**功能探测**（真的套一个只读 profile 跑一次），不是 `which`：机器上没有 `sandbox-exec` / `bwrap` 时构造直接报错；即使装了解析不了 profile（例如本进程已经在另一个沙箱里，macOS 不允许嵌套）也会报错，不会悄悄退回本机执行。
 - 普通 `Agent` 自己组装工具时，把 `SandboxConfig(os_sandbox=True, writable_dirs=[...])` 传给 `BuiltinExecuteTool(sandbox_config=...)` 即可；`sandbox=` 与 `sandbox_config=` 不能同时传。
 - CLI 对应 `--sandbox workspace-write`，见 [CLI 终端指南](../getting-started/terminal.md)。
 

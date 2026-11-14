@@ -156,11 +156,11 @@ class TestToggleCommandsPersist(unittest.TestCase):
         ctx = _ctx(self.work.path, agent=agent)
 
         with patch.object(cli_tools_skills, "get_console", return_value=MagicMock()):
-            cli_tools_skills._cmd_permissions(ctx, "ask")
+            cli_tools_skills._cmd_permissions(ctx, "read-only")
 
-        self.assertEqual(agent.tool_config.permission_mode, "ask")
-        self.assertEqual(ctx.agent_config["permissions"], "ask")
-        self.assertEqual(self.work.project_file()["cli"], {"permissions": "ask"})
+        self.assertEqual(agent.tool_config.permission_mode, "read-only")
+        self.assertEqual(ctx.agent_config["permissions"], "read-only")
+        self.assertEqual(self.work.project_file()["cli"], {"permissions": "read-only"})
 
     def test_invalid_permission_mode_is_not_persisted(self):
         from agentica.agent import Agent
@@ -309,18 +309,18 @@ class TestMainWiring(unittest.TestCase):
 
     def test_saved_preferences_reach_the_agent_config(self):
         cli_prefs.write_project_prefs(
-            self.work.path, {"permissions": "ask", "debug": True, "show_reasoning": False}
+            self.work.path, {"permissions": "read-only", "debug": True, "show_reasoning": False}
         )
 
         call = self._main(self._argv())
         agent_config = call.args[0]
 
-        self.assertEqual(agent_config["permissions"], "ask")
+        self.assertEqual(agent_config["permissions"], "read-only")
         self.assertTrue(agent_config["debug"])
         self.assertFalse(agent_config["_cli_prefs"]["show_reasoning"])
 
     def test_startup_flags_still_win(self):
-        cli_prefs.write_project_prefs(self.work.path, {"permissions": "ask"})
+        cli_prefs.write_project_prefs(self.work.path, {"permissions": "read-only"})
 
         call = self._main(self._argv("--allow-all"))
 
@@ -349,22 +349,22 @@ class TestSessionScope(unittest.TestCase):
     def test_sidecar_merges_keys_instead_of_replacing_them(self):
         log = self._log()
         log.set_cli_prefs({"show_reasoning": False})
-        log.set_cli_prefs({"permissions": "ask"})
+        log.set_cli_prefs({"permissions": "read-only"})
 
         self.assertEqual(
-            log.get_cli_prefs(), {"show_reasoning": False, "permissions": "ask"}
+            log.get_cli_prefs(), {"show_reasoning": False, "permissions": "read-only"}
         )
         # The sidecar is shared with name/archived/profile — they survive.
         log.set_name("my session")
         self.assertEqual(log.get_name(), "my session")
-        self.assertEqual(log.get_cli_prefs(), {"show_reasoning": False, "permissions": "ask"})
+        self.assertEqual(log.get_cli_prefs(), {"show_reasoning": False, "permissions": "read-only"})
 
     def test_none_removes_a_key_so_a_pref_can_return_to_default(self):
         log = self._log()
-        log.set_cli_prefs({"show_reasoning": False, "permissions": "ask"})
+        log.set_cli_prefs({"show_reasoning": False, "permissions": "read-only"})
         log.set_cli_prefs({"show_reasoning": None})
 
-        self.assertEqual(log.get_cli_prefs(), {"permissions": "ask"})
+        self.assertEqual(log.get_cli_prefs(), {"permissions": "read-only"})
 
     def test_session_listing_exposes_the_cli_block(self):
         log = self._log("s-listed")
@@ -429,16 +429,16 @@ class TestSessionScope(unittest.TestCase):
         cli_prefs.apply_cli_prefs(agent_config, {})
         cli_prefs.apply_session_cli_prefs(agent_config, {"show_reasoning": False})
 
-        cli_prefs.apply_session_cli_prefs(agent_config, {"permissions": "ask"})
+        cli_prefs.apply_session_cli_prefs(agent_config, {"permissions": "read-only"})
 
         tui = {}
         cli_prefs.sync_view_prefs_to_tui(tui, agent_config)
         self.assertTrue(tui["show_reasoning"])  # back to the default, not inherited
-        self.assertEqual(agent_config["permissions"], "ask")
+        self.assertEqual(agent_config["permissions"], "read-only")
 
     def test_resume_requested_reads_the_sidecar_of_that_session(self):
         log = SessionLog("s-resumed", work_dir=self.work.path, user_id="default")
-        log.set_cli_prefs({"permissions": "ask", "show_reasoning": False})
+        log.set_cli_prefs({"permissions": "read-only", "show_reasoning": False})
 
         agent_config = {
             "session_id": "s-resumed",
@@ -448,7 +448,7 @@ class TestSessionScope(unittest.TestCase):
         }
         self.assertEqual(
             _resume_session_cli_prefs(agent_config),
-            {"permissions": "ask", "show_reasoning": False},
+            {"permissions": "read-only", "show_reasoning": False},
         )
 
     def test_no_resume_means_no_session_lookup(self):

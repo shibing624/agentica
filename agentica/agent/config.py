@@ -99,9 +99,18 @@ class ToolConfig:
 
     # Unified 3-tier tool permission mode shared by the SDK, CLI, and Gateway.
     # See agentica.agent.permissions for the exact semantics of each tier.
-    # "ask" | "auto" | "allow-all". Defaults to "allow-all" (today's SDK
+    # "read-only" | "auto" | "allow-all". Defaults to "allow-all" (today's SDK
     # behavior: no restriction) so existing Agent() callers see no change.
     permission_mode: str = "allow-all"
+    # The auto tier asks the agent's own model before it asks a human. On, the
+    # model reviews every call the static classifier would park and may allow
+    # it unasked; deny or a failed review falls back to the normal approval
+    # card. Off restores the static-only behavior. One side call per parked
+    # call, never per turn.
+    enable_auto_review: bool = True
+    # Wall-clock cap on one review. A timeout counts as a failed review, so the
+    # call falls back to asking a human; it never runs unreviewed.
+    auto_review_timeout: float = 20.0
 
     def __post_init__(self) -> None:
         from agentica.agent.permissions import validate_permission_mode
@@ -376,7 +385,8 @@ class SandboxConfig:
             ``blocked_paths`` denied. Unlike the checks above this is enforced by
             the kernel, and it is independent of ``enabled`` — it holds in every
             permission mode. A command that needs more is re-run with
-            ``execute(escalate=True)``, which always asks a human in ask/auto.
+            ``execute(escalate=True)``, which always asks a human in
+            read-only/auto.
         network_access: With ``os_sandbox``, allow outbound network. Off by
             default; loopback stays reachable on macOS.
     """

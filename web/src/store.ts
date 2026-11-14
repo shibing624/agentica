@@ -343,6 +343,12 @@ function readSidebarWidth() {
 
 const listeners = new Set<() => void>();
 
+/** Stored tier validated against the current names; a pre-rename "ask" is dropped. */
+function readApprovalMode(): string {
+  const stored = localStorage.getItem("ag_approval");
+  return stored === "read-only" || stored === "auto" || stored === "allow-all" ? stored : "auto";
+}
+
 const state: AppState = {
   rev: 0,
   curSess: null,
@@ -379,7 +385,7 @@ const state: AppState = {
   composerPicker: null,
   approvalMenuOpen: false,
   chatMenuOpen: false,
-  selectedApprovalMode: localStorage.getItem("ag_approval") || "auto",
+  selectedApprovalMode: readApprovalMode(),
   sidebarCollapsed: false,
   sidebarWidth: readSidebarWidth(),
   workspaces: [],

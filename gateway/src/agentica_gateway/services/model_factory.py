@@ -232,7 +232,7 @@ def get_self_manage_tools() -> List[Any]:
     Lets the web agent inspect its own config.yaml/.env, know its own
     version, and adjust its own model/tuning — the "self-awareness"
     capability the CLI has always had. Gated by the same permission_mode
-    tiers as write_file/apply_patch (hidden in "ask" mode, available in
+    tiers as write_file/apply_patch (parked in "read-only", available in
     "auto"/"allow-all") since it's registered as destructive.
     """
     try:

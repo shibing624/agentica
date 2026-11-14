@@ -355,7 +355,7 @@ export function attachChatStream(sessionId: string, signal?: AbortSignal, after 
 
 export const setSessionApprovalMode = (
   sessionId: string,
-  approval_mode: "ask" | "auto" | "allow-all",
+  approval_mode: "read-only" | "auto" | "allow-all",
 ) =>
   postJson<{ session_id: string; approval_mode: string }>(
     `/api/sessions/${encodeURIComponent(sessionId)}/approval_mode`,

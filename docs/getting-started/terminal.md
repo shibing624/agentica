@@ -70,7 +70,7 @@ agentica --profile deepseek_pro
 | 命令 | 用途 |
 |---|---|
 | `/model` / `/model <profile>` | 查看所有模型配置，或将当前项目切换到指定 profile（`/model --clear` 恢复默认） |
-| `/permissions [ask\|auto\|allow-all]` | 切换工具执行权限档位：`ask`（写文件/跑命令前询问）、`auto`（工作区内自动放行）、`allow-all`（全部放行） |
+| `/permissions [read-only\|auto\|allow-all]` | 切换工具执行权限档位：`read-only`（读和联网直接跑，写文件/改状态的命令先询问）、`auto`（工作区内直接放行，其余先由模型审查、没把握再问你）、`allow-all`（全部放行） |
 | `/config` / `/config set <k> <v>` | 查看或直接修改配置文件中的参数（如 `/config set compact_token_limit 300000`） |
 | `/status` / `/usage` | 查看当前会话的模型、工作目录、日志路径与上下文 Token 占用明细 |
 | `/debug [on\|off]` | 开关终端详细调试日志 |
@@ -127,7 +127,7 @@ settings:
 开启后：
 - **写入限制**：只允许写当前工作目录（及同仓库的 worktree）、系统临时目录与常用包缓存目录；`.git/hooks` 与 `.git/config` 保护为只读。
 - **读取限制**：自动屏蔽 `~/.ssh`、`~/.aws`、`~/.gnupg`、`.env` 等敏感路径。
-- **需要临时突破沙箱时**：如果某条命令确实需要写工作区外或联网，在 `ask` / `auto` 权限档下会弹出审批卡让你确认。
+- **需要临时突破沙箱时**：如果某条命令确实需要写工作区外，在 `read-only` / `auto` 权限档下会弹出审批卡（`auto` 下先由模型审查，它放行就不打扰你）。沙箱里的网络默认关闭；不需要沙箱时不要传 `--sandbox` 即可。
 
 ---
 
@@ -141,7 +141,7 @@ settings:
 | `--model_provider` / `--model_name` | `zhipuai` / `glm-4.7-flash` | 直接指定提供商与模型名 |
 | `--work_dir` | 当前目录 | 文件读写与命令执行的基准目录 |
 | `--worktree <名称>` | — | 启动在独立的 `.worktrees/<名称>` 分支目录中 |
-| `--permissions` | `auto` | 初始权限档位：`ask` / `auto` / `allow-all` |
+| `--permissions` | `allow-all` | 初始权限档位：`read-only` / `auto` / `allow-all` |
 | `--sandbox` | `off` | 设为 `workspace-write` 开启系统级沙箱 |
 | `--compact-token-limit` | — | 设置当前会话的上下文压缩工作上限 |
 | `--no-evict` / `--no-auto-compact` | — | 关闭 80% 工具结果淘汰或 95% 自动换窗 |

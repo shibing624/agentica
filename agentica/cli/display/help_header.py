@@ -160,7 +160,7 @@ def show_help(skills_registry=None):
             "/cron":            "Scheduled jobs: list | add \"<prompt>\" <schedule> | edit | pause | resume | remove | runs | run | daemon on/off",
         },
         "Permissions": {
-            "/permissions":     "View or set mode (ask/auto/allow-all)",
+            "/permissions":     "View or set mode (read-only/auto/allow-all)",
         },
         "Other": {
             "/help":            "Show this help message",

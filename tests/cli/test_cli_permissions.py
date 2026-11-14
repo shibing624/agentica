@@ -50,9 +50,9 @@ class TestCmdPermissions(unittest.TestCase):
         agent = Agent()
         ctx = self._make_ctx(agent)
         with patch.object(cli_tools_skills, "get_console", return_value=MagicMock()):
-            cli_tools_skills._cmd_permissions(ctx, "ask")
+            cli_tools_skills._cmd_permissions(ctx, "read-only")
 
-        self.assertEqual(agent.tool_config.permission_mode, "ask")
+        self.assertEqual(agent.tool_config.permission_mode, "read-only")
 
     def test_set_invalid_mode_does_not_mutate_agent(self):
         from agentica.agent import Agent
@@ -76,9 +76,9 @@ class TestCmdPermissions(unittest.TestCase):
 
         self.assertTrue(console.print.called)
         printed = " ".join(str(c) for c in console.print.call_args_list)
-        self.assertIn("Ask for approval", printed)
+        self.assertIn("Read Only", printed)
         self.assertIn("including outside the workspace", printed)
-        self.assertIn("Approve for me", printed)
+        self.assertIn("Workspace Write", printed)
         self.assertIn("Full Access", printed)
         self.assertNotIn("only read-only tools", printed)
         self.assertNotIn("request_path_access", printed)

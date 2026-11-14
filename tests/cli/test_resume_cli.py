@@ -119,7 +119,7 @@ def test_resume_restores_session_profile_before_creating_agent(tmp_path, monkeyp
         session_id="session-target",
         work_dir=str(work_dir),
         run_context=None,
-        tool_config=SimpleNamespace(permission_mode="ask"),
+        tool_config=SimpleNamespace(permission_mode="read-only"),
         session_log=target_log,
     )
     console = MagicMock()

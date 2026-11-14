@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple
 
 from agentica.tools.base import Function, FunctionCall
+from agentica.tools.os_sandbox import writable_temp_roots
 from agentica.tools.safety import (
     check_command_safety,
     command_matches_blocked,
@@ -52,11 +53,9 @@ APPROVAL_TIMED_OUT_RESULT = (
 FILE_TOOLS = frozenset({"read_file", "write_file", "apply_patch", "glob", "grep"})
 WRITE_FILE_TOOLS = frozenset({"write_file", "apply_patch"})
 EXECUTE_TOOLS = frozenset({"execute", "bash", "shell", "run_command"})
-PUBLISH_TOOLS = frozenset({"publish_markdown", "publish_html", "publish_file"})
-NETWORK_TOOLS = frozenset({"web_search", "fetch_url", *PUBLISH_TOOLS})
-# Session-local / product builtins Codex Ask would not prompt on as
-# "file writes". Never inspect ``action``. Ask still parks ``write_file`` /
-# ``apply_patch``, mutating ``execute``, and network tools.
+# Session-local / product builtins no tier prompts on. Never inspect
+# ``action``. Read Only still parks ``write_file`` / ``apply_patch`` and
+# mutating ``execute``; network tools are never parked in any tier.
 BENIGN_ALWAYS_ALLOW = frozenset({
     "write_todos",
     "ask_user_question",
@@ -76,7 +75,7 @@ BENIGN_ALWAYS_ALLOW = frozenset({
 
 _BENIGN_REDIRECT = re.compile(r"\d*>&\d*|&>\s*/dev/null|\d*>>?\s*/dev/null")
 
-# ``check_command_safety`` warn hits that are still "ask" in ask/auto (the
+# ``check_command_safety`` warn hits that are still parked in read-only/auto (the
 # block set already covers ``rm -rf /`` / fork bombs). Recursive ``rm`` of a
 # normal path stays a warn, not this list.
 _HARD_UNSAFE_WARN = frozenset({
@@ -189,22 +188,19 @@ class ApprovalRegistry:
 class SessionGrants:
     """Allow-once (ephemeral) plus allow-similar / deny-similar (project.json).
 
-    ``path_exact`` / ``network_keys`` last for this process only. Prefix
-    fields are the project approval table: loaded from and saved to
-    ``project.json`` ``approvals`` (same file as ``work_dir`` /
-    ``active_profile``). Deny prefixes win over allow prefixes in
-    ``ask`` / ``auto``. ``allow-all`` ignores them (warn + record, still run).
+    ``path_exact`` lasts for this process only. Prefix fields are the project
+    approval table: loaded from and saved to ``project.json`` ``approvals``
+    (same file as ``work_dir`` / ``active_profile``). Deny prefixes win over
+    allow prefixes in ``read-only`` / ``auto``. ``allow-all`` ignores them
+    (warn + record, still run).
     """
 
     path_exact: set = field(default_factory=set)
     path_prefixes: set = field(default_factory=set)
     command_prefixes: List[Tuple[str, ...]] = field(default_factory=list)
-    network_keys: set = field(default_factory=set)
-    network_tools: set = field(default_factory=set)
     tool_names: set = field(default_factory=set)
     deny_path_prefixes: set = field(default_factory=set)
     deny_command_prefixes: List[Tuple[str, ...]] = field(default_factory=list)
-    deny_network_tools: set = field(default_factory=set)
     deny_tool_names: set = field(default_factory=set)
 
     def durable_payload(self) -> Dict[str, Any]:
@@ -216,8 +212,6 @@ class SessionGrants:
                 payload["command_prefixes"] = cmds
         if self.path_prefixes:
             payload["path_prefixes"] = sorted(self.path_prefixes)
-        if self.network_tools:
-            payload["network_tools"] = sorted(self.network_tools)
         if self.tool_names:
             payload["tool_names"] = sorted(self.tool_names)
         if self.deny_command_prefixes:
@@ -226,8 +220,6 @@ class SessionGrants:
                 payload["deny_command_prefixes"] = deny_cmds
         if self.deny_path_prefixes:
             payload["deny_path_prefixes"] = sorted(self.deny_path_prefixes)
-        if self.deny_network_tools:
-            payload["deny_network_tools"] = sorted(self.deny_network_tools)
         if self.deny_tool_names:
             payload["deny_tool_names"] = sorted(self.deny_tool_names)
         return payload
@@ -247,11 +239,6 @@ class SessionGrants:
             for path in raw_paths:
                 if isinstance(path, str) and path:
                     self.path_prefixes.add(path)
-        raw_net = data.get("network_tools")
-        if isinstance(raw_net, list):
-            for name in raw_net:
-                if isinstance(name, str) and name:
-                    self.network_tools.add(name)
         raw_tools = data.get("tool_names")
         if isinstance(raw_tools, list):
             for name in raw_tools:
@@ -271,11 +258,6 @@ class SessionGrants:
             for path in raw_paths:
                 if isinstance(path, str) and path:
                     self.deny_path_prefixes.add(path)
-        raw_net = data.get("deny_network_tools")
-        if isinstance(raw_net, list):
-            for name in raw_net:
-                if isinstance(name, str) and name:
-                    self.deny_network_tools.add(name)
         raw_tools = data.get("deny_tool_names")
         if isinstance(raw_tools, list):
             for name in raw_tools:
@@ -294,11 +276,6 @@ class SessionGrants:
         if name in EXECUTE_TOOLS:
             command = _call_command(fc)
             return bool(command) and self._command_covered(command)
-        if name in NETWORK_TOOLS:
-            if name in self.network_tools:
-                return True
-            key = _network_key(fc)
-            return key is not None and key in self.network_keys
         return False
 
     def denies(self, fc: FunctionCall, *, work_dir: Optional[str]) -> bool:
@@ -313,8 +290,6 @@ class SessionGrants:
         if name in EXECUTE_TOOLS:
             command = _call_command(fc)
             return bool(command) and self._command_denied(command)
-        if name in NETWORK_TOOLS:
-            return name in self.deny_network_tools
         return False
 
     def add_path(self, resolved: str, *, prefix: bool) -> None:
@@ -332,16 +307,6 @@ class SessionGrants:
         if tokens and tokens in self.deny_command_prefixes:
             self.deny_command_prefixes.remove(tokens)
 
-    def add_network(self, fc: FunctionCall, *, prefix: bool) -> None:
-        name = fc.function.name
-        if prefix:
-            self.network_tools.add(name)
-            self.deny_network_tools.discard(name)
-            return
-        key = _network_key(fc)
-        if key is not None:
-            self.network_keys.add(key)
-
     def add_tool_name(self, name: str) -> None:
         self.tool_names.add(name)
         self.deny_tool_names.discard(name)
@@ -357,10 +322,6 @@ class SessionGrants:
             self.deny_command_prefixes.append(tokens)
         if tokens and tokens in self.command_prefixes:
             self.command_prefixes.remove(tokens)
-
-    def add_deny_network(self, name: str) -> None:
-        self.deny_network_tools.add(name)
-        self.network_tools.discard(name)
 
     def add_deny_tool_name(self, name: str) -> None:
         self.deny_tool_names.add(name)
@@ -464,10 +425,6 @@ def _reconcile_allow_deny(merged: SessionGrants, grants: SessionGrants) -> None:
     for path in grants.deny_path_prefixes:
         merged.path_prefixes.discard(path)
         merged.path_exact.discard(path)
-    for name in grants.network_tools:
-        merged.deny_network_tools.discard(name)
-    for name in grants.deny_network_tools:
-        merged.network_tools.discard(name)
     for name in grants.tool_names:
         merged.deny_tool_names.discard(name)
     for name in grants.deny_tool_names:
@@ -530,8 +487,6 @@ def classify(
         command = _call_command(fc) or ""
         ok, _reason = is_read_only_command(command)
         return "allow" if ok else "ask"
-    if name in NETWORK_TOOLS:
-        return "ask"
     return "allow"
 
 
@@ -687,18 +642,6 @@ def describe_approval(fc: FunctionCall, *, work_dir: Optional[str] = None) -> Tu
     if name in FILE_TOOLS:
         preview = "; ".join(call_paths(fc, work_dir=work_dir) or [str(args)])
         return f"Allow this {name} call?", preview
-    if name == "web_search":
-        preview = str(args.get("queries") or "")
-        return "Allow this web search?", preview
-    if name == "fetch_url":
-        preview = str(args.get("url") or "")
-        return "Allow fetching this URL?", preview
-    if name == "publish_file":
-        preview = "; ".join(call_paths(fc, work_dir=work_dir) or [str(args.get("file_path") or "")])
-        return "Allow publishing this local file to public storage?", preview
-    if name in ("publish_markdown", "publish_html"):
-        preview = str(args.get("title") or "")[:200]
-        return f"Allow publishing this page ({name}) to public storage?", preview
     preview = json.dumps(args, ensure_ascii=False, default=str)
     return f"Allow this {name} call?", preview
 
@@ -721,12 +664,21 @@ def make_approve(
     publish: Callable[[PendingApproval], None],
     apply_path_grant: Callable[[str, bool], None],
     get_user_id: Optional[Callable[[], Optional[str]]] = None,
+    review: Optional[Callable[[FunctionCall], Awaitable[Any]]] = None,
 ) -> Callable[[FunctionCall], Awaitable[ApprovalDecision]]:
     """Build the ``Agent.approve`` callback.
 
     ``get_registry`` returning None is an immediate deny on the manual path
     (no LiveTurn, IM, cron, non-streaming POST, SDK without a TUI).
     Allow-similar grants are stored in this project's ``project.json``.
+
+    ``review`` is the auto tier's LLM reviewer (see
+    ``agentica.agent.reviewer``). It is consulted only in ``auto`` mode, only
+    for a call the static classifier would park, and never for one that escapes
+    the OS sandbox: an allow decision runs the call unasked, while deny or a
+    failed review falls through to the normal card. A reviewer allow adds the
+    same per-session path grant a human "allow once" does (exact paths, no
+    durable allow-similar entry).
     """
 
     async def approve(fc: FunctionCall) -> ApprovalDecision:
@@ -753,10 +705,41 @@ def make_approve(
                 "grant": None,
             }
             return "deny"
+        reviewer_trace: Optional[Dict[str, Any]] = None
+        reviewer_note = ""
+        if mode == "auto" and review is not None and not is_sandbox_escalation(fc):
+            outcome = None
+            try:
+                outcome = await review(fc)
+            except Exception as e:  # a reviewer must never break the call path
+                logger.warning(f"Auto reviewer failed: {e}")
+            if outcome is not None:
+                reviewer_trace = outcome.trace()
+                reviewer_note = outcome.note()
+                if outcome.decision == "allow":
+                    if fc.function.name in FILE_TOOLS:
+                        for path in call_paths(fc, work_dir=work_dir):
+                            apply_path_grant(path, False)
+                    fc.approval_waited = False
+                    fc.approval_trace = {
+                        "tool": fc.function.name,
+                        "arguments": _clip_trace_args(fc.arguments or {}),
+                        "mode": mode,
+                        "decision": "allow",
+                        "reason": "reviewer_allow",
+                        "wait_s": 0,
+                        "grant": None,
+                        "reviewer": reviewer_trace,
+                    }
+                    return "allow"
         registry = get_registry()
         if registry is None:
+            if reviewer_trace is not None:
+                fc.denied_result = _reviewer_denied_result(reviewer_trace)
             return "deny"
         question, preview = describe_approval(fc, work_dir=work_dir)
+        if reviewer_note:
+            preview = f"{preview}\n\n{reviewer_note}"
         similar_label = _similar_label_for(fc)
         options = _approval_options(fc)
         pending = PendingApproval(
@@ -801,7 +784,7 @@ def make_approve(
             reason = "timeout"
         elif mode_resolved:
             reason = "mode_switch"
-        fc.approval_trace = {
+        trace: Dict[str, Any] = {
             "tool": fc.function.name,
             "arguments": _clip_trace_args(fc.arguments or {}),
             "question": question,
@@ -814,9 +797,30 @@ def make_approve(
             "wait_s": wait_s,
             "grant": grant,
         }
+        if reviewer_trace is not None:
+            trace["reviewer"] = reviewer_trace
+        fc.approval_trace = trace
         return decision
 
     return approve
+
+
+def _reviewer_denied_result(reviewer_trace: Dict[str, Any]) -> str:
+    """Tool result when the reviewer did not allow and nobody can be asked."""
+    if reviewer_trace.get("failed"):
+        return (
+            "Tool call not run: the auto reviewer could not decide, and no human "
+            "is available to answer the approval prompt. This is neither approval "
+            "nor a refusal of the work; do not retry it and do not get the same "
+            "effect another way."
+        )
+    risk = reviewer_trace.get("risk") or "unknown"
+    reason = (reviewer_trace.get("reason") or "").strip()
+    detail = f" Reason: {reason}" if reason else ""
+    return (
+        f"Tool call denied by the auto reviewer (risk={risk}).{detail} "
+        "Do not retry it and do not get the same effect another way."
+    )
 
 
 def _note_allow_all_passthrough(
@@ -824,7 +828,7 @@ def _note_allow_all_passthrough(
     grants: SessionGrants,
     work_dir: Optional[str],
 ) -> None:
-    """Warn + record when allow-all runs a call ask/auto would deny or park as unsafe."""
+    """Warn + record when allow-all runs a call read-only/auto would deny or park."""
     if grants.denies(fc, work_dir=work_dir):
         reason = "allow_all_ignore_deny"
         logger.warning(
@@ -851,8 +855,6 @@ def _note_allow_all_passthrough(
 def _similar_label_for(fc: FunctionCall) -> str:
     if fc.function.name in EXECUTE_TOOLS:
         return command_class_display(_call_command(fc) or "")
-    if fc.function.name in NETWORK_TOOLS:
-        return fc.function.name
     return ""
 
 
@@ -905,14 +907,6 @@ def _record_grant(
             "command_class": command_class_display(command) if stored else "",
             "command": command,
         }
-    if name in NETWORK_TOOLS:
-        grants.add_network(fc, prefix=prefix)
-        return {
-            "scope": "similar" if prefix else "once",
-            "persisted": prefix,
-            "kind": "network",
-            "tool": name,
-        }
     if prefix:
         grants.add_tool_name(name)
         return {"scope": "similar", "persisted": True, "kind": "tool", "tool": name}
@@ -951,14 +945,6 @@ def _record_deny_grant(
             "command_class": command_class_display(command) if stored else "",
             "command": command,
         }
-    if name in NETWORK_TOOLS:
-        grants.add_deny_network(name)
-        return {
-            "scope": "similar",
-            "persisted": True,
-            "kind": "network",
-            "tool": name,
-        }
     grants.add_deny_tool_name(name)
     return {"scope": "similar", "persisted": True, "kind": "tool", "tool": name}
 
@@ -977,8 +963,17 @@ def _clip_trace_args(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _file_needs_approval(resolved: str, *, work_dir: Optional[str]) -> bool:
+    """Would the auto tier ask a human about a write to ``resolved``?
+
+    The platform temp directories count as inside: workspace-write keeps them
+    silently writable, and asking per scratch file was the mismatch. Sensitive
+    paths still ask (and still hit ``_is_hard_unsafe``) wherever they live.
+    """
     if _is_sensitive_path(resolved):
         return True
+    for temp_root in writable_temp_roots():
+        if _path_is_under(resolved, temp_root):
+            return False
     if not work_dir:
         return True
     return not _path_is_under(resolved, _resolve_tool_path(work_dir, None))
@@ -1022,19 +1017,3 @@ def _looks_like_path_or_file(tok: str) -> bool:
 def _call_command(fc: FunctionCall) -> Optional[str]:
     command = (fc.arguments or {}).get("command")
     return command if isinstance(command, str) else None
-
-
-def _network_key(fc: FunctionCall) -> Optional[str]:
-    args = fc.arguments or {}
-    if fc.function.name == "web_search":
-        queries = args.get("queries")
-        if queries is None:
-            return None
-        return json.dumps(queries, ensure_ascii=False, sort_keys=True, default=str)
-    if fc.function.name == "fetch_url":
-        url = args.get("url")
-        return url if isinstance(url, str) else None
-    if fc.function.name == "publish_file":
-        fp = args.get("file_path")
-        return _resolve_tool_path(fp, None) if isinstance(fp, str) and fp else None
-    return None

@@ -221,7 +221,7 @@ async def status():
 
 _PREFS_THEME = {"auto", "light", "dark"}
 _PREFS_LANG = {"en", "zh"}
-_PREFS_APPROVAL = {"ask", "auto", "allow-all"}
+_PREFS_APPROVAL = {"read-only", "auto", "allow-all"}
 
 
 def _prefs_path(user_id: str) -> Path:

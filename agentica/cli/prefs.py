@@ -83,8 +83,16 @@ def normalize_cli_prefs(raw: Any) -> Dict[str, Any]:
         value = raw[key]
         if key in _BOOL_PREF_KEYS and isinstance(value, bool):
             out[key] = value
-        elif key == "permissions" and isinstance(value, str) and value in PERMISSION_MODES:
-            out[key] = value
+        elif key == "permissions" and isinstance(value, str):
+            if value in PERMISSION_MODES:
+                out[key] = value
+            else:
+                # A saved tier from before the rename ("ask") is not silently
+                # reinterpreted: say so once, then start from the default.
+                logger.warning(
+                    "Saved permission mode %r is no longer valid; using the default "
+                    "instead (valid: %s).", value, ", ".join(PERMISSION_MODES),
+                )
         elif key == "extra_tools":
             # ``None`` is the "forget the saved set" marker and must survive a
             # second pass, because every writer normalizes before persisting.

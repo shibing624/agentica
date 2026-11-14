@@ -38,7 +38,7 @@ class _StubAgent:
     """Just enough agent for build_noninteractive_approve."""
 
     class _ToolConfig:
-        permission_mode = "ask"
+        permission_mode = "read-only"
 
     tool_config = _ToolConfig()
     work_dir = "/tmp/proj"

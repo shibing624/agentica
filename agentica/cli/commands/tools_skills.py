@@ -751,12 +751,12 @@ def _cmd_permissions(ctx: CommandContext, cmd_args: str = ""):
     if ctx.current_agent:
         con.print(f"[bold cyan]Permission Mode: {ctx.current_agent.tool_config.permission_mode}[/bold cyan]")
         con.print()
-        con.print("  [dim]ask[/dim]        - Ask for approval: reads (including outside the workspace), read-only shell, memory, task, and builtins run; file writes, mutating shell, and network need confirmation")
-        con.print("  [dim]auto[/dim]       - Approve for me: ask about file writes outside the workspace, sensitive paths, and hard-unsafe commands")
-        con.print("  [dim]allow-all[/dim]  - Full Access: never ask, never deny (project deny-similar applies only in ask/auto; hard-unsafe is logged and still run, except catastrophic commands like rm -rf / or mkfs, which are always refused)")
+        con.print("  [dim]read-only[/dim] - Read Only: reads (including outside the workspace), read-only shell, memory, task, builtins and network tools run; file writes and mutating shell wait for approval")
+        con.print("  [dim]auto[/dim]       - Workspace Write: in-workspace writes (temp counts), ordinary shell, network and builtins run; the model reviews anything that would ask, and its allow runs the call unasked")
+        con.print("  [dim]allow-all[/dim]  - Full Access: never ask, never deny (project deny-similar applies only in read-only/auto; hard-unsafe is logged and still run, except catastrophic commands like rm -rf / or mkfs, which are always refused)")
         con.print()
         con.print(
-            "Tools stay in the schema in every tier. ask does not hide write tools. "
+            "Tools stay in the schema in every tier; no tier hides write or network tools. "
             "Allow-similar and deny-similar grants are stored in this project's project.json.",
             style="dim",
         )

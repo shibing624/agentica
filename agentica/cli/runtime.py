@@ -523,10 +523,11 @@ def parse_args():
         # allow-all" (which must beat a saved `ask`) from "it is just the
         # default". The default itself is applied there.
         default=None,
-        choices=["ask", "auto", "allow-all"],
-        help="Permission mode: ask (reads anywhere; confirm writes/network), "
-        "auto (also writes inside work_dir), "
-        "allow-all (never ask; default — the CLI is a single-user tool)",
+        choices=["read-only", "auto", "allow-all"],
+        help="Permission mode: read-only (reads and network run; writes and "
+        "mutating commands need approval), auto (in-workspace writes and "
+        "ordinary commands run; the model reviews the rest before a human is "
+        "asked), allow-all (never ask; default — the CLI is a single-user tool)",
     )
     parser.add_argument(
         "--sandbox",
@@ -947,7 +948,7 @@ def create_agent(
         ``action='run'`` executes a job once immediately and returns its output.
         Set False for cron-spawned agents so a scheduled job cannot recursively
         trigger further immediate runs.
-    permission_mode: unified 3-tier tool permission ("ask"/"auto"/"allow-all",
+    permission_mode: unified 3-tier tool permission ("read-only"/"auto"/"allow-all",
         see agentica.agent.permissions). Falls back to ``agent_config["permissions"]``,
         then "allow-all" (the CLI's actual --permissions default; see parse_args()).
     peer_session: optional ``agentica.live.PeerSession``. When given, messages
