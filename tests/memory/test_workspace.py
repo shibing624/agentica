@@ -397,6 +397,23 @@ class TestWorkspace:
         assert "Bob prefers detailed explanations." in bob.read_user_agents_md()
         assert "Bob" not in alice.read_user_agents_md()
 
+    def test_set_user_drops_the_previous_users_frozen_snapshots(self, temp_workspace_path):
+        ws = Workspace(temp_workspace_path, user_id="alice")
+        ws.initialize()
+        ws.write_user_agents_md("ALICE-RULE\n")
+        ws._get_user_memory_md().write_text("ALICE-MEMORY-LINE\n", encoding="utf-8")
+        asyncio.run(ws.freeze_snapshots())
+        assert "ALICE-RULE" in (ws.get_frozen_context() or "")
+        assert "ALICE-MEMORY-LINE" in (ws.get_frozen_memory() or "")
+
+        ws.set_user("bob")
+        assert ws.get_frozen_context() is None
+        assert ws.get_frozen_memory() is None
+        assert ws.get_frozen_experiences() is None
+        asyncio.run(ws.freeze_snapshots())
+        assert "ALICE-RULE" not in (ws.get_frozen_context() or "")
+        assert "ALICE-MEMORY-LINE" not in (ws.get_frozen_memory() or "")
+
     def test_write_user_agents_md_rejects_oversize(self, temp_workspace_path):
         workspace = Workspace(temp_workspace_path)
         workspace.initialize()

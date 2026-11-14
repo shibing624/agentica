@@ -13,7 +13,6 @@ from typing import Any, AsyncIterator, ClassVar, Dict, List, Optional
 from pydantic import BaseModel
 
 from agentica.model.base import Model, NativeCompactionResult
-from agentica.model.cache_routing import is_venus_llmproxy
 from agentica.model.message import Message, VOLATILE_SYSTEM_MARKER
 from agentica.model.metrics import Metrics
 from agentica.model.openai.chat import OpenAIChat
@@ -427,11 +426,7 @@ class OpenAIResponses(OpenAIChat):
         if cache_key is not None:
             request.setdefault("prompt_cache_key", cache_key)
         if self._effective_session_header():
-            headers = self._with_cache_session_header(request.get("extra_headers"))
-            if is_venus_llmproxy(self.base_url) and isinstance(headers, dict):
-                if not any(k.lower() == "venus-codex-routing" for k in headers):
-                    headers["Venus-Codex-Routing"] = "true"
-            request["extra_headers"] = headers
+            request["extra_headers"] = self._with_cache_session_header(request.get("extra_headers"))
         if self.reasoning is not None and self.store is not True:
             include = list(request.get("include") or [])
             if "reasoning.encrypted_content" not in include:

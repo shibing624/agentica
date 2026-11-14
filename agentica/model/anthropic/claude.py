@@ -19,7 +19,7 @@ from PIL import Image
 from pydantic import BaseModel
 
 from agentica.model.base import Model
-from agentica.model.cache_routing import default_sticky_session_header, resolve_cache_session_id
+from agentica.model.cache_routing import resolve_cache_session_id
 from agentica.model.message import Message, VOLATILE_SYSTEM_MARKER
 from agentica.model.metrics import Metrics
 from agentica.model.response import ModelResponse
@@ -366,15 +366,7 @@ class Claude(Model):
         if self.default_headers:
             _headers.update(self.default_headers)
         _lower_header_keys = {k.lower() for k in _headers}
-        _session_header = (
-            self.cache_control_session_header
-            if self.cache_control_session_header is not None
-            else (
-                None
-                if ("venus-sticky-routing" in _lower_header_keys or "venus-session-id" in _lower_header_keys)
-                else default_sticky_session_header(self.base_url)
-            )
-        )
+        _session_header = self.cache_control_session_header or None
         if _session_header:
             # Resolved per client build, not memoized: the client may first be
             # built before update_model() assigns session_id, and caching that
@@ -485,6 +477,9 @@ class Claude(Model):
         # one round in a single user message, right after the tool_use.
         tool_result_turn: Optional[int] = None
         reminder_user_turn: Optional[int] = None
+        # In-history system text that arrived before this round's tool results.
+        # It joins the result user message instead of opening a second user turn.
+        queued_reminders: List[Dict[str, Any]] = []
 
         # This path intentionally does NOT round-trip through
         # ``Message.to_model_dict()``: Anthropic needs block-typed content
@@ -519,14 +514,18 @@ class Claude(Model):
                     "type": "text",
                     "text": f"<system-reminder>\n{text.strip()}\n</system-reminder>",
                 }
+                if pending_tool_use_ids and tool_result_turn is None:
+                    queued_reminders.append(reminder_block)
+                    continue
+                if tool_result_turn is not None:
+                    chat_messages[tool_result_turn]["content"].append(reminder_block)  # type: ignore
+                    continue
                 if chat_messages and chat_messages[-1]["role"] == "user":
                     chat_messages[-1]["content"].append(reminder_block)  # type: ignore
                     reminder_user_turn = len(chat_messages) - 1
                 else:
                     chat_messages.append({"role": "user", "content": [reminder_block]})  # type: ignore
                     reminder_user_turn = len(chat_messages) - 1
-                tool_result_turn = None
-                pending_tool_use_ids = set()
             elif message.role == "tool":
                 # OpenAI-shape result: from a resumed transcript, a history
                 # converted on /model, or a placeholder the shared repair code
@@ -538,22 +537,34 @@ class Claude(Model):
                 pending_tool_use_ids.discard(message.tool_call_id)
                 block = _tool_result_block(message)
                 if tool_result_turn is None:
-                    chat_messages.append({"role": "user", "content": [block]})  # type: ignore
+                    chat_messages.append({"role": "user", "content": [*queued_reminders, block]})  # type: ignore
+                    queued_reminders = []
                     tool_result_turn = len(chat_messages) - 1
                 else:
                     chat_messages[tool_result_turn]["content"].append(block)  # type: ignore
             else:
                 replayed_blocks = None
+                origin_ok = True
                 if message.role == "assistant" and isinstance(message.provider_data, dict):
                     block_origin = message.provider_data.get("anthropic_model")
-                    if not block_origin or block_origin == self.id:
+                    origin_ok = not isinstance(block_origin, str) or block_origin == self.id
+                    if origin_ok:
                         replayed_blocks = message.provider_data.get("anthropic_blocks")
-                if isinstance(content, list):
+                if isinstance(content, list) and origin_ok:
                     blocks = [
                         b
                         for b in content
                         if not _is_empty_text_block(b) and not _is_unsigned_thinking_block(b)
                     ]
+                elif isinstance(content, list):
+                    # Signed by another Claude. Drop thinking; tool_use is
+                    # rebuilt from tool_calls below.
+                    text = "\n".join(
+                        b.get("text", "")
+                        for b in content
+                        if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str)
+                    )
+                    blocks = [{"type": "text", "text": text}] if text.strip() else []
                 elif isinstance(replayed_blocks, list):
                     blocks = [
                         b
@@ -623,6 +634,9 @@ class Claude(Model):
                 # pads a partial native round): every result lands in the one
                 # message right after the tool_use, results first, and the
                 # request never carries two consecutive user turns.
+                if queued_reminders and (answered or tool_result_turn is not None):
+                    blocks = [*queued_reminders, *blocks]
+                    queued_reminders = []
                 merge_turn = tool_result_turn if tool_result_turn is not None else reminder_user_turn
                 if merge_turn is None:
                     chat_messages.append({"role": "user", "content": blocks})  # type: ignore
@@ -636,6 +650,14 @@ class Claude(Model):
                     # Plain user input closes the round.
                     tool_result_turn = None
                     pending_tool_use_ids = set()
+
+        if queued_reminders:
+            if tool_result_turn is not None:
+                chat_messages[tool_result_turn]["content"].extend(queued_reminders)  # type: ignore
+            elif chat_messages and chat_messages[-1]["role"] == "user":
+                chat_messages[-1]["content"].extend(queued_reminders)  # type: ignore
+            else:
+                chat_messages.append({"role": "user", "content": queued_reminders})  # type: ignore
 
         # system_and_3 strategy: cache the system prompt (breakpoint added in
         # prepare_request_kwargs) + the last 3 messages for a rolling cache
@@ -1183,6 +1205,7 @@ class Claude(Model):
 
         # Update usage metrics
         self.update_usage_metrics(assistant_message, message_data.response_usage, metrics)
+        self._stamp_block_origin(assistant_message)
 
         return assistant_message, message_data.response_content, message_data.tool_ids
 
@@ -1561,6 +1584,7 @@ class Claude(Model):
 
         # Update usage metrics
         self.update_usage_metrics(assistant_message, message_data.response_usage, metrics)
+        self._stamp_block_origin(assistant_message)
         assistant_message.finish_reason = self.last_finish_reason
 
         # Add assistant message to messages
@@ -1573,6 +1597,16 @@ class Claude(Model):
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
             async for _resp in self.handle_stream_tool_calls(assistant_message, messages, message_data.tool_ids):
                 yield _resp
+
+    def _stamp_block_origin(self, assistant_message: Message) -> None:
+        """Record which Claude signed this turn's blocks.
+
+        Replay skips ``anthropic_blocks`` when the next request goes to a
+        different model id: thinking signatures do not transfer.
+        """
+        data = dict(assistant_message.provider_data) if isinstance(assistant_message.provider_data, dict) else {}
+        data["anthropic_model"] = self.id
+        assistant_message.provider_data = data
 
     def get_tool_call_prompt(self) -> Optional[str]:
         if self.functions is not None and len(self.functions) > 0:

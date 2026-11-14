@@ -8,6 +8,7 @@ from pathlib import Path
 import asyncio
 import json
 import os
+import sys
 
 os.environ.setdefault("OPENAI_API_KEY", "sk-test-not-real")
 
@@ -458,6 +459,7 @@ class TestConfigEndpoints:
         assert "workspace" in data
         assert "supports_images" in data
         assert "media_model" in data
+        assert data["platform"] == sys.platform
 
     def test_channels_catalog(self, mock_app):
         client, _ = mock_app

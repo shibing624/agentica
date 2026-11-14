@@ -397,7 +397,13 @@ def ensure_history_portable(agent) -> bool:
     if written_for is None or written_for == identity:
         return False
     make_history_portable(agent.working_memory)
-    agent.reset_window_pins()
+    # Callers outside the agent (tests, routers) pass a namespace that only
+    # has model / working_memory / _history_model_identity. Resetting the
+    # pinned window is an Agent method; compaction uses the same guard.
+    from agentica.agent.base import Agent
+
+    if isinstance(agent, Agent):
+        agent.reset_window_pins()
     return True
 
 

@@ -285,6 +285,51 @@ class TestClaudeFormatMessagesToolRole(unittest.TestCase):
         self.assertEqual(used, {"t1"})
         self.assertEqual(texts, ["run status", "[User interrupted the response]", "retry"])
 
+    def test_in_history_system_stays_inside_the_open_tool_round(self):
+        """A system line between tool_use and tool_result must not open a second user turn."""
+        model = Claude(id="claude-opus-4-6", api_key="fake")
+        model.enable_cache_control = False
+        messages = [
+            Message(role="user", content="read it"),
+            Message(
+                role="assistant",
+                content=[{"type": "tool_use", "id": "t1", "name": "read_file", "input": {}}],
+                tool_calls=[{"type": "function", "id": "t1", "function": {"name": "read_file", "arguments": "{}"}}],
+            ),
+            Message(role="system", content="date rolled"),
+            Message(role="tool", tool_call_id="t1", content="ok", tool_name="read_file"),
+        ]
+        chat_messages, _ = asyncio.run(model.format_messages(messages))
+        self.assertEqual([m["role"] for m in chat_messages], ["user", "assistant", "user"])
+        blocks = chat_messages[-1]["content"]
+        self.assertTrue(any(b.get("type") == "tool_result" for b in blocks))
+        self.assertTrue(any("date rolled" in (b.get("text") or "") for b in blocks))
+
+    def test_thinking_signed_by_another_claude_is_not_replayed(self):
+        model = Claude(id="claude-b", api_key="fake")
+        model.enable_cache_control = False
+        signed = [
+            {"type": "thinking", "thinking": "secret", "signature": "sig-a"},
+            {"type": "text", "text": "answer"},
+        ]
+        messages = [
+            Message(role="user", content="q"),
+            Message(
+                role="assistant",
+                content="answer",
+                provider_data={"anthropic_model": "claude-a", "anthropic_blocks": signed},
+            ),
+        ]
+        chat, _ = asyncio.run(model.format_messages(messages))
+        blob = str(chat)
+        self.assertNotIn("sig-a", blob)
+        self.assertIn("answer", blob)
+
+        same = Claude(id="claude-a", api_key="fake")
+        same.enable_cache_control = False
+        replayed, _ = asyncio.run(same.format_messages(messages))
+        self.assertIn("sig-a", str(replayed))
+
 
 class TestClaudeCacheControlBudget(unittest.TestCase):
     """cache_control breakpoints must never exceed Anthropic's max of 4.
@@ -293,8 +338,8 @@ class TestClaudeCacheControlBudget(unittest.TestCase):
     every turn. Because ``messages`` is reused across turns (and tool_result
     blocks may already carry cache_control), breakpoints accumulated and the
     API rejected the request with 'A maximum of 4 blocks with cache_control
-    may be provided. Found 5.' The fix strips existing breakpoints and caps
-    message breakpoints at 3 (system takes the 4th).
+    may be provided. Found 5.' The fix strips existing breakpoints, then
+    spends whatever remains of the 4-block budget after tools and system.
     """
 
     @staticmethod
@@ -313,8 +358,9 @@ class TestClaudeCacheControlBudget(unittest.TestCase):
         model.enable_cache_control = True
         messages = [Message(role="user", content=f"m{i}") for i in range(8)]
         chat_messages, _ = asyncio.run(model.format_messages(messages))
-        # 3 on messages + 1 on system (added in prepare_request_kwargs) = 4.
-        self.assertLessEqual(self._count_msg_cache_control(chat_messages), 3)
+        # No tools and no system in this direct call, so the message budget is 4.
+        # A real request reserves one for tools and one for the system head.
+        self.assertLessEqual(self._count_msg_cache_control(chat_messages), 4)
 
     def test_reused_message_list_does_not_accumulate(self):
         """Formatting the same growing list across turns stays within budget."""
@@ -328,8 +374,8 @@ class TestClaudeCacheControlBudget(unittest.TestCase):
             chat_messages, _ = asyncio.run(model.format_messages(messages))
             self.assertLessEqual(
                 self._count_msg_cache_control(chat_messages),
-                3,
-                f"turn {turn}: message breakpoints exceeded 3",
+                4,
+                f"turn {turn}: message breakpoints exceeded 4",
             )
 
     def test_preexisting_breakpoints_are_stripped(self):

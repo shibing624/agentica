@@ -7,7 +7,6 @@
 import asyncio
 import json
 import os
-import re
 from datetime import datetime
 from functools import partial
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
@@ -41,8 +40,11 @@ _FILE_TOOL_NAMES = frozenset({
     "apply_patch", "glob", "grep",
 })
 
-_PINNED_DATE_RE = re.compile(r"(?:Today's date is |^Date: )(\d{4}-\d{2}-\d{2})", re.MULTILINE)
-_PINNED_CHANNEL_RE = re.compile(r"This turn came in over the `([^`]+)` IM channel:")
+def _join_prefix(parts: Sequence[Optional[str]], tail: str) -> str:
+    body = [part for part in parts if part]
+    if not body:
+        return tail
+    return "\n\n".join([*body, tail])
 
 
 class PromptsMixin:
@@ -249,28 +251,40 @@ class PromptsMixin:
             "summary": summary_val,
         }
 
-    def _extract_runtime_state_from_prompt(self, prompt_text: str) -> Dict[str, str]:
-        """Reconstruct the embedded runtime state from a persisted ``system_prompt``."""
-        pc = self.prompt_config
-        date_match = _PINNED_DATE_RE.search(prompt_text)
-        expect_date = pc.add_datetime_to_instructions or pc.minimal or bool(os.environ.get("AGENTICA_SIMPLE"))
-        date_val = date_match.group(1) if (date_match and expect_date) else ""
-        chan_match = _PINNED_CHANNEL_RE.search(prompt_text)
-        channel_val = chan_match.group(1) if chan_match else ""
-        summary_val = (
-            self.working_memory.summary.model_dump_json(indent=2)
-            if (
-                "## Summary of Previous Interactions" in prompt_text
-                and self.working_memory.create_session_summary
-                and self.working_memory.summary is not None
-            )
-            else ""
+    def _context_epoch_moved(self) -> bool:
+        workspace = self.workspace
+        if workspace is None:
+            return False
+        return workspace.context_epoch != self._pinned_context_epoch
+
+    def _bind_system_pin(self, prompt: str) -> None:
+        self._pinned_system_prompt = prompt
+        self._pinned_runtime_state = self._current_runtime_state()
+        self._pinned_tool_policies = list(self._tool_policy_prompts)
+        workspace = self.workspace
+        self._pinned_context_epoch = workspace.context_epoch if workspace is not None else 0
+
+    def _take_tool_policy_reminder(self) -> Optional[str]:
+        """Surface a tool guide that arrived after ``messages[0]`` was pinned.
+
+        The guide is part of the system prompt, which stays byte-stable for the
+        window. A tool registered later still has to reach the model, so its
+        policy text is appended once, the same way a date rollover is.
+        """
+        if self._pinned_system_prompt is None:
+            return None
+        known = set(self._pinned_tool_policies)
+        fresh = [prompt for prompt in self._tool_policy_prompts if prompt and prompt not in known]
+        if not fresh:
+            return None
+        self._pinned_tool_policies.extend(fresh)
+        body = "\n\n---\n\n".join(fresh)
+        return (
+            "<system-reminder>\n"
+            "Tool guidance added during this session:\n\n"
+            f"{body}\n"
+            "</system-reminder>"
         )
-        return {
-            "date": date_val,
-            "channel": channel_val,
-            "summary": summary_val,
-        }
 
     def _take_runtime_context_reminder(self) -> Optional[str]:
         """Emit an in-history ``<system-reminder>`` only when volatile facts changed.
@@ -325,12 +339,15 @@ class PromptsMixin:
         has_active_history = bool(self.working_memory.runs)
 
         if can_pin and has_active_history and self._pinned_system_prompt is not None:
-            return Message(role=pc.system_message_role, content=self._pinned_system_prompt)
+            if self._context_epoch_moved():
+                self._pinned_system_prompt = None
+                self._pinned_runtime_state = None
+            else:
+                return Message(role=pc.system_message_role, content=self._pinned_system_prompt)
 
         rendered = await self._render_system_message_raw()
         if can_pin and rendered is not None and isinstance(rendered.content, str):
-            self._pinned_system_prompt = rendered.content
-            self._pinned_runtime_state = self._current_runtime_state()
+            self._bind_system_pin(rendered.content)
         return rendered
 
     async def _render_system_message_raw(self) -> Optional[Message]:
@@ -996,6 +1013,12 @@ class PromptsMixin:
                 last_msg = user_messages[-1]
                 if last_msg.role == "user" and isinstance(last_msg.content, str):
                     recall_query = last_msg.content
+        # ``sent_override`` is what this request shows the model. History and
+        # the session log keep the durable prefix only (git snapshot and
+        # runtime reminder). Recall, memory, hooks and file-change notes are
+        # injected for this request and must not be replayed on the next turn
+        # or by /resume.
+        sent_override: Optional[str] = None
         if (
             recall_query
             and user_messages
@@ -1010,33 +1033,31 @@ class PromptsMixin:
                 self._get_recall_blocks(recall_query, prior),
                 self._get_prompt_hook_block(recall_query),
             )
-            blocks = [
-                b for b in (
-                    self._get_git_snapshot_block() if first_turn else None,
-                    session_block,
-                    memory_block,
-                    hook_block,
-                ) if b
-            ]
-            if blocks:
+            git_block = self._get_git_snapshot_block() if first_turn else None
+            original = user_messages[-1].content
+            stored = _join_prefix([git_block], original)
+            sent = _join_prefix([git_block, session_block, memory_block, hook_block], original)
+            if stored != original:
                 # A ``messages=`` item may be the caller's own Message object,
                 # kept in its history and passed again next turn; rewrite a
                 # copy so the block never leaks into the caller's state.
                 last = user_messages[-1]
-                prefix = "\n\n".join(blocks)
-                user_messages[-1] = last.model_copy(update={"content": f"{prefix}\n\n{last.content}"})
+                user_messages[-1] = last.model_copy(update={"content": stored})
+            if sent != stored:
+                sent_override = sent
 
         # Files the model read in earlier turns may have been edited between
-        # turns (the user's editor, git). Same placement as recall: before the
-        # question, on a copy.
+        # turns (the user's editor, git). The note is for this request only.
         if user_messages and isinstance(user_messages[-1].content, str):
             note = self.take_external_file_change_note()
             if note:
-                last = user_messages[-1]
-                user_messages[-1] = last.model_copy(update={"content": f"{note}\n\n{last.content}"})
+                base = sent_override if sent_override is not None else user_messages[-1].content
+                sent_override = f"{note}\n\n{base}"
 
         # Append volatile runtime deltas (date rollover, IM channel switch,
         # updated session summary) in-history rather than mutating messages[0].
+        # The reminder stays in history: the next live turn and /resume must
+        # both still see it.
         if (
             self.add_history_to_context
             and len(self.working_memory.runs) > 0
@@ -1044,18 +1065,33 @@ class PromptsMixin:
             and user_messages
             and isinstance(user_messages[-1].content, str)
         ):
-            runtime_reminder = self._take_runtime_context_reminder()
-            if runtime_reminder:
+            pieces = [
+                piece
+                for piece in (
+                    self._take_tool_policy_reminder(),
+                    self._take_runtime_context_reminder(),
+                )
+                if piece
+            ]
+            if pieces:
+                reminder = "\n\n".join(pieces)
                 last = user_messages[-1]
                 user_messages[-1] = last.model_copy(
-                    update={"content": f"{runtime_reminder}\n\n{last.content}"}
+                    update={"content": f"{reminder}\n\n{last.content}"}
                 )
+                if sent_override is not None:
+                    sent_override = f"{reminder}\n\n{sent_override}"
 
         if pending_preamble and user_messages:
             fold_window_preamble(user_messages[0], pending_preamble)
+            if sent_override is not None and len(user_messages) == 1:
+                sent_override = f"{pending_preamble}\n\n{sent_override}"
             self.working_memory.drop_pending_window_preamble()
 
-        messages_for_model.extend(user_messages)
+        model_users = list(user_messages)
+        if sent_override is not None and user_messages:
+            model_users[-1] = user_messages[-1].model_copy(update={"content": sent_override})
+        messages_for_model.extend(model_users)
         self.run_response.messages = messages_for_model
         return system_message, user_messages, messages_for_model
 

@@ -120,10 +120,13 @@ def test_a_deleted_profile_falls_back_instead_of_breaking_the_chat(svc):
 
 def test_a_pick_rebuilds_only_that_chats_agent(svc, monkeypatch):
     built = []
-    monkeypatch.setattr(
-        svc, "_build_agent",
-        lambda sid, owner=None: built.append(sid) or SimpleNamespace(user_id=svc._owner(owner)),
-    )
+    def build(sid, owner=None):
+        built.append(sid)
+        agent = SimpleNamespace(user_id=svc._owner(owner))
+        agent.set_permission_mode = lambda mode: None
+        return agent
+
+    monkeypatch.setattr(svc, "_build_agent", build)
 
     async def scenario():
         a, b = await svc._get_agent("a"), await svc._get_agent("b")
@@ -228,7 +231,13 @@ def test_build_agent_creates_the_main_model_from_the_session_profile(svc, monkey
 
 def test_a_pick_mid_run_waits_for_the_run(svc, monkeypatch):
     built = []
-    monkeypatch.setattr(svc, "_build_agent", lambda sid, owner=None: built.append(sid) or SimpleNamespace(user_id=svc._owner(owner)))
+    def build(sid, owner=None):
+        built.append(sid)
+        agent = SimpleNamespace(user_id=svc._owner(owner))
+        agent.set_permission_mode = lambda mode: None
+        return agent
+
+    monkeypatch.setattr(svc, "_build_agent", build)
 
     async def scenario():
         running = await svc._get_agent("a")

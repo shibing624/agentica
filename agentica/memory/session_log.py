@@ -30,7 +30,7 @@ import time
 from collections import OrderedDict, deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, Union, runtime_checkable
+from typing import TYPE_CHECKING, Any, Dict, List, NamedTuple, Optional, Protocol, Union, runtime_checkable
 from uuid import uuid4
 
 from agentica.compression.token_budget import (
@@ -362,6 +362,35 @@ def assert_trajectory_equivalent(derived: List[Any], actual: List[Any]) -> Optio
     return None
 
 
+class ActivePrelude(NamedTuple):
+    """Last sent system prompt, tool order, and the facts that must not be re-guessed."""
+
+    system_prompt: Optional[str]
+    tools: List[str]
+    runtime_state: Optional[Dict[str, str]]
+    agents_md_digest: Optional[str]
+
+
+def _runtime_trace_key(
+    runtime_state: Optional[Dict[str, str]],
+    agents_md_digest: Optional[str],
+) -> str:
+    return json.dumps(
+        {"runtime_state": runtime_state or {}, "agents_md_digest": agents_md_digest or ""},
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+
+
+def _runtime_fields(entry: Dict[str, Any]) -> tuple[Optional[Dict[str, str]], Optional[str]]:
+    raw = entry.get("runtime_state")
+    state: Optional[Dict[str, str]] = None
+    if isinstance(raw, dict):
+        state = {str(key): str(value) for key, value in raw.items()}
+    digest = entry.get("agents_md_digest")
+    return state, digest if isinstance(digest, str) and digest else None
+
+
 class SessionLog:
     """Append-only JSONL session log with UUID chain. Enables session resume.
 
@@ -426,6 +455,7 @@ class SessionLog:
         # What ``append_trace_prelude`` last wrote, so the same header is not
         # repeated on every request of the session.
         self._trace_prelude_key: Optional[str] = None
+        self._trace_runtime_key: Optional[str] = None
         # Prompt size of the immediately preceding LLM request in the current
         # context window, used to measure step-over-step prefix reuse and cliffs.
         self._last_request_prompt_tokens: int = 0
@@ -733,6 +763,8 @@ class SessionLog:
         context_window: Optional[int],
         tools: List[str],
         system_prompt: str,
+        runtime_state: Optional[Dict[str, str]] = None,
+        agents_md_digest: Optional[str] = None,
     ) -> bool:
         """Write the observability header for this session. True if it wrote.
 
@@ -754,9 +786,19 @@ class SessionLog:
                 [str(model or ""), str(provider or ""), *tools, system_prompt]
             ).encode("utf-8", "replace")
         ).hexdigest()
+        runtime_key = _runtime_trace_key(runtime_state, agents_md_digest)
         if digest == self._trace_prelude_key:
+            if runtime_key != self._trace_runtime_key:
+                self._trace_runtime_key = runtime_key
+                self.append_event(
+                    "runtime_state",
+                    runtime_state=runtime_state or {},
+                    agents_md_digest=agents_md_digest or "",
+                )
+                return True
             return False
         self._trace_prelude_key = digest
+        self._trace_runtime_key = runtime_key
         self.append_event(
             "session_meta",
             model=model,
@@ -764,6 +806,8 @@ class SessionLog:
             context_window=context_window,
             tool_count=len(tools),
             prelude_hash=digest,
+            runtime_state=runtime_state or {},
+            agents_md_digest=agents_md_digest or "",
         )
         self.append_event("tool_list_ready", tools=list(tools), count=len(tools))
         if system_prompt:
@@ -774,8 +818,8 @@ class SessionLog:
             )
         return True
 
-    def load_active_prelude(self, model: Optional[str] = None) -> tuple[Optional[str], List[str]]:
-        """Recover the active window's last sent ``(system_prompt, tools)`` from disk.
+    def load_active_prelude(self, model: Optional[str] = None) -> ActivePrelude:
+        """Recover the active window's last sent system prompt and tool order.
 
         Keeping ``messages[0]`` and the tool declaration order byte-identical
         across ``/resume`` or Gateway agent rebuilds preserves the provider's
@@ -787,7 +831,7 @@ class SessionLog:
         ``session_meta.model`` differs from ``model``.
         """
         if not self.path.exists():
-            return None, []
+            return ActivePrelude(None, [], None, None)
 
         entries = list(self._iter_entries())
         last_boundary_idx = -1
@@ -805,6 +849,8 @@ class SessionLog:
         active_prompt: Optional[str] = None
         active_tools: List[str] = []
         active_hash: Optional[str] = None
+        active_runtime: Optional[Dict[str, str]] = None
+        active_digest: Optional[str] = None
         last_prompt_tokens = 0
 
         for entry in entries[start_idx:]:
@@ -816,6 +862,17 @@ class SessionLog:
                 active_model = str(m) if m is not None else None
                 h = entry.get("prelude_hash")
                 active_hash = str(h) if isinstance(h, str) and h else None
+                state, digest = _runtime_fields(entry)
+                if state is not None:
+                    active_runtime = state
+                if digest is not None:
+                    active_digest = digest
+            elif name == "runtime_state":
+                state, digest = _runtime_fields(entry)
+                if state is not None:
+                    active_runtime = state
+                if digest is not None:
+                    active_digest = digest
             elif name == "tool_list_ready":
                 tools = entry.get("tools")
                 if isinstance(tools, list):
@@ -832,14 +889,20 @@ class SessionLog:
                         last_prompt_tokens = p
 
         if model and active_model and active_model != model:
-            return None, []
+            return ActivePrelude(None, [], None, None)
 
+        # This read is also the resume path's first look at the window. Seed
+        # the trace keys so the next request continues the prelude digest and
+        # the cache-cliff baseline instead of writing a second header and
+        # treating the first warm step as a cold start.
         if active_hash and self._trace_prelude_key is None:
             self._trace_prelude_key = active_hash
+        if self._trace_runtime_key is None and (active_runtime is not None or active_digest):
+            self._trace_runtime_key = _runtime_trace_key(active_runtime, active_digest)
         if last_prompt_tokens > 0 and self._last_request_prompt_tokens == 0:
             self._last_request_prompt_tokens = last_prompt_tokens
 
-        return active_prompt, active_tools
+        return ActivePrelude(active_prompt, active_tools, active_runtime, active_digest)
 
     def iter_raw_entries(self):
         """Yield every JSONL object, skipping blank and corrupt lines."""

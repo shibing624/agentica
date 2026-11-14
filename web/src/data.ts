@@ -13,6 +13,7 @@ export async function loadStatus() {
     serverModelName: data.model_name || "",
     serverProvider: data.model_provider || "",
     serverDir: data.base_dir || "",
+    serverPlatform: data.platform || "",
     serverVersion: data.version || "",
     serverConfigPath: data.config_path || "",
     serverProfile: data.active_profile || "",

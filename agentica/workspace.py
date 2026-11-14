@@ -6,6 +6,7 @@ Workspace management for Agentica agents.
 Inspired by OpenClaw's workspace concept.
 """
 import asyncio
+import hashlib
 import threading
 import json
 import os
@@ -183,6 +184,9 @@ class Workspace:
         self._context_snapshot: Optional[str] = None
         self._memory_snapshot: Optional[str] = None
         self._experience_snapshot: Optional[str] = None
+        # Bumped when this user's AGENTS.md is replaced or the active user
+        # changes. Agents compare it with the epoch they pinned against.
+        self._context_epoch: int = 0
 
     @property
     def user_id(self) -> str:
@@ -209,6 +213,13 @@ class Workspace:
         with self._user_switch_lock:
             if new_id != self._user_id:
                 self._user_initialized = False
+                # The gateway shares one Workspace across accounts. A frozen
+                # snapshot is the previous user's files; the next read must
+                # miss and load the new user.
+                self._context_snapshot = None
+                self._memory_snapshot = None
+                self._experience_snapshot = None
+                self._context_epoch += 1
             self._user_id = new_id
 
     def _get_user_path(self) -> Path:
@@ -445,6 +456,15 @@ class Workspace:
         """
         return self._experience_snapshot
 
+    @property
+    def context_epoch(self) -> int:
+        """Changes when the pinned AGENTS.md chain must be rendered again."""
+        return self._context_epoch
+
+    def user_agents_md_digest(self) -> str:
+        """Content hash of this user's AGENTS.md, for the session-log prelude."""
+        return hashlib.sha1(self.read_user_agents_md().encode("utf-8")).hexdigest()
+
     # =========================================================================
     # Cross-product project config compatibility (Hermes-style)
     # =========================================================================
@@ -646,6 +666,7 @@ class Workspace:
         tmp.write_text(content, encoding="utf-8")
         tmp.replace(path)
         self._context_snapshot = None
+        self._context_epoch += 1
         return path
 
     def _ensure_home_agent_md_symlink(self, target: Path) -> None:

@@ -105,6 +105,12 @@ export const IconFolder = () => (
     <path d="M1.75 4.25c0-.55.45-1 1-1h3.1l1.1 1.3h6.05c.55 0 1 .45 1 1v6.2c0 .55-.45 1-1 1h-10.25c-.55 0-1-.45-1-1z" />
   </S>
 );
+export const IconFolderOpen = () => (
+  <S strokeWidth="1.3" strokeLinejoin="round">
+    <path d="M1.75 4.25c0-.55.45-1 1-1h3.1l1.1 1.3h6.05c.55 0 1 .45 1 1v1.2" />
+    <path d="M1.75 6.75h12.3l-1.2 6.1c-.1.5-.55.85-1.05.85H2.95c-.55 0-1-.45-1-1z" />
+  </S>
+);
 export const IconPencil = () => (
   <S strokeWidth="1.3">
     <path d="M11.55 1.45a1.55 1.55 0 012.2 2.2l-8.2 8.2-3.3.9.9-3.3z" strokeLinejoin="round" />

@@ -355,7 +355,7 @@ def test_apply_cache_control_strips_marker_when_caching_off():
 def test_persistent_session_id_stable_per_base_url(tmp_path, monkeypatch):
     from agentica.model import cache_routing as chat_mod
 
-    monkeypatch.setattr(chat_mod.Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.setattr(chat_mod, "AGENTICA_CACHE_DIR", str(tmp_path))
     a = chat_mod.persistent_cache_session_id("https://x.example/v1")
     b = chat_mod.persistent_cache_session_id("https://x.example/v1")
     c = chat_mod.persistent_cache_session_id("https://y.example/v1")
@@ -366,12 +366,12 @@ def test_persistent_session_id_stable_per_base_url(tmp_path, monkeypatch):
 def test_persistent_session_id_tolerates_corrupt_file(tmp_path, monkeypatch):
     from agentica.model import cache_routing as chat_mod
 
-    monkeypatch.setattr(chat_mod.Path, "home", staticmethod(lambda: tmp_path))
-    f = tmp_path / ".agentica" / "cache" / "cache_routing.json"
-    f.parent.mkdir(parents=True)
+    monkeypatch.setattr(chat_mod, "AGENTICA_CACHE_DIR", str(tmp_path))
+    f = tmp_path / "cache_routing.json"
     f.write_text("not json at all")
     sid = chat_mod.persistent_cache_session_id("https://x.example/v1")
     assert sid.startswith("agentica-cache-")
+    assert f.exists()
 
 
 def test_session_header_shared_across_instances(tmp_path, monkeypatch):

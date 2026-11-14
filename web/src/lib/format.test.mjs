@@ -3,6 +3,10 @@ import test, { after } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
 
+globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+globalThis.document = { documentElement: { lang: "", dataset: {} } };
+globalThis.window = { setTimeout, clearTimeout, localStorage: globalThis.localStorage };
+
 const vite = await createServer({
   root: fileURLToPath(new URL("../..", import.meta.url)),
   configFile: false,
@@ -14,23 +18,20 @@ const {
   agoStr, fmtDurationMs, fmtRunDuration, fmtSpan, lastQueryTs,
   sessionSideStatus, updateQueuedMessageText,
 } = await vite.ssrLoadModule("/src/lib/format.ts");
+const { setState } = await vite.ssrLoadModule("/src/store.ts");
+const { getStrings } = await vite.ssrLoadModule("/src/i18n.ts");
 after(() => vite.close());
 
-const zh = {
-  agoJustNow: "刚刚",
-  agoMinutes: (n) => `${n}分钟前`,
-  agoHours: (n) => `${n}小时前`,
-  agoDays: (n) => `${n}天前`,
-  agoMonths: (n) => `${n}个月前`,
-  agoYears: (n) => `${n}年前`,
-};
-const en = {
-  agoJustNow: "just now",
-  agoMinutes: (n) => `${n} min ago`,
-  agoHours: (n) => (n === 1 ? "1 hour ago" : `${n} hours ago`),
-  agoDays: (n) => (n === 1 ? "1 day ago" : `${n} days ago`),
-  agoMonths: (n) => (n === 1 ? "1 month ago" : `${n} months ago`),
-  agoYears: (n) => (n === 1 ? "1 year ago" : `${n} years ago`),
+const agoLabels = () => {
+  const c = getStrings().chat;
+  return {
+    agoJustNow: c.agoJustNow,
+    agoMinutes: c.agoMinutes,
+    agoHours: c.agoHours,
+    agoDays: c.agoDays,
+    agoMonths: c.agoMonths,
+    agoYears: c.agoYears,
+  };
 };
 
 const now = Date.parse("2026-08-22T15:32:00Z");
@@ -46,18 +47,28 @@ test("duration drops leading zeros", () => {
   assert.equal(fmtDurationMs(400 * 86_400_000), "1y1mo");
 });
 
-test("idle label is coarse and bilingual", () => {
-  assert.equal(agoStr(now - 30_000, zh, now), "刚刚");
-  assert.equal(agoStr(now - 4 * 60_000, en, now), "just now");
-  assert.equal(agoStr(now - 7 * 60_000, zh, now), "5分钟前");
-  assert.equal(agoStr(now - 12 * 60_000, en, now), "10 min ago");
-  assert.equal(agoStr(now - 6 * 3_600_000, zh, now), "6小时前");
-  assert.equal(agoStr(now - 1 * 3_600_000, en, now), "1 hour ago");
-  assert.equal(agoStr(now - 11 * 3_600_000, en, now), "11 hours ago");
-  assert.equal(agoStr(now - 2 * 86_400_000, zh, now), "2天前");
-  assert.equal(agoStr(now - 1 * 86_400_000, en, now), "1 day ago");
-  assert.equal(agoStr(now - 45 * 86_400_000, zh, now), "1个月前");
-  assert.equal(agoStr(now - 400 * 86_400_000, en, now), "1 year ago");
+test("sidebar idle labels use dsh's compact bilingual form without ago suffixes", () => {
+  setState({ lang: "zh" });
+  assert.equal(agoStr(now - 30_000, agoLabels(), now), "刚刚");
+  assert.equal(agoStr(now - 7 * 60_000, agoLabels(), now), "5分钟");
+  assert.equal(agoStr(now - 2 * 3_600_000, agoLabels(), now), "2小时");
+  assert.equal(agoStr(now - 6 * 3_600_000, agoLabels(), now), "6小时");
+  assert.equal(agoStr(now - 86_400_000, agoLabels(), now), "1天");
+  assert.equal(agoStr(now - 2 * 86_400_000, agoLabels(), now), "2天");
+  assert.equal(agoStr(now - 45 * 86_400_000, agoLabels(), now), "1个月");
+
+  setState({ lang: "en" });
+  assert.equal(agoStr(now - 4 * 60_000, agoLabels(), now), "now");
+  assert.equal(agoStr(now - 7 * 60_000, agoLabels(), now), "5min");
+  assert.equal(agoStr(now - 12 * 60_000, agoLabels(), now), "10min");
+  assert.equal(agoStr(now - 2 * 3_600_000, agoLabels(), now), "2h");
+  assert.equal(agoStr(now - 11 * 3_600_000, agoLabels(), now), "11h");
+  assert.equal(agoStr(now - 86_400_000, agoLabels(), now), "1d");
+  assert.equal(agoStr(now - 45 * 86_400_000, agoLabels(), now), "1mo");
+  assert.equal(agoStr(now - 400 * 86_400_000, agoLabels(), now), "1y");
+  for (const delta of [7 * 60_000, 2 * 3_600_000, 86_400_000, 45 * 86_400_000]) {
+    assert.doesNotMatch(agoStr(now - delta, agoLabels(), now), /前|ago/);
+  }
 });
 
 test("lastQueryTs prefers the latest non-steer user turn", () => {

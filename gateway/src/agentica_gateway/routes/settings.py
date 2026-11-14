@@ -194,6 +194,7 @@ async def status():
     return {
         "workspace": str(settings.workspace_path),
         "base_dir": str(settings.base_dir),
+        "platform": sys.platform,
         "model": f"{svc.model_provider}/{svc.model_name}" if svc else f"{settings.model_provider}/{settings.model_name}",
         "model_provider": svc.model_provider if svc else settings.model_provider,
         "model_name": model_name,

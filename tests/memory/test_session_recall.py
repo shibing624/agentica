@@ -299,6 +299,12 @@ class TestAgentWiring(unittest.TestCase):
             self.assertIn("twine upload", captured["user"])
             self.assertTrue(captured["user"].rstrip().endswith("继续上次的"))
             self.assertNotIn(SESSION_RECALL_OPEN, Path(b._session_log.path).read_text(encoding="utf-8"))
+            stored = [
+                m.content for m in b.working_memory.get_messages_from_last_n_runs()
+                if m.role == "user" and isinstance(m.content, str)
+            ]
+            self.assertTrue(stored)
+            self.assertNotIn(SESSION_RECALL_OPEN, stored[-1])
 
             tool = BuiltinContextTool()
             tool.set_agent(b)

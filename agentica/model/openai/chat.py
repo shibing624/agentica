@@ -42,7 +42,6 @@ from openai.types.chat.chat_completion_message import ChatCompletionMessage
 
 from agentica.model.base import Model, require_first_choice
 from agentica.model.cache_routing import (
-    default_sticky_session_header,
     is_claude_model_id,
     persistent_cache_session_id,
     resolve_cache_session_id,
@@ -196,6 +195,19 @@ def _is_unsigned_thinking_block(block: Any) -> bool:
         data = block.get("data")
         return not (isinstance(data, str) and data)
     return False
+
+
+def _strip_cache_control_value(value: Any) -> Any:
+    """Copy ``value`` without ``cache_control`` keys at any depth."""
+    if isinstance(value, dict):
+        return {
+            key: _strip_cache_control_value(item)
+            for key, item in value.items()
+            if key != "cache_control"
+        }
+    if isinstance(value, list):
+        return [_strip_cache_control_value(item) for item in value]
+    return value
 
 
 def _tag_content_block_cache_control(content: Any) -> Any:
@@ -427,6 +439,7 @@ class OpenAIChat(Model):
     _OUTPUT_CAP_KEYS: ClassVar[tuple[str, ...]] = ("max_tokens", "max_completion_tokens")
     _OUTPUT_CAP_KEY_BY_DEPLOYMENT: ClassVar[Dict[tuple[str, str, str], str]] = {}
     _UNSUPPORTED_PROMPT_CACHE_KEY_DEPLOYMENTS: ClassVar[set[tuple[str, str, str]]] = set()
+    _UNSUPPORTED_CACHE_CONTROL_DEPLOYMENTS: ClassVar[set[tuple[str, str, str]]] = set()
 
     def _output_cap_deployment_key(self) -> tuple[str, str, str]:
         """Identity used to share a learned wire key across per-run clones."""
@@ -511,10 +524,33 @@ class OpenAIChat(Model):
         self._auto_output_cap = True
         return True
 
+    def _drop_rejected_cache_control(
+        self,
+        request_kwargs: Dict[str, Any],
+        messages: Optional[List[Dict[str, Any]]],
+    ) -> None:
+        """Remove ``cache_control`` from this request and stop sending it.
+
+        The breakpoints live on message blocks and tool definitions, not as a
+        top-level field. ``messages`` is the list the create closure captured;
+        a ping puts that list in ``request_kwargs`` instead.
+        """
+        self.enable_cache_control = False
+        target = messages if isinstance(messages, list) else request_kwargs.get("messages")
+        if isinstance(target, list):
+            for index, item in enumerate(target):
+                target[index] = _strip_cache_control_value(item)
+        tools = request_kwargs.get("tools")
+        if isinstance(tools, list):
+            request_kwargs["tools"] = _strip_cache_control_value(tools)
+
     async def _create_with_auto_cap(
         self,
         create: Callable[[Dict[str, Any]], Awaitable[Any]],
         request_kwargs: Dict[str, Any],
+        messages: Optional[List[Dict[str, Any]]] = None,
+        *,
+        retry_cache_control: bool = True,
     ) -> Any:
         """Send ``request_kwargs``; if an agentica-chosen cap is rejected, drop it.
 
@@ -536,10 +572,19 @@ class OpenAIChat(Model):
             and self._output_cap_deployment_key() in self._UNSUPPORTED_PROMPT_CACHE_KEY_DEPLOYMENTS
         ):
             request_kwargs = {k: v for k, v in request_kwargs.items() if k != "prompt_cache_key"}
+        if self._output_cap_deployment_key() in self._UNSUPPORTED_CACHE_CONTROL_DEPLOYMENTS:
+            self._drop_rejected_cache_control(request_kwargs, messages)
         active_key = self._active_output_cap_key(request_kwargs)
         try:
             return await create(request_kwargs)
         except openai.BadRequestError as error:
+            if retry_cache_control and self._is_unsupported_parameter(error, "cache_control"):
+                self._UNSUPPORTED_CACHE_CONTROL_DEPLOYMENTS.add(self._output_cap_deployment_key())
+                self._drop_rejected_cache_control(request_kwargs, messages)
+                logger.info(f"{self.id}: endpoint rejected cache_control; omitting it for this deployment")
+                return await self._create_with_auto_cap(
+                    create, request_kwargs, messages, retry_cache_control=False,
+                )
             if (
                 "prompt_cache_key" in request_kwargs
                 and self._is_unsupported_parameter(error, "prompt_cache_key")
@@ -547,7 +592,9 @@ class OpenAIChat(Model):
                 self._UNSUPPORTED_PROMPT_CACHE_KEY_DEPLOYMENTS.add(self._output_cap_deployment_key())
                 without_cache_key = {k: v for k, v in request_kwargs.items() if k != "prompt_cache_key"}
                 logger.info(f"{self.id}: endpoint rejected prompt_cache_key; omitting it for this deployment")
-                return await self._create_with_auto_cap(create, without_cache_key)
+                return await self._create_with_auto_cap(
+                    create, without_cache_key, messages, retry_cache_control=retry_cache_control,
+                )
             if (
                 active_key is not None
                 and len(self._OUTPUT_CAP_KEYS) == 2
@@ -930,10 +977,8 @@ class OpenAIChat(Model):
         return resolve_cache_session_id(session_id=self.session_id, base_url=self.base_url)
 
     def _effective_session_header(self) -> Optional[str]:
-        """Resolved sticky-routing header name (explicit config, or known proxy default)."""
-        if self.cache_control_session_header is not None:
-            return self.cache_control_session_header or None
-        return default_sticky_session_header(self.base_url)
+        """Sticky-routing header from the profile. Unset means no header."""
+        return self.cache_control_session_header or None
 
     def _with_cache_session_header(self, existing: Any) -> Any:
         """Merge a stable per-run session id into extra_headers for sticky routing.
@@ -1059,6 +1104,8 @@ class OpenAIChat(Model):
         When caching is off, warns if the request already carries manual
         cache_control blocks (so the user knows to flip enable_cache_control on).
         """
+        if self._output_cap_deployment_key() in self._UNSUPPORTED_CACHE_CONTROL_DEPLOYMENTS:
+            self.enable_cache_control = False
         tools = request_kwargs.get("tools")
         if not self.enable_cache_control:
             if _request_has_cache_control(formatted, tools):
@@ -1184,6 +1231,7 @@ class OpenAIChat(Model):
                                 **kwargs,
                             ),
                             request_kwargs,
+                            payload,
                         )
 
                     response = await self._send_with_system_position_repair(formatted, _parse)
@@ -1204,6 +1252,7 @@ class OpenAIChat(Model):
                     **kwargs,
                 ),
                 request_kwargs,
+                payload,
             )
 
         try:
@@ -1239,6 +1288,7 @@ class OpenAIChat(Model):
                     **kwargs,
                 ),
                 request_kwargs,
+                payload,
             )
 
         async def _open() -> AsyncIterator[ChatCompletionChunk]:

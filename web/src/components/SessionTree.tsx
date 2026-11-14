@@ -9,8 +9,9 @@ import {
 } from "../sessions";
 import {
   IconArchive, IconChevronRight, IconClock, IconCopyOutline, IconFolder, IconFork, IconLayers, IconMore, IconPencil,
-  IconPin, IconPlus, IconSpinner, IconTrash,
+  IconFinder, IconFolderOpen, IconPin, IconPlus, IconSpinner, IconTrash,
 } from "../icons";
+import * as api from "../api";
 import {
   getState, normDir, projectIdForDir, projectNameForDir, setState, showToast, useAppState, type Session,
 } from "../store";
@@ -195,12 +196,13 @@ export function SessionTree() {
       )}
       {groups.map((g) => {
         const shut = !!collapsed[g.id];
+        const active = g.sessions.some(({ id }) => id === s.curSess);
         const busyWhileShut = shut && g.sessions.some(({ session }) => session.running);
         const isExpanded = !!expanded[g.id];
         const rows = collapseSessionRows(g.sessions, s.curSess, isExpanded || !!q);
         return (
           <section className="p-group" key={g.id}>
-            <div className={"p-head" + (menuFor === g.id ? " menu-open" : "")}>
+            <div className={"p-head" + (active ? " workspace-active" : "") + (menuFor === g.id ? " menu-open" : "")}>
               <button type="button" className={"p-caret" + (shut ? "" : " open")} title={g.name}
                       aria-label={shut ? S.chat.expandProject : S.chat.collapseProject}
                       onClick={() => setCollapsed((c) => ({ ...c, [g.id]: !c[g.id] }))}>
@@ -221,7 +223,7 @@ export function SessionTree() {
                         onClick={() => setCollapsed((c) => ({ ...c, [g.id]: !c[g.id] }))}
                         onDoubleClick={() => { setRenameText(g.name); setRenaming(g.id); }}>
                   <div className="p-title">
-                    <span className="p-icon"><IconFolder /></span>
+                    <span className="p-icon">{active ? <IconFolderOpen /> : <IconFolder />}</span>
                     <span className="p-title-text">{g.name}</span>
                     {/* Folded project: a running session inside is invisible, so the
                         header carries dsh's busy spinner in its place. */}
@@ -242,6 +244,17 @@ export function SessionTree() {
                     </button>
                     {menuFor === g.id && (
                       <div className="p-menu" role="menu">
+                        {s.serverPlatform === "darwin" && (
+                          <button type="button" role="menuitem" className="p-menu-item"
+                                  onClick={() => {
+                                    setMenuFor(null);
+                                    void api.revealPathApi(g.dir).then(({ ok, data }) => {
+                                      if (!ok) showToast((data as any)?.detail || S.workspace.revealFailed, 2500);
+                                    });
+                                  }}>
+                            <IconFinder /><span>{S.workspace.revealInFinder}</span>
+                          </button>
+                        )}
                         <button type="button" role="menuitem" className="p-menu-item"
                                 onClick={() => { setMenuFor(null); setRenameText(g.name); setRenaming(g.id); }}>
                           <IconPencil /><span>{S.workspace.rename}</span>

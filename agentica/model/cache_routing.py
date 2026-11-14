@@ -10,21 +10,25 @@ one provider's module — importing ``model/openai/chat.py`` from the Anthropic
 side would drag the whole OpenAI SDK in.
 """
 import json
-import os
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
+
+from agentica.config import AGENTICA_CACHE_DIR
 
 CACHE_ROUTING_FILENAME = "cache_routing.json"
 
 
 def _cache_routing_path(home: Optional[Path] = None) -> Path:
+    """Sticky-id file. ``home`` is the test override of ``~``.
+
+    Production uses ``AGENTICA_CACHE_DIR`` (``$AGENTICA_HOME/cache``, or
+    ``AGENTICA_CACHE_DIR`` when that is set on its own). Copying the home
+    path here used to ignore that override and write beside the real cache.
+    """
     if home is not None:
         return home / ".agentica" / "cache" / CACHE_ROUTING_FILENAME
-    env_home = os.environ.get("AGENTICA_HOME")
-    if env_home:
-        return Path(env_home) / "cache" / CACHE_ROUTING_FILENAME
-    return Path.home() / ".agentica" / "cache" / CACHE_ROUTING_FILENAME
+    return Path(AGENTICA_CACHE_DIR) / CACHE_ROUTING_FILENAME
 
 
 def is_claude_model_id(model_id: Optional[str]) -> bool:
@@ -37,22 +41,10 @@ def is_claude_model_id(model_id: Optional[str]) -> bool:
     return "claude" in (model_id or "").lower()
 
 
-def is_venus_llmproxy(base_url: Any) -> bool:
-    raw = str(base_url or "").lower()
-    return ("venus.oa.com" in raw or "venus.woa.com" in raw) and "/llmproxy" in raw
-
-
-def default_sticky_session_header(base_url: Any) -> Optional[str]:
-    """Known proxy sticky-routing header when the caller left it unset."""
-    if is_venus_llmproxy(base_url):
-        return "Venus-Session-Id"
-    return None
-
-
 def persistent_cache_session_id(base_url: Any, home: Optional[Path] = None) -> str:
     """Load-or-create the sticky cache-routing id for this endpoint.
 
-    Persisted in ``~/.agentica/cache/cache_routing.json`` keyed by base_url so
+    Persisted in ``$AGENTICA_CACHE_DIR/cache_routing.json`` keyed by base_url so
     a new CLI process keeps the same routing id and lands on the same proxy
     backend (a fresh random id would guarantee a cold cache). Best-effort: if
     the file is unreadable/unwritable, an in-memory id is used for this process.

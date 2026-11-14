@@ -687,6 +687,8 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self._pinned_system_prompt: Optional[str] = None
         self._pinned_runtime_state: Optional[Dict[str, str]] = None
         self._pinned_tool_order: List[str] = []
+        self._pinned_tool_policies: List[str] = []
+        self._pinned_context_epoch: int = 0
 
         # Mid-run steering: guidance pushed (possibly from another thread) while
         # the agent is inside its tool loop. Drained between tool batches and
@@ -1055,6 +1057,14 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self._pinned_system_prompt = None
         self._pinned_runtime_state = None
         self._pinned_tool_order = []
+        self._pinned_tool_policies = []
+        self._pinned_context_epoch = 0
+
+    def _logged_agents_md_still_current(self, logged: Optional[str]) -> bool:
+        """A settings-page edit of AGENTS.md must win over the logged prompt."""
+        if logged is None or self.workspace is None:
+            return True
+        return self.workspace.user_agents_md_digest() == logged
 
     def _restore_prelude_from_session_log(self) -> None:
         """Recover the active window's system prompt and tool order on resume."""
@@ -1065,12 +1075,19 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         ):
             return
         model_id = self.model.id if self.model is not None else None
-        prompt_text, tool_names = self._session_log.load_active_prelude(model=model_id)
-        if prompt_text:
-            self._pinned_system_prompt = prompt_text
-            self._pinned_runtime_state = self._extract_runtime_state_from_prompt(prompt_text)
-        if tool_names and not self._pinned_tool_order:
-            self._pinned_tool_order = list(tool_names)
+        prelude = self._session_log.load_active_prelude(model=model_id)
+        if prelude.system_prompt and self._logged_agents_md_still_current(prelude.agents_md_digest):
+            self._pinned_system_prompt = prelude.system_prompt
+            self._pinned_runtime_state = (
+                dict(prelude.runtime_state)
+                if prelude.runtime_state is not None
+                else self._current_runtime_state()
+            )
+            self._pinned_tool_policies = list(self._tool_policy_prompts)
+            workspace = self.workspace
+            self._pinned_context_epoch = workspace.context_epoch if workspace is not None else 0
+        if prelude.tools and not self._pinned_tool_order:
+            self._pinned_tool_order = list(prelude.tools)
 
     def steer(
         self,

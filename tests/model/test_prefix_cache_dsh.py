@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -89,7 +90,7 @@ def test_sticky_header_still_applied_when_cache_control_is_off():
     assert kw["extra_headers"]["X-Session-Id"] == "sess-ds-1"
 
 
-def test_venus_proxy_gets_default_sticky_session_header():
+def test_sticky_header_is_not_inferred_from_the_base_url():
     model = OpenAIChat(
         id="claude-haiku-5-5",
         api_key="fake_key",
@@ -97,7 +98,17 @@ def test_venus_proxy_gets_default_sticky_session_header():
     )
     model.session_id = "sess-venus-42"
     _, kw = model._apply_cache_control([{"role": "user", "content": "hi"}], {})
-    assert kw["extra_headers"]["Venus-Session-Id"] == "sess-venus-42"
+    assert "Venus-Session-Id" not in (kw.get("extra_headers") or {})
+
+    configured = OpenAIChat(
+        id="claude-haiku-5-5",
+        api_key="fake_key",
+        base_url="http://v2.open.venus.oa.com/llmproxy/v1",
+        cache_control_session_header="Venus-Session-Id",
+    )
+    configured.session_id = "sess-venus-42"
+    _, configured_kw = configured._apply_cache_control([{"role": "user", "content": "hi"}], {})
+    assert configured_kw["extra_headers"]["Venus-Session-Id"] == "sess-venus-42"
 
 
 def test_unsupported_prompt_cache_key_falls_back_and_remembers():
@@ -134,6 +145,50 @@ def test_unsupported_prompt_cache_key_falls_back_and_remembers():
         OpenAIChat._UNSUPPORTED_PROMPT_CACHE_KEY_DEPLOYMENTS.discard(model._output_cap_deployment_key())
 
 
+def test_unsupported_cache_control_is_stripped_and_remembered():
+    model = OpenAIChat(
+        id="claude-haiku-5-5",
+        api_key="fake_key",
+        base_url="https://strict-cc.example/v1",
+    )
+    assert model.enable_cache_control is True
+    messages = [{
+        "role": "user",
+        "content": [{"type": "text", "text": "hi", "cache_control": {"type": "ephemeral"}}],
+    }]
+    kwargs = {"tools": [{"type": "function", "function": {"name": "a"}, "cache_control": {"type": "ephemeral"}}]}
+    calls: List[Dict[str, Any]] = []
+
+    async def fake_create(request: Dict[str, Any]) -> str:
+        calls.append(request)
+        blob = json.dumps({"messages": messages, "tools": request.get("tools")}, default=str)
+        if "cache_control" in blob:
+            req = httpx.Request("POST", "https://strict-cc.example/v1/chat/completions")
+            resp = httpx.Response(
+                400,
+                request=req,
+                json={"error": {"message": "Unknown parameter", "code": "unsupported_parameter", "param": "cache_control"}},
+            )
+            raise openai.BadRequestError("Unknown parameter", response=resp, body=resp.json())
+        return "ok"
+
+    try:
+        res = asyncio.run(model._create_with_auto_cap(fake_create, kwargs, messages))
+        assert res == "ok"
+        assert len(calls) == 2
+        assert "cache_control" not in json.dumps(messages)
+        assert "cache_control" not in json.dumps(calls[-1].get("tools"))
+        assert model.enable_cache_control is False
+        formatted, kw = model._apply_cache_control(
+            [{"role": "user", "content": "next"}],
+            {"tools": [{"type": "function", "function": {"name": "a"}}]},
+        )
+        assert "cache_control" not in json.dumps(formatted)
+        assert "cache_control" not in json.dumps(kw.get("tools"))
+    finally:
+        OpenAIChat._UNSUPPORTED_CACHE_CONTROL_DEPLOYMENTS.discard(model._output_cap_deployment_key())
+
+
 # ── 2. OpenAIResponses prompt_cache_key + sticky header + marker strip ────────
 
 
@@ -142,6 +197,7 @@ def test_openai_responses_carries_prompt_cache_key_sticky_header_and_strips_mark
         id="gpt-5.4-mini",
         api_key="fake_key",
         base_url="https://v2.open.venus.woa.com/llmproxy/v1",
+        cache_control_session_header="Venus-Session-Id",
         reasoning="low",
     )
     model.session_id = "sess-resp-9"
@@ -487,3 +543,89 @@ def test_trace_records_prefix_reuse_ratio_and_detects_cache_cliffs(tmp_path):
     assert totals["prefixReuseHits"] == 1
     assert totals["cacheCliffs"] == 1
     assert slog.trajectory_stats()["cache_cliffs"] == 1
+
+
+def test_agents_md_edit_replaces_the_pinned_system_prompt(tmp_path):
+    from agentica.workspace import Workspace
+
+    ws = Workspace(tmp_path / "ws", user_id="alice")
+    ws.initialize()
+    ws.write_user_agents_md("RULE-V1\n")
+    agent = Agent(
+        model=OpenAIChat(id="gpt-4o-mini", api_key="fake_key"),
+        workspace=ws,
+        tool_config=ToolConfig(auto_load_mcp=False),
+    )
+    agent.working_memory.runs.append(SimpleNamespace())
+    first = asyncio.run(agent.get_system_message())
+    assert "RULE-V1" in first.content
+
+    ws.write_user_agents_md("RULE-V2\n")
+    second = asyncio.run(agent.get_system_message())
+    assert "RULE-V2" in second.content
+    assert "RULE-V1" not in second.content
+
+
+def test_resume_uses_logged_runtime_state(tmp_path):
+    slog = SessionLog(session_id="pin-runtime", base_dir=str(tmp_path))
+    slog.append_trace_prelude(
+        model="gpt-4o-mini",
+        provider="openai",
+        context_window=128000,
+        tools=[],
+        system_prompt="You are an assistant with no channel sentence.",
+        runtime_state={"date": datetime.now().strftime("%Y-%m-%d"), "channel": "wechat", "summary": ""},
+    )
+    agent = Agent(
+        model=OpenAIChat(id="gpt-4o-mini", api_key="fake_key"),
+        tool_config=ToolConfig(auto_load_mcp=False),
+    )
+    agent._session_log = slog
+    agent._run_channel = "wechat"
+    agent.working_memory.runs.append(SimpleNamespace())
+    agent._restore_prelude_from_session_log()
+    assert agent._pinned_runtime_state == agent._current_runtime_state()
+    assert agent._pinned_runtime_state["channel"] == "wechat"
+    assert agent._take_runtime_context_reminder() is None
+
+
+def test_a_tool_guide_added_after_pin_is_appended_once(tmp_path):
+    agent = Agent(
+        model=OpenAIChat(id="gpt-4o-mini", api_key="fake_key"),
+        tool_config=ToolConfig(auto_load_mcp=False),
+    )
+    agent.working_memory.runs.append(SimpleNamespace())
+    asyncio.run(agent.get_system_message())
+    agent._tool_policy_prompts.append("NEW-GUIDE follow this")
+    note = agent._take_tool_policy_reminder()
+    assert note is not None and "NEW-GUIDE follow this" in note
+    assert agent._take_tool_policy_reminder() is None
+
+
+def test_resume_skips_a_pinned_prompt_when_agents_md_changed(tmp_path):
+    from agentica.workspace import Workspace
+
+    ws = Workspace(tmp_path / "ws", user_id="alice")
+    ws.initialize()
+    ws.write_user_agents_md("RULE-V1\n")
+    slog = SessionLog(session_id="pin-agents", base_dir=str(tmp_path / "log"))
+    slog.append_trace_prelude(
+        model="gpt-4o-mini",
+        provider="openai",
+        context_window=128000,
+        tools=["search_session"],
+        system_prompt="system with RULE-V1",
+        runtime_state={"date": "", "channel": "", "summary": ""},
+        agents_md_digest=ws.user_agents_md_digest(),
+    )
+    ws.write_user_agents_md("RULE-V2\n")
+    agent = Agent(
+        model=OpenAIChat(id="gpt-4o-mini", api_key="fake_key"),
+        workspace=ws,
+        tool_config=ToolConfig(auto_load_mcp=False),
+    )
+    agent._session_log = slog
+    agent.working_memory.runs.append(SimpleNamespace())
+    agent._restore_prelude_from_session_log()
+    assert agent._pinned_system_prompt is None
+    assert agent._pinned_tool_order == ["search_session"]

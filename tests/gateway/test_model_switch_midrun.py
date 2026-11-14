@@ -22,6 +22,7 @@ def _service(tmp_path, monkeypatch):
 
     def build(session_id, owner=None):
         agent = SimpleNamespace(user_id=svc._owner(owner), session_id=session_id, n=len(built))
+        agent.set_permission_mode = lambda mode: None
         built.append(agent)
         return agent
 

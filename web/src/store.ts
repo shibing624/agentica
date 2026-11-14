@@ -212,6 +212,7 @@ export type AppState = {
   goalCompose: { budgetText: string } | null;
   serverModel: string;
   serverDir: string;
+  serverPlatform: string;
   serverProvider: string;
   serverModelName: string;
   serverVersion: string;
@@ -353,6 +354,7 @@ const state: AppState = {
   goalCompose: null,
   serverModel: "-",
   serverDir: "",
+  serverPlatform: "",
   serverProvider: "",
   serverModelName: "",
   serverVersion: "",

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -33,6 +34,38 @@ from agentica.compression.tool_result_storage import DEFAULT_MAX_RESULT_SIZE_CHA
 if TYPE_CHECKING:
     from agentica.agent import Agent
 
+
+_TAGGED_EPHEMERAL_RE = re.compile(
+    r"<(session_recall|memory_recall)>.*?</\1>\s*",
+    re.DOTALL,
+)
+_FILE_NOTE_RE = re.compile(
+    r"\[File change notice\] These files changed on disk after you last read "
+    r"or wrote them \(the user, another process, or a shell command you ran\)\. "
+    r"What you saw of them may be out of date; read them again before "
+    r"relying on or editing their contents\.\n(?:- [^\n]*\n)*"
+)
+
+
+def scrub_ephemeral_request_prefix(content: str) -> str:
+    """Drop request-only prefixes that must not enter the transcript.
+
+    ``<git_snapshot>`` and ``<system-reminder>`` stay. Recall, memory recall
+    and the file-change note are regenerated on the next human turn.
+    """
+    cleaned = _TAGGED_EPHEMERAL_RE.sub("", content)
+    cleaned = _FILE_NOTE_RE.sub("", cleaned)
+    if cleaned == content:
+        return content
+    return re.sub(r"\n{3,}", "\n\n", cleaned).lstrip("\n")
+
+
+def scrub_ephemeral_user_messages(messages: List[Any]) -> None:
+    for message in messages:
+        if isinstance(message, Message) and message.role == "user" and isinstance(message.content, str):
+            cleaned = scrub_ephemeral_request_prefix(message.content)
+            if cleaned != message.content:
+                message.content = cleaned
 
 
 class PersistMixin:
@@ -175,6 +208,8 @@ class PersistMixin:
             if user_messages[-1].automated:
                 meta["automated"] = True
             wire_body = user_messages[-1].content
+            if isinstance(wire_body, str):
+                wire_body = scrub_ephemeral_request_prefix(wire_body)
             if isinstance(wire_body, str) and wire_body != text:
                 meta["wire_content"] = wire_body
         if agent._run_input_meta:
@@ -818,6 +853,7 @@ class PersistMixin:
                 run_messages.append(synthesized)
         else:
             run_messages = user_messages + turn_msgs
+        scrub_ephemeral_user_messages(run_messages)
         if system_message is not None:
             run_messages.insert(0, system_message)
         agent.run_response.messages = run_messages
@@ -905,12 +941,15 @@ class PersistMixin:
                     k for k, fn in model.functions.items()
                     if not fn.deferred and fn.is_available()
                 ]
+        workspace = agent.workspace
         slog.append_trace_prelude(
             model=model.id if model is not None else None,
             provider=model.provider if model is not None else None,
             context_window=model.context_window if model is not None else None,
             tools=ordered_tools,
             system_prompt=system_prompt,
+            runtime_state=dict(agent._pinned_runtime_state) if agent._pinned_runtime_state else None,
+            agents_md_digest=workspace.user_agents_md_digest() if workspace is not None else None,
         )
 
     @staticmethod

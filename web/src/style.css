@@ -17,7 +17,7 @@
   /* Trace lane track. A tool lane is mostly empty, so it needs more contrast
      against the card than --bg3 gives, in both themes. */
   --lane-track:#e2e5ea;
-  --side-bg:#f9fafb;--hover:rgba(38,49,72,.06);--hover2:rgba(38,49,72,.10);
+  --side-bg:#f9fafb;--hover:rgba(38,49,72,.06);--hover2:rgba(38,49,72,.10);--selected:rgba(38,49,72,.14);
   --skill-ref:#4176e6;--skill-ref-bg:rgba(65,118,230,.10);
   --scroll:rgba(97,102,107,.16);
   --scroll-hover:rgba(97,102,107,.36);
@@ -33,7 +33,7 @@
   --user-bg:#2c2c2e;--user-fg:#f9fafb;
   --code-bg:#1b1b1c;
   --lane-track:#2b2b2b;
-  --side-bg:#1b1b1c;--hover:rgba(255,255,255,.08);--hover2:rgba(255,255,255,.14);
+  --side-bg:#1b1b1c;--hover:rgba(255,255,255,.08);--hover2:rgba(255,255,255,.14);--selected:rgba(255,255,255,.19);
   --skill-ref:#7aaaff;--skill-ref-bg:rgba(122,170,255,.14);
   --scroll:rgba(207,211,214,.14);
   --scroll-hover:rgba(207,211,214,.32);
@@ -175,6 +175,7 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .p-group{margin-bottom:2px}
 .p-head{display:flex;align-items:center;gap:2px;height:34px;min-height:34px;padding:0 4px 0 2px;box-sizing:border-box;border-radius:10px;color:var(--fg);position:relative}
 .p-head:hover,.p-head.menu-open{background:var(--hover)}
+.p-head.workspace-active .p-icon{color:var(--accent)}
 .p-caret{width:20px;height:24px;border:none;background:transparent;color:var(--fg3);cursor:pointer;border-radius:5px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
 .p-caret svg{width:11px;height:11px;transition:transform var(--t)}
 .p-caret.open svg{transform:rotate(90deg)}
@@ -202,8 +203,8 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .p-rename-input{flex:1;min-width:0;height:26px;margin:0 4px 0 2px;border:1px solid var(--fg3);border-radius:6px;background:var(--bg);color:var(--fg);font-size:13px;padding:2px 7px;outline:none;box-shadow:0 0 0 2px var(--accent-soft)}
 .s-hint{padding:3px 8px 6px 28px;font-size:12px;color:var(--fg3)}
 .s-item{height:34px;min-height:34px;padding:0 8px 0 28px;box-sizing:border-box;border-radius:10px;cursor:pointer;transition:background var(--t),box-shadow var(--t),opacity var(--t);margin-bottom:1px;position:relative;display:flex;align-items:center;gap:8px;outline:none}
-.s-item:hover{background:var(--hover)}
-.s-item.active{background:var(--hover2)}
+.s-item:hover:not(.active){background:var(--hover)}
+.s-item.active{background:var(--selected)}
 .s-item.archived{opacity:.62}
 .s-main{min-width:0;flex:1}
 .s-item .ti{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px;line-height:20px;font-weight:450}
@@ -211,7 +212,7 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
    background here becomes a dark chip on the selected row. Hover hides
    the label (keeps its width) and shows the action buttons over it.
    Busy spinner / unread dot live in the leading .s-lead slot instead. */
-.s-item .mt{flex-shrink:0;font-size:11px;color:var(--fg3);white-space:nowrap;pointer-events:none}
+.s-item .mt{flex-shrink:0;font-size:10px;color:var(--fg3);white-space:nowrap;pointer-events:none}
 /* Leading status slot (dsh): sits in the row's left indent, so titles stay
    aligned whether or not a row shows one. Stays visible on hover. */
 .s-lead{position:absolute;left:8px;top:50%;width:16px;height:16px;margin-top:-8px;display:flex;align-items:center;justify-content:center;pointer-events:none;color:var(--fg3)}
