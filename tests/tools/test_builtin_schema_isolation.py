@@ -20,46 +20,46 @@ from agentica.tools.builtin_task_tool import BuiltinTaskTool
 # Names that are separately installable. A function on one Tool must not
 # mention a name that is only provided by a different Tool.
 _FOREIGN = {
-    "read_file": frozenset({"execute", "wait", "task", "delegate", "web_search", "fetch_url"}),
-    "write_file": frozenset({"execute", "wait", "task", "delegate", "web_search", "fetch_url"}),
-    "apply_patch": frozenset({"execute", "wait", "task", "delegate", "web_search", "fetch_url"}),
-    "glob": frozenset({"execute", "wait", "task", "delegate", "web_search", "fetch_url"}),
-    "grep": frozenset({"execute", "wait", "task", "delegate", "web_search", "fetch_url"}),
+    "read_file": frozenset({"execute", "wait", "task", "web_search", "fetch_url"}),
+    "write_file": frozenset({"execute", "wait", "task", "web_search", "fetch_url"}),
+    "apply_patch": frozenset({"execute", "wait", "task", "web_search", "fetch_url"}),
+    "glob": frozenset({"execute", "wait", "task", "web_search", "fetch_url"}),
+    "grep": frozenset({"execute", "wait", "task", "web_search", "fetch_url"}),
     "execute": frozenset({
         "read_file", "write_file", "apply_patch", "glob",
-        "task", "delegate", "web_search", "fetch_url",
+        "task", "web_search", "fetch_url",
     }),
     "wait": frozenset({
         "read_file", "write_file", "apply_patch", "glob", "grep",
         "task", "web_search", "fetch_url",
     }),
     "task": frozenset({
-        "execute", "wait", "delegate", "read_file", "write_file",
+        "execute", "wait", "read_file", "write_file",
         "apply_patch", "glob", "grep", "web_search", "fetch_url",
     }),
     "web_search": frozenset({
         "execute", "read_file", "write_file", "apply_patch", "grep", "glob",
-        "task", "delegate", "fetch_url",
+        "task", "fetch_url",
     }),
     "fetch_url": frozenset({
         "execute", "read_file", "write_file", "apply_patch", "grep", "glob",
-        "task", "delegate", "web_search",
+        "task", "web_search",
     }),
     "write_todos": frozenset({
         "execute", "read_file", "write_file", "apply_patch", "grep",
-        "task", "delegate",
+        "task",
     }),
     "save_memory": frozenset({
         "execute", "read_file", "write_file", "apply_patch", "grep", "glob",
-        "task", "delegate",
+        "task",
     }),
     "search_memory": frozenset({
         "execute", "read_file", "write_file", "apply_patch", "grep", "glob",
-        "task", "delegate",
+        "task",
     }),
     "search_session": frozenset({
         "execute", "read_file", "write_file", "apply_patch", "grep", "glob",
-        "task", "delegate", "web_search", "fetch_url",
+        "task", "web_search", "fetch_url",
     }),
 }
 
@@ -115,7 +115,7 @@ def test_tools_md_does_not_name_execute():
     content = get_tools_prompt()
     assert not _mentions(content, "execute")
     assert not _mentions(content, "task")
-    assert not _mentions(content, "delegate")
+    assert not _mentions(content, "execute")
 
 
 def test_every_builtin_tool_property_has_description_and_clean_top_doc():

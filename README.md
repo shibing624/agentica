@@ -66,7 +66,7 @@ https://github.com/user-attachments/assets/39fb961e-3979-4629-a87d-81dce9196597
 
 ### 2. 🤝 多窗口组队，一个人指挥一支队伍
 
-一个窗口不够用时，Agent 可以自己派生只读子任务查代码查资料，也可以把独立的大功能交给后台新进程去跑；多个终端同时改同一个仓库时，用 `/worktree` 自动隔离分支。详见 [多智能体协作](https://shibing624.github.io/agentica/multi-agent/subagent)。
+一个窗口不够用时，Agent 可以派生只读子任务查代码查资料；长命令用 `execute(background=True)` 在后台跑，并用 `/ps`、`wait` 查看或等待结果；多个终端同时改同一个仓库时用 `/worktree` 自动隔离分支。详见 [Subagent](https://shibing624.github.io/agentica/multi-agent/subagent)。
 
 ### 3. 🧬 越用越懂你和你的项目
 

@@ -1634,8 +1634,8 @@ class TestCLIToolRender(unittest.TestCase):
         console = Console(file=output, force_terminal=False, color_system=None)
         _display_tool_impl(
             console,
-            "send_message",
-            {"target": "peer-a", "message": "OK cmake [/usr/bin/cmake]"},
+            "execute",
+            {"command": "echo OK cmake [/usr/bin/cmake]"},
         )
         _display_tool_impl(
             console,

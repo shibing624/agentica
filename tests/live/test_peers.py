@@ -432,7 +432,7 @@ class TestLifecycle:
 
 
 class TestFormatting:
-    def test_the_injected_text_names_the_sender_and_reply_address(self):
+    def test_the_injected_text_names_the_sender_without_a_deleted_tool(self):
         message = PeerMessage(
             text="done",
             from_name="alpha",
@@ -443,18 +443,12 @@ class TestFormatting:
         rendered = peers.format_for_model([message])
 
         assert "alpha" in rendered
-        assert "send_message to alpha" in rendered
+        assert "send_message" not in rendered
         assert "abcd1234" not in rendered
         assert "another agent session" in rendered
 
-    def test_handed_over_work_must_be_reported_back_to_the_sender(self):
-        """The header, not just the policy, has to ask for the outcome.
-
-        It used to end in "only if it is waiting on an answer": a dispatcher is
-        never visibly waiting, so a worker finished the job and told nobody,
-        and the user carried the result between terminals by hand. A
-        per-message instruction beats a standing one, so this belongs here.
-        """
+    def test_handed_over_work_stays_in_this_sessions_answer(self):
+        """Mailbox delivery remains, but the model has no peer-send tool."""
         message = PeerMessage(
             text="rerun arm 3",
             from_name="alpha",
@@ -464,9 +458,8 @@ class TestFormatting:
 
         rendered = peers.format_for_model([message])
 
-        assert "only if it is waiting on an answer" not in rendered
-        assert "report the outcome back with send_message to alpha" in rendered
-        assert "when it is done or you stop" in rendered
+        assert "send_message" not in rendered
+        assert "leave the outcome in this session's answer" in rendered
         # Purely informational messages still do not need an acknowledgement.
         assert "if it only informed you, no reply is needed" in rendered
 
@@ -484,9 +477,9 @@ class TestFormatting:
 
         rendered = peers.format_for_model([message])
 
-        assert "not this terminal" in rendered
-        assert "report back with send_message to wechat-agentica-41" in rendered
-        assert "if needed]" not in rendered
+        assert "They are not at this terminal" in rendered
+        assert "send_message" not in rendered
+        assert "leave the result in this session's answer" in rendered
 
     def test_drain_notifies_the_cli_hook(self):
         seen = []
@@ -505,7 +498,7 @@ class TestFormatting:
 
 
 class TestUserRelayedMessages:
-    """`/send-message` lets the human speak into another session, unlike an agent."""
+    """Human-relayed mail still carries authority, unlike an agent message."""
 
     def test_a_user_message_survives_the_roundtrip_as_such(self):
         a = _session("alpha")
@@ -551,14 +544,8 @@ class TestUserRelayedMessages:
         assert not received[0].from_user
 
 
-class TestAnUnaddressableSenderIsNotAskedToBeRepliedTo:
-    """`from_peer_id` empty means the writer is not a session on this machine.
-
-    Naming it in a "report back with send_message to X" instruction sends the
-    model to an address that never resolves, so the result lands in a mailbox
-    nobody reads. The instruction is dropped for that case; senders that *can*
-    be reached are unaffected.
-    """
+class TestEverySenderGetsTheSameReplyPolicy:
+    """No sender can be answered with a model-side peer-send tool."""
 
     def test_a_non_session_user_message_does_not_invite_a_reply(self):
         message = PeerMessage(
@@ -571,8 +558,8 @@ class TestAnUnaddressableSenderIsNotAskedToBeRepliedTo:
 
         rendered = peers.format_for_model([message])
 
-        assert "send_message to" not in rendered
-        assert "no reply address" in rendered
+        assert "send_message" not in rendered
+        assert "leave the result in this session's answer" in rendered
         assert "vpet-desktop" in rendered
         # The authority claim is what makes it an instruction; keep that.
         assert "treat as their instruction" in rendered
@@ -584,13 +571,11 @@ class TestAnUnaddressableSenderIsNotAskedToBeRepliedTo:
 
         rendered = peers.format_for_model([message])
 
-        assert "send_message to" not in rendered
-        assert "no reply address" in rendered
+        assert "send_message" not in rendered
+        assert "another agent session" in rendered
 
-    def test_an_addressable_sender_is_still_asked_to_be_replied_to(self):
-        """The regression guard: the fix must not silence the reply instruction
-        for senders that can actually be reached — `/send-message` forwards and
-        the gateway's phone relay both have a mailbox."""
+    def test_an_addressable_sender_is_not_given_a_deleted_reply_tool(self):
+        """Addressable live sessions and cron/gateway relays get the same header."""
         from_user = PeerMessage(
             text="go", from_name="wechat-41", from_peer_id="abcd1234",
             to_peer_id="beef", from_kind="user",
@@ -599,10 +584,12 @@ class TestAnUnaddressableSenderIsNotAskedToBeRepliedTo:
             text="done", from_name="alpha", from_peer_id="abcd1234", to_peer_id="beef"
         )
 
-        assert "report back with send_message to wechat-41" in peers.format_for_model([from_user])
-        assert "report the outcome back with send_message to alpha" in peers.format_for_model(
-            [from_agent]
-        )
+        user_rendered = peers.format_for_model([from_user])
+        agent_rendered = peers.format_for_model([from_agent])
+        assert "send_message" not in user_rendered
+        assert "send_message" not in agent_rendered
+        assert "leave the result in this session's answer" in user_rendered
+        assert "leave the outcome in this session's answer" in agent_rendered
 
 
 class TestDelivery:

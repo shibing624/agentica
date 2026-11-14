@@ -165,11 +165,9 @@ class TestClassifyAndGrants(unittest.TestCase):
             ("save_memory", {"title": "t", "content": "c"}),
             ("search_memory", {"query": "t"}),
             ("task", {"prompt": "look around"}),
-            ("delegate", {"task": "do it"}),
             ("wait", {"pid": 1}),
             ("cronjob", {"action": "create"}),
             ("worktree", {"action": "merge"}),
-            ("send_message", {"target": "a", "text": "hi"}),
         ]
         for name, args in calls:
             fc = _fc(name, args, is_destructive=True)
@@ -235,7 +233,7 @@ class TestClassifyAndGrants(unittest.TestCase):
             "write_todos", "ask_user_question", "save_memory",
             "search_memory", "search_session",
             "list_skills", "get_skill_info",
-            "self_manage", "list_agents", "task", "delegate",
+            "self_manage", "task",
         ):
             fc = _fc(name, {}, is_destructive=(name in ("write_todos", "self_manage")))
             self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "allow", name)

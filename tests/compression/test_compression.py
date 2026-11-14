@@ -475,7 +475,7 @@ class TestToolCallArgumentShrinking(unittest.TestCase):
         self.assertEqual(self._content_of(messages, 4), "n" * 300)
 
     def test_omitted_arg_is_an_object_not_a_string(self):
-        """A string marker is a send_message body. The stand-in must not be."""
+        """A string marker is a tool argument. The stand-in must not be one."""
         from agentica.compression.tool_call_args import OMITTED_ARG_KEY, omitted_tool_arg
 
         marker = omitted_tool_arg(1183)
@@ -494,7 +494,7 @@ class TestToolCallArgumentShrinking(unittest.TestCase):
                 "id": "s1",
                 "type": "function",
                 "function": {
-                    "name": "send_message",
+                    "name": "write_note",
                     "arguments": json.dumps({"target": "peer", "message": old}),
                 },
             }]),
@@ -528,7 +528,7 @@ class TestToolCallArgumentShrinking(unittest.TestCase):
                 {
                     "type": "tool_use",
                     "id": "s1",
-                    "name": "send_message",
+                    "name": "write_note",
                     "input": {"target": "peer", "message": old},
                 },
             ],
@@ -536,7 +536,7 @@ class TestToolCallArgumentShrinking(unittest.TestCase):
                 "id": "s1",
                 "type": "function",
                 "function": {
-                    "name": "send_message",
+                    "name": "write_note",
                     "arguments": json.dumps({"target": "peer", "message": old}),
                 },
             }],
@@ -552,7 +552,7 @@ class TestToolCallArgumentShrinking(unittest.TestCase):
         )
 
     def test_result_placeholder_does_not_invite_reissue_of_omitted_args(self):
-        """Re-run send_message(message=<marker>) is how the marker reached a peer."""
+        """Re-running a string tool argument with the marker is how it spreads."""
         from agentica.compression.evict import evict_tool_results
         from agentica.compression.tool_call_args import omitted_tool_arg
 
@@ -563,7 +563,7 @@ class TestToolCallArgumentShrinking(unittest.TestCase):
                 "id": "s1",
                 "type": "function",
                 "function": {
-                    "name": "send_message",
+                    "name": "write_note",
                     "arguments": json.dumps({
                         "target": "vpetmac-05",
                         "message": payload,
@@ -573,7 +573,7 @@ class TestToolCallArgumentShrinking(unittest.TestCase):
             Message(
                 role="tool",
                 tool_call_id="s1",
-                tool_name="send_message",
+                tool_name="write_note",
                 content=" ".join(f"queued-token{i}" for i in range(200)),
             ),
             Message(role="user", content="next"),
@@ -585,7 +585,7 @@ class TestToolCallArgumentShrinking(unittest.TestCase):
         )
 
         placeholder = msgs[2].content
-        self.assertIn("send_message(", placeholder)
+        self.assertIn("write_note(", placeholder)
         self.assertNotIn("Re-run the call", placeholder)
         self.assertNotIn("<evicted-tool-arg", placeholder)
         self.assertIn("cannot be recovered", placeholder)
@@ -648,7 +648,7 @@ class TestToolCallArgumentShrinking(unittest.TestCase):
         from agentica.compression.evict import evict_tool_results
         from agentica.compression.tool_call_args import omitted_tool_arg
 
-        msgs = self._round("call_c3", name="send_message")
+        msgs = self._round("call_c3", name="write_note")
         msgs[1].tool_calls[0]["function"]["arguments"] = json.dumps(
             {"message": omitted_tool_arg(900)}
         )

@@ -66,7 +66,7 @@ Deeply tuned for open and frontier models alike — DeepSeek, OpenAI, Claude, Zh
 
 ### 2. 🤝 Coordinate multiple agents like a team
 
-An agent can spin up fast read-only subagents to search code or hand off large jobs to background worker processes, and `/worktree` isolates branches when several terminals edit the same repository — with nothing extra to deploy. See [Multi-Agent Collaboration](https://shibing624.github.io/agentica/multi-agent/subagent).
+An agent can spin up fast read-only subagents to search code; long commands run with `execute(background=True)` and are inspected or awaited with `/ps` and `wait`. `/worktree` isolates branches when several terminals edit the same repository — with nothing extra to deploy. See [Subagent](https://shibing624.github.io/agentica/multi-agent/subagent).
 
 ### 3. 🧬 Learns your habits and your codebase
 
@@ -88,7 +88,7 @@ Link WeChat (scan a QR code), Feishu, WeCom, Telegram, QQ, DingTalk, or Slack wi
 |---|---|---|---|
 | **Surfaces** | ✅ Desktop App + CLI + Local Web + Mobile IM | CLI / IDE | CLI |
 | **Models** | ✅ Any provider, switch anytime (cloud or local Ollama) | Claude only | OpenAI only |
-| **Multi-session teamwork** | ✅ Subagents + background workers + worktree branch isolation | ❌ | ❌ |
+| **Multi-session teamwork** | ✅ Subagents + background commands + worktree branch isolation | ❌ | ❌ |
 | **Long-term memory & evolving skills** | ✅ Auto memory + experience compiled into Skills | ❌ | ❌ |
 | **SDKs for developers** | ✅ Python SDK (`agentica`) + npm (`@agentica-ai/sdk`) | Partial (Claude-only) | ❌ |
 | **Open source** | ✅ Apache 2.0 | ❌ | ✅ |

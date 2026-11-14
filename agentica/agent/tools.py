@@ -7,7 +7,6 @@ This module contains the default tool implementations that can be
 enabled on the Agent.
 """
 
-import json
 from typing import (
     Any,
     Callable,

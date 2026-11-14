@@ -29,8 +29,8 @@ Tool *results* are not the only bulk in a transcript: a ``write_file`` or
 ``apply_patch`` call carries its whole payload in the assistant message's
 arguments, which no amount of result eviction can reach. Those strings are
 replaced with a JSON object ``{"$evicted": N}`` (not a string and not a
-truncated prefix — either form is copied into the next ``send_message`` /
-``write_file`` / ``execute``). The live tool round is
+truncated prefix — either form is copied into the next ``write_file`` /
+``execute`` call). The live tool round is
 left intact (in-flight calls and the trailing result batch), matching the
 trailing-result exclusion: that payload is what just executed. The cutoff is
 by message position, not tool name — SDK ``tools=``, CLI ``--tools``, Web
@@ -276,8 +276,8 @@ def _resolve_call(
     Prefer the assistant ``tool_calls`` index: Layer 1 rewrites those
     arguments in place. ``Message.tool_args`` is a snapshot from execute
     time and still holds the original payload (or nothing), so a
-    placeholder built from it would invite the model to re-issue
-    ``send_message`` with a body that is already gone.
+    placeholder built from it would invite the model to re-issue a tool
+    with an argument that is already gone.
     """
     if block is not None:
         return calls.get(block.get("tool_use_id") or "", (None, None))
@@ -310,8 +310,8 @@ def _placeholder(name: Optional[str], args: Any, handle: Optional[str] = None) -
 
     Re-issue is only invited when the original arguments are still in the
     transcript. After Layer 1 drops a payload, telling the model to re-run
-    ``send_message`` / ``execute`` / ``write_file`` with the marker as the
-    body is how that marker reaches a peer, a shell, or the disk.
+    ``execute`` / ``write_file`` with the marker as the body is how that
+    marker reaches a shell or the disk.
 
     ``handle`` is the tool-call id under which the session log keeps the full
     result; it is only passed when the model can actually read that log.
@@ -531,7 +531,7 @@ def upgrade_legacy_omitted_args(messages: "List[Message]") -> int:
     """Rewrite leftover string markers in every assistant call, including live.
 
     Those strings are already in the transcript. Leaving them is how the
-    model copies a marker into ``send_message``. Fast-path substring check
+    model copies a marker into a new tool call. Fast-path substring check
     avoids parsing or touching clean assistant messages on normal steps.
     """
     changed = 0

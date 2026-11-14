@@ -107,9 +107,8 @@ class TestPrintMode:
         had a canned "no user is available" string answer in the user's place —
         the model asked, and got words the user never said.
 
-        This is also the path a ``delegate`` worker takes (``agentica --query
-        ... --print``), so the worker inherits the absence rather than needing
-        its own wiring.
+        One-shot ``agentica --query ... --print`` inherits the absence rather
+        than needing its own wiring.
         """
         captured = {}
         _run_one_shot(["done"], print_mode=True, captured=captured)

@@ -5,6 +5,15 @@ repo_url: https://github.com/shibing624/agentica
 repo_name: shibing624/agentica
 edit_uri: blob/main/docs/
 
+# Local-only research notes and scratch assets are gitignored and must never be
+# published: mkdocs builds every markdown under docs/ even when it is absent
+# from nav, which would put unpublished drafts into the Pages artifact and the
+# search index. Keep the exclusion here as a second line of defence behind
+# .gitignore, so an accidental `git add -f` cannot publish them.
+exclude_docs: |
+  /learn_cc/
+  /tmp/
+
 theme:
   name: readthedocs
   locale: zh

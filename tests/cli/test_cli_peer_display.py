@@ -77,7 +77,7 @@ class TestPeerMessageRendering:
         """The bracketed authority header belongs in the model's context only."""
         out = _render([_message("done")])
 
-        assert "reply with send_message" not in out
+        assert "send_message" not in out
         assert "[Message from another agent session" not in out
 
     def test_a_long_body_is_not_truncated_with_an_ellipsis(self):

@@ -96,10 +96,10 @@ class TestAnEvictedArgumentIsNeverExecuted:
     """Layer 1 dropped a payload, so the value is gone.
 
     The marker is a JSON object, not a string: a string in this slot is
-    a ``send_message`` body / shell command / file write. Observed live:
-    three ``send_message`` calls delivered the old string marker as the
-    entire peer message. The tool result must not echo that marker back
-    or the model copies it again.
+    a shell command / file write / arbitrary string tool argument. Observed
+    live in older sessions: three string-marker tool calls delivered the old
+    marker as their entire argument. The tool result must not echo that marker
+    back or the model copies it again.
     """
 
     def test_the_object_marker_is_refused(self):
@@ -168,19 +168,19 @@ class TestAnEvictedArgumentIsNeverExecuted:
         assert call.error is None
         assert call.arguments == {"text": "hi", "times": 2}
 
-    def test_send_message_shaped_call_is_refused_before_the_mailbox(self):
+    def test_string_argument_call_is_refused_before_execution(self):
         from agentica.compression.tool_call_args import omitted_tool_arg
 
-        def send_message(target: str, message: str) -> str:
-            """Send a peer message."""
-            raise AssertionError("mailbox must not be reached")
+        def write_note(target: str, message: str) -> str:
+            """Write a note."""
+            raise AssertionError("the tool must not be reached")
 
-        fn = Function.from_callable(send_message)
+        fn = Function.from_callable(write_note)
         fn.process_entrypoint(strict=False)
         call = get_function_call(
-            "send_message",
+            "write_note",
             json.dumps({"target": "vpetmac-05", "message": omitted_tool_arg(1183)}),
-            functions={"send_message": fn},
+            functions={"write_note": fn},
         )
 
         assert call.error is not None

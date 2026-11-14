@@ -121,7 +121,7 @@ the question where the user is (the terminal, a Web/Desktop card, or an IM
 message with a tap-to-answer link) and blocks until they reply. A page from
 `publish_html` / `publish_markdown` can only be read — never use one to ask,
 approve, or collect input. Work handed to you by another agent session must go
-back with `send_message`; this question never reaches that person.
+back in this session's answer; this question never reaches that person.
 
 Ask only when no reasonable default exists or the step is hard to undo. For an
 ambiguity you can resolve with a recommendation, take it and tell the user

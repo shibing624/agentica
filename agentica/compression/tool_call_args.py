@@ -5,7 +5,7 @@ import json
 from typing import Any, Optional
 
 # Structured stand-in for one dropped string leaf. A JSON object, not a
-# string: a string in this slot is a ``send_message`` / ``execute`` /
+# string: a string in this slot is an ``execute`` /
 # ``write_file`` payload, and the model copies it into the next call.
 OMITTED_ARG_KEY = "$evicted"
 

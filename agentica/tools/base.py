@@ -819,10 +819,10 @@ def get_function_call(
         function_call.arguments = coerce_tool_args(_arguments, function_to_call)
 
         # Fail closed when Layer 1 dropped a payload. The marker is a JSON
-        # object, not a string, so it cannot be a ``send_message`` body or a
+        # object, not a string, so it cannot be a string tool argument or a
         # shell command. Executing it anyway has happened: ``execute`` ran it
-        # as shell, ``write_file`` wrote it, ``send_message`` delivered it to
-        # a peer as the entire message. Imported here: ``agentica.compression``
+        # as shell and ``write_file`` wrote it as the entire payload.
+        # Imported here: ``agentica.compression``
         # pulls ``utils.tokens``, which imports this module.
         from agentica.compression.tool_call_args import omitted_tool_args
 

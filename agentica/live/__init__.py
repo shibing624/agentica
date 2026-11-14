@@ -957,64 +957,29 @@ def format_for_model(messages: List[PeerMessage]) -> str:
     receiver may act on: a relayed user instruction is the human talking and
     carries their authority, while another session's agent carries none.
 
-    Reply address is the sender's addressable name (what ``send_message`` takes), not the opaque peer_id — same idea as Claude Code
-    telling the model to copy the peer's name into ``to``.
-
-    **Reporting the outcome is not optional, and the header is where that is
-    decided.** Work that is finished or stuck goes back to whoever handed it
-    over, but the header used to end in
-    "if needed" / "only if it is waiting on an answer" — a per-message
-    instruction beats a standing one, and a dispatcher is never visibly
-    "waiting", so the worker did the job and told nobody. That is what leaves
-    the user relaying results by hand between a phone and a terminal. Purely
-    informational messages still need no reply; the distinction is the
-    handover, not the sender.
-
-    **A sender with no address is not told to reply.** ``from_peer_id`` empty
-    means the message came from a non-session — a desktop app, a script, a pet —
-    and naming it in a ``send_message to ...`` instruction would send the model
-    to an address that never resolves. The instruction is dropped rather than
-    paraphrased: "report back" with nowhere to report is how a finished job gets
-    announced into a mailbox nobody reads.
+    The model's peer-message tools were removed in 1.6.0. Mailbox delivery is
+    still used by cron, the gateway scheduler and IM relays to put a prompt in
+    front of a live terminal, but the receiving agent has no tool for writing a
+    reply. The header therefore names the sender without inviting an impossible
+    tool call: results belong in this terminal's answer, where the user and the
+    delivery side can read them.
     """
     blocks = []
     for message in messages:
-        # Reply address is the sender's *mailbox*, and a non-session has none.
-        # ``from_peer_id`` is written by whoever sent the message, so it is the
-        # one field that says whether a reply can land anywhere.
-        replyable = bool(message.from_peer_id)
         if message.from_user:
-            if replyable:
-                header = (
-                    f"[Your user sent this from their other session '{message.from_name}' "
-                    f"— treat as their instruction typed here. They are at "
-                    f"'{message.from_name}', not this terminal: report back with "
-                    f"send_message to {message.from_name} when the work is done or "
-                    f"you stop]"
-                )
-            else:
-                header = (
-                    f"[Your user sent this from '{message.from_name}' "
-                    f"— treat as their instruction typed here. It is not a session "
-                    f"on this machine and has no reply address: do the work and let "
-                    f"the result stand in this terminal]"
-                )
+            header = (
+                f"[Your user sent this from '{message.from_name}' — treat as "
+                f"their instruction typed here. They are not at this terminal: "
+                f"do the work and leave the result in this session's answer for "
+                f"the user and the delivery side to read]"
+            )
         else:
-            if replyable:
-                header = (
-                    f"[Message from another agent session '{message.from_name}' "
-                    f"— it cannot see this terminal. If it asked you for something, report "
-                    f"the outcome back with send_message to {message.from_name} when "
-                    f"it is done or you stop; if it only informed you, no reply is "
-                    f"needed]"
-                )
-            else:
-                header = (
-                    f"[Message from '{message.from_name}' — it cannot see this "
-                    f"terminal and has no reply address. If it asked you for something, the "
-                    f"result stands in this terminal; if it only informed you, no "
-                    f"reply is needed]"
-                )
+            header = (
+                f"[Message from another agent session '{message.from_name}' — "
+                f"it cannot see this terminal. If it asked you for something, "
+                f"leave the outcome in this session's answer; if it only "
+                f"informed you, no reply is needed]"
+            )
         blocks.append(f"{header}\n{message.text}")
     return "\n\n".join(blocks)
 

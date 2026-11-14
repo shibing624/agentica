@@ -252,8 +252,8 @@ def test_injected_guidance_does_not_unprotect_the_in_flight_call():
     there is no trailing ``role="tool"`` result to fold into — i.e. exactly
     while a call is in flight. That append used to become the "tail", so the
     cutoff moved above the assistant and its own unread payload was shrunk to
-    the placeholder. Observed live: a ``send_message`` payload reached the peer
-    as ``<evicted-tool-arg chars=1885>``.
+    the placeholder. Observed live in older sessions: an in-flight string tool
+    argument became ``<evicted-tool-arg chars=1885>``.
     """
     long = "W" * 300
     msgs = [
@@ -283,10 +283,10 @@ def test_injected_message_does_not_unprotect_a_packed_round():
     live_result = _result_body("claude-live")
     live_assistant = Message(
         role="assistant",
-        content=[{"type": "tool_use", "id": "live", "name": "send_message",
+        content=[{"type": "tool_use", "id": "live", "name": "write_note",
                   "input": {"message": long}}],
         tool_calls=[{"id": "live", "type": "function",
-                     "function": {"name": "send_message", "arguments": json.dumps({"message": long})}}],
+                     "function": {"name": "write_note", "arguments": json.dumps({"message": long})}}],
     )
     packed = Message(role="user", content=[
         {"type": "tool_result", "tool_use_id": "live", "content": live_result},

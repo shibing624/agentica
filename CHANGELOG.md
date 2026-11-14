@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | **`agentica.gateway` 别名包**（`python -m agentica.gateway.main`） | `agentica-gateway` 可执行文件或 `agentica_gateway` 包；较早的 Desktop 构建需先升级 Desktop |
 | **bundled skill `multi-agent`** | 无；`task` 的工具说明已覆盖 |
 
+- **收尾清理 1.6.0 遗留的模型可见文案与测试夹具**：`format_for_model()` 与 `ask_user_question` 的 system prompt 不再要求模型用已删除的 `send_message` 回报跨会话消息；结果改为留在本会话回答中，由用户 / cron / IM 投递侧读取。`agentica` skill 不再指向已删的 `multi-agent` skill，README 明确后台能力是 `execute(background=True)` + `wait` / `/ps`。同步清理测试里以 `delegate` / `send_message` 命名的死夹具；底层 `agentica.live.send_message` 投递函数、`PeerSession`、mailbox 与 `/list-agents` 保持不变。
+
 - **IM 远控命令 `/switch` 改为 `/project`（`项目`），`/resume` 改为 `/session`（`会话`）**：原 `/switch`（`切换`）与 `/resume`（`恢复`）命名不指明操作对象，已直接替换为 `/project`（别名 `/p`、`/projects`、`/workspace`、`项目`、`切换项目`、`切换工作区`）与 `/session`（别名 `/s`、`/sessions`、`会话`、`切换会话`、`会话列表`）；`/status` 保留全名与 `状态`（`/s` 归属 `/session`）（`gateway/src/agentica_gateway/services/im_bot/commands.py`）。
 
 #### features

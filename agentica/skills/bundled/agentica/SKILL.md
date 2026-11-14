@@ -132,7 +132,7 @@ worth more than a confident paragraph, because the user's installed version is
 the only version that matters. If `--help` and your memory disagree, `--help`
 is right and your memory is stale.
 
-For running more than one agentica at a time, or getting two sessions to talk,
-use the `multi-agent` skill instead. Isolating *this* session in a git
-worktree of the current repo is the `worktree` skill. Scheduling unattended
-jobs is the `cron` skill (the `cronjob` tool).
+To isolate *this* session in a git worktree of the current repo, use the
+`worktree` skill. Scheduling unattended jobs is the `cron` skill (the
+`cronjob` tool). Use `task` for read-only subagents and
+`execute(background=True)` for work that must keep running in the background.

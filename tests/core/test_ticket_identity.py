@@ -8,7 +8,7 @@ The rules these tests pin down, from the module docstring:
 2. It is a name, not a state machine: binding it changes no behaviour, and a
    reader that finds no ticket must report "unmanaged" rather than invent one.
 3. It survives a process boundary through the environment, which is the only
-   channel ``delegate`` has.
+   channel a headless child process has.
 """
 from __future__ import annotations
 
@@ -81,7 +81,7 @@ def test_bind_prefers_an_explicit_id_over_the_inherited_one():
 
 
 def test_the_environment_is_the_inheritance_channel(monkeypatch):
-    """A delegated child reads its parent's ticket from its environment."""
+    """A child process reads its parent's ticket from its environment."""
     monkeypatch.setenv(TICKET_ENV, "tk_fromparent")
     assert current_ticket_id() == "tk_fromparent"
     assert bind_ticket() == "tk_fromparent"

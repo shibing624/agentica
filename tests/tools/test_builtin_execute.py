@@ -654,8 +654,7 @@ class TestBuiltinExecuteTool:
             registry.wait_completed(timeout=0.01)
 
     def test_registry_passes_extra_env_to_the_child_without_replacing_it(self, tmp_dir):
-        """The delegate tool marks a worker's depth this way; the child still
-        needs the rest of the environment (PATH, API keys) to run at all."""
+        """A caller can pass extra environment to a child while keeping PATH and API keys."""
         registry = BackgroundProcessRegistry()
         script = 'import os; print(os.environ["DEPTH_MARKER"], "PATH" in os.environ)'
         command = f"{shlex.quote(sys.executable)} -c {shlex.quote(script)}"
@@ -666,9 +665,9 @@ class TestBuiltinExecuteTool:
         assert "1 True" in Path(item.log_path).read_text(encoding="utf-8")
 
     def test_a_multi_line_command_does_not_leak_into_the_output(self, tmp_dir):
-        """A delegated worker's command carries its whole task, newlines and all.
-        The log header has to stay one line or readers, which strip the header by
-        dropping a leading `$ ` line, hand the rest of it back as output."""
+        """A background command can contain newlines. The log header has to stay
+        one line or readers, which strip the header by dropping a leading `$ `
+        line, hand the rest of it back as output."""
         registry = BackgroundProcessRegistry()
         command = f"{shlex.quote(sys.executable)} -c {shlex.quote('print(1)')} # first line\\\n# second line"
 
@@ -677,20 +676,20 @@ class TestBuiltinExecuteTool:
 
         assert read_log_tail(item.log_path) == "1"
 
-    def test_a_delegated_process_is_counted_and_reported_as_one(self, tmp_dir):
+    def test_registry_tracks_a_tagged_process_by_kind(self, tmp_dir):
         registry = BackgroundProcessRegistry()
         command = f"{shlex.quote(sys.executable)} -c {shlex.quote('print(1)')}"
 
         registry.start(command, cwd=tmp_dir)
-        registry.start(command, cwd=tmp_dir, kind="delegate", label="parser port")
+        registry.start(command, cwd=tmp_dir, kind="worker", label="parser port")
         event_kinds = {
             registry.wait_completed(timeout=10).kind,
             registry.wait_completed(timeout=10).kind,
         }
 
-        assert registry.running_count(kind="delegate") == 0
-        assert [p.label for p in registry.list(include_finished=True, kind="delegate")] == ["parser port"]
-        assert event_kinds == {"command", "delegate"}
+        assert registry.running_count(kind="worker") == 0
+        assert [p.label for p in registry.list(include_finished=True, kind="worker")] == ["parser port"]
+        assert event_kinds == {"command", "worker"}
 
     def test_background_stop_tolerates_wait_after_sigkill_timeout(self):
         registry = BackgroundProcessRegistry()

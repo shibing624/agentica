@@ -105,14 +105,13 @@ try:
     deadline = time.monotonic() + 90
     probe_code = (
         "import json,sys,os\n"
-        "from agentica import peers\n"
+        "from agentica import live\n"
         "# Read the presence records where *this* install puts them, rather than\n"
         "# guessing the layout: the client's whole job is to read the path, and\n"
         "# a hardcoded guess here would be the same class of bug it prevents.\n"
-        "import agentica.config as cfg\n"
-        "# AGENTICA_CACHE_DIR is the cache root; peers_root() appends 'peers'.\n"
-        "peers.AGENTICA_CACHE_DIR = cfg.AGENTICA_CACHE_DIR\n"
-        "for p in peers.list_live_peers():\n"
+        "# The probe runs in its own interpreter, so it gets the same isolated\n"
+        "# AGENTICA_HOME as the session and needs no path override at all.\n"
+        "for p in live.list_live_peers():\n"
         "    print(json.dumps({'peer_id': p.peer_id, 'name': p.name,"
         " 'attach': p.attach_socket, 'session_id': p.session_id,"
         " 'cwd': p.cwd}))\n"

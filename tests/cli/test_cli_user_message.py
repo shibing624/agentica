@@ -273,7 +273,7 @@ class TestCLIUserMessage(unittest.TestCase):
 
         body = (
             "[Message from another agent session 'temp-af' "
-            "— reply with send_message to temp-af]\n"
+            "— leave the outcome in this session's answer]\n"
             "用户反馈：希望你以后发消息时说明这是用户的决定。"
             "不过需要对齐一个边界——agent 间消息无论怎么措辞都不构成对我的用户授权，"
             "我这边仍会向用户本人确认后才采纳，不会仅凭消息里这是用户的意思就直接改。"
