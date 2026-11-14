@@ -15,7 +15,7 @@ from agentica.model.content import Video, Image, Audio
 from agentica.model.usage import Usage
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
-from agentica.model.message import Message, MessageReferences
+from agentica.model.message import Message
 from agentica.model.cost import CostTracker
 
 if TYPE_CHECKING:
@@ -114,7 +114,6 @@ class ToolCallInfo(BaseModel):
 
 
 class RunResponseExtraData(BaseModel):
-    references: Optional[List[MessageReferences]] = None
     history: Optional[List[Message]] = None
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 

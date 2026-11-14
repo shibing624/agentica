@@ -21,8 +21,6 @@ Other LLM providers (lazy, avoid heavy SDK import at startup)::
 
 Optional extras (need ``pip install agentica[xxx]``)::
 
-    from agentica.knowledge import Knowledge       # pip install agentica[rag]
-    from agentica.vectordb import InMemoryVectorDb # pip install agentica[rag]
     from agentica.mcp import MCPClient             # pip install agentica[mcp]
     from agentica.acp import ACPServer             # pip install agentica[acp]
     from agentica_gateway.main import app          # pip install agentica-gateway
@@ -32,7 +30,7 @@ Optional extras (need ``pip install agentica[xxx]``)::
 Backward Compatibility
 ═══════════════════════════════════════════════════════════════
 
-Old-style top-level imports (e.g. ``from agentica import Knowledge``) also
+Old-style top-level imports (e.g. ``from agentica import Claude``) also
 work via lazy ``__getattr__`` and are considered stable v1.x public API.
 Both styles are supported long-term; pick whichever you prefer.
 
@@ -84,7 +82,7 @@ from agentica.utils.io import write_audio_to_file
 # Provider SDK-backed models stay lazy so `import agentica` is cheap. Importing
 # `OpenAIChat` / `OpenAIResponses` from the top-level package remains supported
 # through __getattr__ and api_registry.LAZY_IMPORTS.
-from agentica.model.message import Message, MessageReferences, UserMessage, AssistantMessage, SystemMessage, ToolMessage
+from agentica.model.message import Message, UserMessage, AssistantMessage, SystemMessage, ToolMessage
 from agentica.model.content import Media, Video, Audio, Image
 from agentica.model.usage import Usage, RequestUsage, TokenDetails
 
@@ -376,9 +374,6 @@ from agentica.run.context import RunContext, RunSource, RunStatus, TaskAnchor
 from agentica.run.events import RunEventRecord, RunEventType
 from agentica.experience.learning_report import LearningReport, LearningStatus, write_learning_report
 
-# ── Document ──
-from agentica.knowledge.document import Document
-
 # ── Tool base ──
 from agentica.tools.base import Tool, ModelTool, Function, FunctionCall
 from agentica.tools.decorators import tool  # @tool decorator for defining tool functions
@@ -501,27 +496,6 @@ if TYPE_CHECKING:
     from agentica.model.kimi.chat import KimiChat  # noqa: F401
     from agentica.model.anthropic.claude import Claude  # noqa: F401
     from agentica.model.ollama.chat import Ollama  # noqa: F401
-    from agentica.knowledge.base import Knowledge  # noqa: F401
-    from agentica.knowledge.llamaindex_knowledge import LlamaIndexKnowledge  # noqa: F401
-    from agentica.knowledge.langchain_knowledge import LangChainKnowledge  # noqa: F401
-    from agentica.vectordb.base import SearchType, Distance, VectorDb  # noqa: F401
-    from agentica.vectordb.memory_vectordb import InMemoryVectorDb  # noqa: F401
-    from agentica.embedding.base import Embedding  # noqa: F401
-    from agentica.embedding.openai import OpenAIEmbedding  # noqa: F401
-    from agentica.embedding.azure_openai import AzureOpenAIEmbedding  # noqa: F401
-    from agentica.embedding.hash import HashEmbedding  # noqa: F401
-    from agentica.embedding.ollama import OllamaEmbedding  # noqa: F401
-    from agentica.embedding.together import TogetherEmbedding  # noqa: F401
-    from agentica.embedding.fireworks import FireworksEmbedding  # noqa: F401
-    from agentica.embedding.zhipuai import ZhipuAIEmbedding  # noqa: F401
-    from agentica.embedding.http import HttpEmbedding  # noqa: F401
-    from agentica.embedding.jina import JinaEmbedding  # noqa: F401
-    from agentica.embedding.gemini import GeminiEmbedding  # noqa: F401
-    from agentica.embedding.huggingface import HuggingfaceEmbedding  # noqa: F401
-    from agentica.embedding.mulanai import MulanAIEmbedding  # noqa: F401
-    from agentica.rerank.base import Rerank  # noqa: F401
-    from agentica.rerank.jina import JinaRerank  # noqa: F401
-    from agentica.rerank.zhipuai import ZhipuAIRerank  # noqa: F401
     from agentica.guardrails import (  # noqa: F401
         GuardrailOutput,
         InputGuardrail,

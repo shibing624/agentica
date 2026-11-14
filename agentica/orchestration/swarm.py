@@ -73,7 +73,6 @@ def _clone_agent_for_task(source: Any) -> Any:
         description=source.description,
         instructions=source.instructions,
         tools=source.tools,                        # cloned by Agent._post_init() (Tool.clone())
-        knowledge=source.knowledge,
         workspace=source.workspace,
         work_dir=source.work_dir,
         response_model=source.response_model,

@@ -81,7 +81,6 @@ def _make_parent_agent(auxiliary_model=None):
             Function(name="task", entrypoint=lambda: None),
         ],
         workspace="workspace-ref",
-        knowledge="knowledge-ref",
         working_memory=working_memory,
         context={},
         _event_callback=None,
@@ -137,7 +136,6 @@ def test_spawn_applies_config_to_child_agent():
         tool_call_limit=7,
         can_spawn_subagents=False,
         inherit_workspace=True,
-        inherit_knowledge=True,
         inherit_context=True,
         timeout=5,
     )
@@ -157,7 +155,6 @@ def test_spawn_applies_config_to_child_agent():
     assert "parent summary" in init_kwargs["instructions"]
     assert [tool.name for tool in init_kwargs["tools"]] == ["read_file"]
     assert init_kwargs["workspace"] == "workspace-ref"
-    assert init_kwargs["knowledge"] == "knowledge-ref"
     assert init_kwargs["tool_config"].tool_call_limit == 7
     assert init_kwargs["context"]["_subagent_depth"] == 1
     assert init_kwargs["context"]["_can_spawn_subagents"] is False

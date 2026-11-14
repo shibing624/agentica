@@ -12,7 +12,6 @@ timeout: 1800
 can_spawn_subagents: false
 inherit_context: true
 inherit_workspace: false
-inherit_knowledge: false
 ---
 You are a read-only code explainer. You describe how code works; you do not modify it and you do not pass judgement on it.
 

@@ -6,7 +6,6 @@ part of the code is from phidata
 """
 from typing import Union, List
 import json
-from agentica.knowledge.document import Document
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
@@ -31,7 +30,7 @@ class WikipediaTool(Tool):
             raise ImportError(
                 "The `wikipedia` package is not installed. " "Please install it via `pip install wikipedia`."
             )
-        data = Document(name=query, content=wikipedia.summary(query)).to_dict()
+        data = {"name": query, "content": wikipedia.summary(query)}
         logger.info(f"Searching wikipedia for: {query}, result: {data}")
         return json.dumps(data, ensure_ascii=False, indent=2)
 

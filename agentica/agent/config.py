@@ -52,7 +52,6 @@ class PromptConfig:
     expected_output: Optional[str] = None
     additional_context: Optional[str] = None
     introduction: Optional[str] = None
-    references_format: Literal["json", "yaml"] = "json"
 
     # Prompt behavior switches
     add_name_to_instructions: bool = False
@@ -87,11 +86,6 @@ class ToolConfig:
     tool_call_limit: Optional[int] = None
     tool_choice: Optional[Union[str, Dict[str, Any]]] = None
     auto_load_mcp: bool = False
-    # Knowledge tools
-    search_knowledge: bool = True
-    update_knowledge: bool = False
-    # References
-    add_references: bool = False
     # Compression. The manager is always constructed (for /compact and
     # cross-provider fallback); these two flags gate the *automatic* path.
     # Both default on. Layer 0 (tool-result budget) is an output policy,

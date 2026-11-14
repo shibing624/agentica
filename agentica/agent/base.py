@@ -11,7 +11,7 @@ Architecture:
 - Multi-modal: images/videos/audio passed as run() parameters, not stored on Agent
 
 Parameters organized in three layers:
-1. Core definition (~10): model, name, instructions, tools, knowledge, etc.
+1. Core definition (~10): model, name, instructions, tools, etc.
 2. Common config (~5): add_history_to_context, debug, enable_tracing, etc.
 3. Packed config (3): PromptConfig, ToolConfig, WorkspaceMemoryConfig
 """
@@ -127,7 +127,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
     2. Common config (~5): add_history_to_context, debug, etc.
     3. Packed config (3): prompt_config, tool_config, long_term_memory_config
 
-    For output_language, markdown, search_knowledge etc., set them via
+    For output_language, markdown etc., set them via
     prompt_config=PromptConfig(...) or tool_config=ToolConfig(...).
 
     Example - Minimal:
@@ -140,7 +140,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         ...     model=OpenAIChat(id="gpt-4o"),
         ...     instructions="You are a data analyst.",
         ...     tools=[web_search, calculator],
-        ...     knowledge=my_knowledge,
         ...     response_model=AnalysisReport,
         ...     prompt_config=PromptConfig(markdown=True, output_language="Chinese"),
         ... )
@@ -176,7 +175,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
     description: Optional[str] = None
     instructions: Optional[Union[str, List[str], Callable]] = None
     tools: Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]] = None
-    knowledge: Optional[Any] = None  # Knowledge type
     workspace: Optional[Any] = None  # Workspace type
     user_id: Optional[str] = None
     work_dir: Optional[str] = None  # Working directory for file operations (used by builtin tools)
@@ -335,7 +333,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         description: Optional[str] = None,
         instructions: Optional[Union[str, List[str], Callable]] = None,
         tools: Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]] = None,
-        knowledge: Optional[Any] = None,
         workspace: Optional[Union[Any, str]] = None,  # Workspace or str path
         user_id: Optional[str] = None,  # User ID for multi-user workspace isolation
         work_dir: Optional[str] = None,  # Working directory for file operations
@@ -384,7 +381,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             description=description,
             instructions=instructions,
             tools=tools,
-            knowledge=knowledge,
             workspace=workspace,
             user_id=user_id,
             work_dir=work_dir,
@@ -446,7 +442,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         description: Optional[str],
         instructions: Optional[Union[str, List[str], Callable]],
         tools: Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]],
-        knowledge: Optional[Any],
         workspace: Optional[Union[Any, str]],
         user_id: Optional[str],
         work_dir: Optional[str],
@@ -468,7 +463,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self.description = description
         self.instructions = instructions
         self.tools = tools
-        self.knowledge = knowledge
         self.response_model = response_model
         self.work_dir = work_dir
         self.enable_long_term_memory = enable_long_term_memory
@@ -1444,7 +1438,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
     def clone(self) -> "Agent":
         """Create a lightweight clone of this Agent for concurrent execution.
 
-        Shares heavy config (tools, instructions, knowledge) but creates a
+        Shares heavy config (tools, instructions) but creates a
         fresh Model instance and resets all mutable runtime state.
         Safe for parallel asyncio.gather() calls.
         """

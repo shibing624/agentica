@@ -37,7 +37,6 @@ nav:
       - 模型与提供商: concepts/model.md
       - 工具与自定义工具: concepts/tools.md
       - 记忆与常驻规则: concepts/memory.md
-      - 知识库 (RAG): concepts/rag.md
       - 存储与数据库: concepts/storage.md
   - 多智能体与协作:
       - 如何选择协作方式: multi-agent/choosing.md
