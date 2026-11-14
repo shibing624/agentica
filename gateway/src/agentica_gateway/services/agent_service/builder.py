@@ -108,6 +108,10 @@ class AgentBuilderMixin:
         # The auxiliary model also serves as the task subagent model (CLI
         # unified them — no separate task_model config anymore).
         task_model = auxiliary_model
+        # Auto-tier review: profile auto_review_model block, else the auxiliary
+        # model, else the main model (Agent.resolve_auxiliary_model order).
+        review_model = self._sibling_model(cfg, "auto_review")
+        auxiliary_task_models = {"auto_review": review_model} if review_model is not None else None
         fallback_models = self._fallback_models(cfg)
         max_api_retry = int(cfg.get("max_api_retry") or 2)
         work_dir = self.get_session_work_dir(session_id, owner)
@@ -150,6 +154,7 @@ class AgentBuilderMixin:
             model=model,
             auxiliary_model=auxiliary_model,
             task_model=task_model,
+            auxiliary_task_models=auxiliary_task_models,
             session_profile=cfg.get("profile") or None,
             fallback_models=fallback_models,
             max_api_retry=max_api_retry,

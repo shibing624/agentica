@@ -30,6 +30,9 @@ PROFILES = {
             "model_provider": "deepseek", "model_name": "deepseek-chat", "api_key": "k-fast",
             "reasoning_effort": "high",
             "auxiliary_model": {"model_name": "deepseek-lite"},
+            "auto_review_model": {
+                "model_provider": "zhipuai", "model_name": "glm-4.7-flash", "api_key": "k-review",
+            },
         },
         "proj": {"model_provider": "openai", "model_name": "gpt-4o-mini"},
         "cached_proxy": {
@@ -89,6 +92,10 @@ def test_picking_a_model_changes_only_that_chat(svc):
     assert a["api_key"] == "k-fast" and a["reasoning_effort"] == "high"
     # Same provider: the auxiliary model reuses the main endpoint and key.
     assert (a["auxiliary_model_name"], a["auxiliary_api_key"]) == ("deepseek-lite", "k-fast")
+    # The auto-tier reviewer model is a cross-provider override: its own key,
+    # never the main model's.
+    assert (a["auto_review_model_provider"], a["auto_review_model_name"]) == ("zhipuai", "glm-4.7-flash")
+    assert a["auto_review_api_key"] == "k-review"
     assert svc.session_profile_source("a") == "session"
     # The other chat in the same project, and the gateway default, did not move.
     assert svc.session_profile_source("b") == "default"
@@ -216,17 +223,25 @@ def test_gateway_forwards_profile_cache_control_and_headers_to_model(svc):
 
 def test_build_agent_creates_the_main_model_from_the_session_profile(svc, monkeypatch):
     calls = _built(svc, monkeypatch)
+    built = {}
     asyncio.run(svc.set_session_profile("a", "fast"))
-    monkeypatch.setattr(
-        svc_mod, "DeepAgent",
-        lambda **kw: SimpleNamespace(**{**kw, "tools": [], "_session_log": None}),
-    )
+
+    def fake_deep_agent(**kw):
+        built.update(kw)
+        return SimpleNamespace(**{**kw, "tools": [], "_session_log": None})
+
+    monkeypatch.setattr(svc_mod, "DeepAgent", fake_deep_agent)
     svc._workspace = None
     svc._build_agent("a")
     provider, name, kw = calls[0]
     assert (provider, name) == ("deepseek", "deepseek-chat")
     assert kw["api_key"] == "k-fast" and kw["reasoning_effort"] == "high"
     assert calls[1][:2] == ("deepseek", "deepseek-lite")  # auxiliary from the same profile
+    # The profile's auto_review_model block is built and handed over as the
+    # auto-tier reviewer's model.
+    assert calls[2][:2] == ("zhipuai", "glm-4.7-flash")
+    assert calls[2][2]["api_key"] == "k-review"
+    assert built["auxiliary_task_models"]["auto_review"].id == "glm-4.7-flash"
 
 
 def test_a_pick_mid_run_waits_for_the_run(svc, monkeypatch):

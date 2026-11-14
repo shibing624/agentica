@@ -4,10 +4,17 @@
 @description: LLM review of one tool call that would otherwise ask a human.
 
 The ``auto`` permission tier is the approval tier: its static classifier knows
-a call needs a decision, and this reviewer makes that decision with the agent's
-own model instead of a human. It is an approval replacement, not a sandbox — it
-restricts nothing and it never runs a call on its own; it answers the one
-question the approval card would have asked.
+a call needs a decision, and this reviewer makes that decision with a model
+instead of a human. It is an approval replacement, not a sandbox — it restricts
+nothing and it never runs a call on its own; it answers the one question the
+approval card would have asked.
+
+The model is the agent's auxiliary model (the same cheap one background calls
+use), falling back to the main model when no auxiliary model is configured.
+``auto_review`` is a normal ``resolve_auxiliary_model`` task key, so an SDK
+caller can point the review at any other LLM with
+``auxiliary_task_models={"auto_review": model}``, and the CLI / Gateway expose
+the same override as a profile ``auto_review_model:`` block.
 
 Two rules keep it honest:
 
@@ -219,7 +226,8 @@ class ToolCallReviewer:
         started = time.monotonic()
         config = getattr(self._agent, "tool_config", None)
         timeout = float(getattr(config, "auto_review_timeout", 0.0) or 0.0)
-        model = getattr(self._agent, "model", None)
+        resolve = getattr(self._agent, "resolve_auxiliary_model", None)
+        model = resolve("auto_review") if resolve is not None else getattr(self._agent, "model", None)
         if model is None:
             return _failed("no model available for the auto review", started=started)
         model_id = str(getattr(model, "id", "") or "")

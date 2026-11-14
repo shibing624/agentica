@@ -1002,6 +1002,10 @@ def create_agent(
     # The task subagent tool shares the auxiliary model (one cheap model for all
     # non-user-facing LLM work), so the CLI exposes only main + auxiliary.
     task_model = auxiliary_model
+    # Auto-tier review: profile ``auto_review_model`` block, else the auxiliary
+    # model, else the main model (Agent.resolve_auxiliary_model order).
+    review_model = _build_sibling_model(agent_config, "auto_review")
+    auxiliary_task_models = {"auto_review": review_model} if review_model is not None else None
     # Cross-provider fallback chain (resilience): built from the resolved flat
     # dicts in agent_config["fallback_models"]. [] when none configured.
     fallback_models = _build_fallback_models(agent_config)
@@ -1112,6 +1116,7 @@ def create_agent(
         model=model,
         auxiliary_model=auxiliary_model,
         task_model=task_model,
+        auxiliary_task_models=auxiliary_task_models,
         session_profile=agent_config.get("profile_name") or None,
         fallback_models=fallback_models,
         max_api_retry=max_api_retry,

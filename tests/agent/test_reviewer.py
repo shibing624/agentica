@@ -45,9 +45,18 @@ class _FakeModel:
         return self.side
 
 
-def _agent(*, side, timeout=5.0, enabled=True, messages=None, work_dir="/tmp/agentica-review-wd"):
-    return SimpleNamespace(
-        model=_FakeModel(side),
+def _agent(*, side, timeout=5.0, enabled=True, messages=None, work_dir="/tmp/agentica-review-wd", aux=None):
+    main = _FakeModel(side)
+    tasks = []
+
+    def resolve(task):
+        tasks.append(task)
+        return aux if aux is not None else main
+
+    agent = SimpleNamespace(
+        model=main,
+        tasks=tasks,
+        resolve_auxiliary_model=resolve,
         tool_config=SimpleNamespace(
             enable_auto_review=enabled, auto_review_timeout=timeout,
         ),
@@ -58,6 +67,7 @@ def _agent(*, side, timeout=5.0, enabled=True, messages=None, work_dir="/tmp/age
         ),
         work_dir=work_dir,
     )
+    return agent
 
 
 def _fc(name="write_file", arguments=None):
@@ -158,6 +168,29 @@ async def test_trace_is_json_safe_and_note_is_human_facing():
     assert trace["reason"] == "secrets"
     assert trace["failed"] is None
     assert "deny (risk=high)" in outcome.note()
+
+
+async def test_reviewer_uses_the_auxiliary_task_hook():
+    aux_side = _FakeSide('{"risk":"low","decision":"allow"}')
+    agent = _agent(side="", aux=_FakeModel(aux_side))
+    outcome = await ToolCallReviewer(agent).review(_fc())
+    assert outcome.decision == "allow"
+    assert agent.tasks == ["auto_review"]
+    assert aux_side.closed is True
+
+
+async def test_agent_resolves_auto_review_aux_then_main():
+    from unittest.mock import MagicMock
+
+    from agentica.agent import Agent
+
+    main, aux, review = MagicMock(), MagicMock(), MagicMock()
+    plain = Agent(model=main)
+    assert plain.resolve_auxiliary_model("auto_review") is main
+    with_aux = Agent(model=main, auxiliary_model=aux)
+    assert with_aux.resolve_auxiliary_model("auto_review") is aux
+    explicit = Agent(model=main, auxiliary_model=aux, auxiliary_task_models={"auto_review": review})
+    assert explicit.resolve_auxiliary_model("auto_review") is review
 
 
 async def test_agent_skips_the_reviewer_when_disabled(monkeypatch):

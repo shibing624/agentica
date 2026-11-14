@@ -27,6 +27,33 @@ def _pkg():
     return sys.modules["agentica_gateway.services.agent_service"]
 
 
+def _sibling_model_fields(
+    block: Any, prefix: str, provider: str, base_url: str, api_key: str,
+) -> Dict[str, Any]:
+    """Flat ``{prefix}_*`` fields for one profile sibling-model block.
+
+    Same provider as main inherits the main endpoint/key for omitted fields; a
+    different provider keeps its own (empty means its preset / env var), never
+    the main key.
+    """
+    block = block if isinstance(block, dict) else {}
+    named = bool(block.get("model_name"))
+    sibling_provider = block.get("model_provider") or provider
+    same = sibling_provider == provider
+    wire_api = block.get("wire_api") or ""
+    return {
+        f"{prefix}_model_provider": sibling_provider if named else "",
+        f"{prefix}_model_name": block.get("model_name") or "",
+        f"{prefix}_base_url": block.get("base_url") or (base_url if same else ""),
+        f"{prefix}_api_key": block.get("api_key") or (api_key if same else ""),
+        f"{prefix}_wire_api": wire_api,
+        f"{prefix}_reasoning": block.get("reasoning") or "",
+        f"{prefix}_reasoning_effort": "" if wire_api == "responses" else (block.get("reasoning_effort") or ""),
+        f"{prefix}_extra_body": dict(block["extra_body"]) if isinstance(block.get("extra_body"), dict) else None,
+        f"{prefix}_extra_headers": dict(block["extra_headers"]) if isinstance(block.get("extra_headers"), dict) else None,
+    }
+
+
 def _profile_model_config(name: str, profile: Dict[str, Any]) -> Dict[str, Any]:
     """One config.yaml profile as the flat model config the agent is built from.
 
@@ -35,14 +62,9 @@ def _profile_model_config(name: str, profile: Dict[str, Any]) -> Dict[str, Any]:
     auxiliary block inherits the main endpoint only on the same provider.
     """
     wire_api = profile.get("wire_api") or ""
-    aux = profile.get("auxiliary_model")
-    aux = aux if isinstance(aux, dict) else {}
     provider = profile["model_provider"]
     base_url = profile.get("base_url") or ""
     api_key = profile.get("api_key") or ""
-    aux_provider = aux.get("model_provider") or provider
-    same = aux_provider == provider
-    aux_wire_api = aux.get("wire_api") or ""
     raw_fallbacks = profile.get("fallback_models")
     fallbacks: List[Dict[str, Any]] = []
     if isinstance(raw_fallbacks, list):
@@ -72,15 +94,12 @@ def _profile_model_config(name: str, profile: Dict[str, Any]) -> Dict[str, Any]:
         "default_headers": dict(profile["default_headers"]) if isinstance(profile.get("default_headers"), dict) else None,
         "fallback_models": fallbacks,
         "max_api_retry": int(max_api_retry) if max_api_retry is not None else 2,
-        "auxiliary_model_provider": aux_provider if aux.get("model_name") else "",
-        "auxiliary_model_name": aux.get("model_name") or "",
-        "auxiliary_base_url": aux.get("base_url") or (base_url if same else ""),
-        "auxiliary_api_key": aux.get("api_key") or (api_key if same else ""),
-        "auxiliary_wire_api": aux_wire_api,
-        "auxiliary_reasoning": aux.get("reasoning") or "",
-        "auxiliary_reasoning_effort": "" if aux_wire_api == "responses" else (aux.get("reasoning_effort") or ""),
-        "auxiliary_extra_body": dict(aux["extra_body"]) if isinstance(aux.get("extra_body"), dict) else None,
-        "auxiliary_extra_headers": dict(aux["extra_headers"]) if isinstance(aux.get("extra_headers"), dict) else None,
+        **_sibling_model_fields(
+            profile.get("auxiliary_model"), "auxiliary", provider, base_url, api_key,
+        ),
+        **_sibling_model_fields(
+            profile.get("auto_review_model"), "auto_review", provider, base_url, api_key,
+        ),
     }
 
 

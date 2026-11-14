@@ -685,6 +685,54 @@ class TestResolveFallbackModels(_CliSetupTestBase):
         self.assertEqual(resolved["fallback_models"][0]["model_name"], "glm-4.7-flash")
 
 
+class TestResolveAutoReviewModel(_CliSetupTestBase):
+    """The auto tier's reviewer model: aux by default, profile block to override."""
+
+    def _profile(self, **extra):
+        self._write_profile({
+            "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com", "api_key": "sk-main",
+            **extra,
+        })
+
+    def test_no_block_means_no_override(self):
+        self._profile()
+        resolved = cli_setup.resolve_model_config(_make_args(), console=None)
+        for key in ("auto_review_model_name", "auto_review_model_provider",
+                    "auto_review_base_url", "auto_review_api_key"):
+            self.assertIsNone(resolved[key], key)
+
+    def test_same_provider_block_inherits_main_endpoint_and_key(self):
+        self._profile(auto_review_model={"model_name": "deepseek-chat"})
+        resolved = cli_setup.resolve_model_config(_make_args(), console=None)
+        self.assertEqual(resolved["auto_review_model_provider"], "deepseek")
+        self.assertEqual(resolved["auto_review_model_name"], "deepseek-chat")
+        self.assertEqual(resolved["auto_review_base_url"], "https://api.deepseek.com")
+        self.assertEqual(resolved["auto_review_api_key"], "sk-main")
+
+    def test_cross_provider_block_uses_its_own_endpoint_and_key(self):
+        self._profile(auto_review_model={
+            "model_provider": "zhipuai", "model_name": "glm-4.7-flash", "api_key": "sk-zhipu",
+        })
+        resolved = cli_setup.resolve_model_config(_make_args(), console=None)
+        self.assertEqual(resolved["auto_review_model_provider"], "zhipuai")
+        self.assertEqual(resolved["auto_review_base_url"], cli_setup.default_base_url("zhipuai"))
+        self.assertEqual(resolved["auto_review_api_key"], "sk-zhipu")
+        self.assertNotEqual(resolved["auto_review_api_key"], "sk-main")
+
+    def test_named_profile_carries_the_review_block(self):
+        self._write_profile({
+            "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com", "api_key": "sk-main",
+            "auto_review_model": {"model_provider": "zhipuai", "model_name": "glm-4.7-flash",
+                                   "api_key": "sk-z"},
+        }, name="work")
+        resolved = cli_setup.resolve_named_profile_config("work")
+        self.assertEqual(resolved["auto_review_model_name"], "glm-4.7-flash")
+        self.assertEqual(resolved["auto_review_model_provider"], "zhipuai")
+        self.assertEqual(resolved["auto_review_api_key"], "sk-z")
+
+
 class TestShouldOnboard(_CliSetupTestBase):
     def _tty(self):
         return patch.multiple(
