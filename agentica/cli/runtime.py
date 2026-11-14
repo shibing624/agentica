@@ -1076,8 +1076,6 @@ def create_agent(
     # Use DeepAgent for full-featured CLI experience.
     from agentica.agent.deep import DeepAgent
     from agentica.tools.skill_tool import SkillTool
-    from agentica.tools.self_manage_tool import SelfManageTool, CLI_RESTART_HINT
-    from agentica.tools.cron_tool import CronTool
 
     # Immediate-run executor for the cronjob tool: builds a fresh CLI agent per
     # run (mirrors the `/cron run` command) so `action='run'` is a real trial run
@@ -1096,21 +1094,25 @@ def create_agent(
 
         cron_job_runner = _cron_job_runner
 
-    # Always give the CLI agent the self-management + cron tools so it can
-    # inspect/optimize its own config (config.yaml / .env), self-upgrade, and
-    # schedule/manage its own recurring tasks by natural language. Prepended so a
-    # user-supplied extra tool with the same name could still override.
-    cli_tools = [
-        SelfManageTool(restart_hint=CLI_RESTART_HINT),
-        CronTool(job_runner=cron_job_runner),
-    ] + list(extra_tools or [])
+    # Product surfaces share one tool set; the CLI passes only its local
+    # session config and callbacks. ``worktree_binder`` is the CLI-owned
+    # instance so /worktree, --worktree and the model tool see the same state.
+    from agentica.tools.product import build_product_tools
 
-    # A per-task checkout the agent can move this session into on its own, for
-    # when another session is dirty in the same directory.
+    from agentica.cli.session_resume import enter_work_dir as _enter_work_dir
+
+    cli_tools = build_product_tools(
+        surface="cli",
+        work_dir=work_dir,
+        agent_config=agent_config,
+        cron_job_runner=cron_job_runner,
+        extra_tools=list(extra_tools or []),
+        enter_work_dir=_enter_work_dir,
+    )
     if worktree_binder is not None:
-        from agentica.tools.worktree_tool import WorktreeTool
-
-        cli_tools.insert(0, WorktreeTool(worktree_binder))
+        for tool in cli_tools:
+            if tool.name == "worktree_tool":
+                tool._binder = worktree_binder
 
     new_agent = DeepAgent(
         model=model,

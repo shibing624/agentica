@@ -50,7 +50,7 @@ from .services.scheduler_service import GatewayCronRunner, GatewayScheduler
 from .services.channel_manager import ChannelManager
 from .services.im_bot import ImBotController
 from .services.router import MessageRouter
-from .routes import auth as auth_routes, chat, settings as settings_routes, scheduler as scheduler_routes, channels, ws, plugins as plugins_routes, traces as traces_routes, workspace as workspace_routes, terminals as terminal_routes, git as git_routes
+from .routes import auth as auth_routes, chat, settings as settings_routes, scheduler as scheduler_routes, channels, ws, plugins as plugins_routes, traces as traces_routes, workspace as workspace_routes, terminals as terminal_routes, git as git_routes, worktree as worktree_routes
 from .terminals import manager as terminal_manager
 
 # ContextVar holding the current request ID — async-safe, no threading issues
@@ -503,6 +503,7 @@ app.include_router(chat.router)
 app.include_router(workspace_routes.router)
 app.include_router(terminal_routes.router)
 app.include_router(git_routes.router)
+app.include_router(worktree_routes.router)
 app.include_router(traces_routes.router)
 app.include_router(scheduler_routes.router)
 app.include_router(plugins_routes.router)

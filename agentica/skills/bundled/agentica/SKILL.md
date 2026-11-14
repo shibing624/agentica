@@ -13,10 +13,11 @@ metadata:
 
 # Driving agentica
 
-You are almost certainly running inside an agentica CLI session right now. This
-skill tells you **where to look things up**, not what the answers are: flags,
-commands and tool names change with every release, so anything written down
-here would start lying within weeks.
+The same harness runs behind the CLI, Web, Desktop, IM and headless surfaces.
+This skill tells you **where to look things up**, not what the answers are:
+flags, commands and tool names change with every release, so anything written
+down here would start lying within weeks. The built-in tool and skill catalogue
+is shared; a surface only changes how a human invokes it.
 
 ## Rule 1: look it up, do not recall
 
@@ -24,10 +25,10 @@ Three live sources, in the order you should reach for them:
 
 | Question | Source | How you read it |
 |---|---|---|
-| What can the command line do? | `agentica --help` | `execute` |
+| What can the command line do? | `agentica --help` | `execute` (CLI / headless) |
 | How is this machine configured? | your own config | `self_manage(action="show")` |
 | What is on disk, exactly? | `~/.agentica/config.yaml` | `read_file` |
-| What is this session doing? | slash commands | **ask the user to type it** |
+| What is this session doing? | the surface's status/help outlet | **ask the user to use it** |
 
 `agentica --help` is generated from the parser, so it is never out of date. It
 is the authoritative answer for every flag, every subcommand and every value an
@@ -36,12 +37,14 @@ option accepts. Read it before answering any "can agentica ...?" question.
 ## Rule 2: you cannot type slash commands
 
 `/help`, `/status`, `/model`, `/tools`, `/skills`, `/resume`, `/permissions` and
-the rest are handled by the CLI's input loop, before anything reaches you. A
+the rest are handled by the client input loop, before anything reaches you. A
 slash command in your reply is just text, and a slash command inside a peer
-message is just text too.
+message is just text too. Web/Desktop may show some of these as menu entries;
+IM has its own command set.
 
-When the answer lives behind one, say which one the user should type. `/help`
-lists all of them and is the source of truth for what exists.
+When the answer lives behind one, say which one the user should use on their
+surface. CLI `/help` lists the terminal commands; Web/Desktop/IM help is the
+source of truth for their outlets.
 
 ## The map
 

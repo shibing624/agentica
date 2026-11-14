@@ -16,9 +16,9 @@ after(() => vite.close());
 const S = {
   cmdGroupAdd: "添加", cmdGroupCommands: "指令", cmdGroupSkills: "技能",
   cmdFile: "文件", cmdSkill: "技能", cmdGoal: "目标", cmdQueue: "排队", cmdCompact: "压缩",
-  cmdPermission: "权限", cmdModel: "模型", cmdExport: "下载日志",
+  cmdPermission: "权限", cmdModel: "模型", cmdExport: "下载日志", cmdWorktree: "工作树",
   slashGoal: "g", slashQueue: "q", slashCompact: "c",
-  cmdPermissionDesc: "p", cmdModelDesc: "m", cmdExportDesc: "e",
+  cmdPermissionDesc: "p", cmdModelDesc: "m", cmdExportDesc: "e", cmdWorktreeDesc: "w",
 };
 const skills = [
   { name: "paper-analysis", slash: "/paper-analysis", description: "论文" },
@@ -31,13 +31,19 @@ const ids = (groups) => flatItems(groups).map((it) => it.id || it.cmd);
 test("+ menu: add (file, skill picker, goal), then commands (compact, permission, model, export); no plan or feedback", () => {
   const g = plusMenuGroups(S);
   assert.deepEqual(g.map((x) => x.title), ["添加", "指令"]);
-  assert.deepEqual(ids(g), ["file", "skill", "goal", "compact", "permission", "model", "export"]);
+  assert.deepEqual(ids(g), ["file", "skill", "goal", "compact", "permission", "model", "export", "worktree"]);
 });
 
 test("bare / lists every command, then only invocable skills", () => {
   const g = slashMenuGroups("/", skills, S);
   assert.deepEqual(g.map((x) => x.title), ["指令", "技能"]);
-  assert.deepEqual(ids(g), ["goal", "queue", "compact", "permission", "model", "export", "/paper-analysis", "/handoff"]);
+  assert.deepEqual(ids(g), ["goal", "queue", "compact", "permission", "model", "export", "worktree", "/paper-analysis", "/handoff"]);
+});
+
+test("the worktree command is a real built-in command, not a skill prefix", () => {
+  const found = flatItems(slashMenuGroups("/worktree", skills, S)).find((it) => it.id === "worktree");
+  assert.equal(found?.cmd, "/worktree");
+  assert.equal(found?.kind, "command");
 });
 
 test("/ filters commands and skills by prefix; empty groups disappear", () => {

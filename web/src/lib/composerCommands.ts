@@ -1,7 +1,7 @@
 /** Composer commands, shared by the `+` menu and the `/` menu so the two never
  *  drift (same ids, labels, order). Pure; ChatPage runs them. */
 
-export type CommandId = "file" | "skill" | "goal" | "queue" | "compact" | "permission" | "model" | "export";
+export type CommandId = "file" | "skill" | "goal" | "queue" | "compact" | "permission" | "model" | "export" | "worktree";
 
 export type CommandStrings = {
   cmdGroupAdd: string;
@@ -15,12 +15,14 @@ export type CommandStrings = {
   cmdPermission: string;
   cmdModel: string;
   cmdExport: string;
+  cmdWorktree: string;
   slashGoal: string;
   slashQueue: string;
   slashCompact: string;
   cmdPermissionDesc: string;
   cmdModelDesc: string;
   cmdExportDesc: string;
+  cmdWorktreeDesc: string;
 };
 
 export type MenuItem = {
@@ -38,11 +40,12 @@ export type MenuGroup = { title: string; items: MenuItem[] };
 function command(id: CommandId, S: CommandStrings): MenuItem {
   const label: Record<CommandId, string> = {
     file: S.cmdFile, skill: S.cmdSkill, goal: S.cmdGoal, queue: S.cmdQueue, compact: S.cmdCompact,
-    permission: S.cmdPermission, model: S.cmdModel, export: S.cmdExport,
+    permission: S.cmdPermission, model: S.cmdModel, export: S.cmdExport, worktree: S.cmdWorktree,
   };
   const desc: Record<CommandId, string> = {
     file: "", skill: "", goal: S.slashGoal, queue: S.slashQueue, compact: S.slashCompact,
     permission: S.cmdPermissionDesc, model: S.cmdModelDesc, export: S.cmdExportDesc,
+    worktree: S.cmdWorktreeDesc,
   };
   return { key: "cmd:" + id, id, cmd: "/" + id, label: label[id], desc: desc[id], kind: "command" };
 }
@@ -51,7 +54,7 @@ function command(id: CommandId, S: CommandStrings): MenuItem {
 export function plusMenuGroups(S: CommandStrings): MenuGroup[] {
   return [
     { title: S.cmdGroupAdd, items: (["file", "skill", "goal"] as const).map((id) => command(id, S)) },
-    { title: S.cmdGroupCommands, items: (["compact", "permission", "model", "export"] as const).map((id) => command(id, S)) },
+    { title: S.cmdGroupCommands, items: (["compact", "permission", "model", "export", "worktree"] as const).map((id) => command(id, S)) },
   ];
 }
 
@@ -77,7 +80,7 @@ export function slashMenuGroups(query: string, skills: Array<Record<string, any>
   const hit = (it: MenuItem) => !q
     || it.cmd.slice(1).toLowerCase().startsWith(q)
     || it.label.toLowerCase().startsWith(q);
-  const commands = (["goal", "queue", "compact", "permission", "model", "export"] as const)
+  const commands = (["goal", "queue", "compact", "permission", "model", "export", "worktree"] as const)
     .map((id) => command(id, S)).filter(hit);
   const skill = skillItems(skills).filter(hit);
   return [

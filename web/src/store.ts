@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 import * as api from "./api";
-import type { Automation } from "./api";
+import type { Automation, WorktreeState } from "./api";
 import { sessionStatsCache, type SessionStats } from "./lib/sessionCache";
 import { createViewStore } from "./lib/sessionView";
 import { readBusyEnter, type BusyEnterBehavior } from "./lib/composerSubmission";
@@ -281,6 +281,16 @@ export type AppState = {
   mcpForm: McpForm | null;
   settingsTab: string;
   settingsModal: { open: boolean };
+  worktreePanel: {
+    open: boolean;
+    loading: boolean;
+    busy: boolean;
+    error: string;
+    output: string;
+    name: string;
+    base: string;
+    state: WorktreeState | null;
+  };
   profileForm: ProfileForm | null;
   /** This account's automations, for the sidebar badge and the chat links. */
   cronJobs: Automation[];
@@ -420,6 +430,16 @@ const state: AppState = {
   mcpForm: null,
   settingsTab: "settings",
   settingsModal: { open: false },
+  worktreePanel: {
+    open: false,
+    loading: false,
+    busy: false,
+    error: "",
+    output: "",
+    name: "",
+    base: "",
+    state: null,
+  },
   profileForm: null,
   cronJobs: [],
   sidebarSearch: "",

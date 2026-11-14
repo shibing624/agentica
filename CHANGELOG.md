@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### added
+
+- **多端 worktree 对齐**：`worktree` 工具从 CLI 专属改为统一产品工具面，CLI / Web / Desktop / IM / headless / cron 共用同一套内置能力；Web/Desktop 的 `/worktree` 面板可对当前 session 执行 `status` / `bind` / `new` / `merge` / `remove`，不再需要手写 Python 调用 `agentica.git.worktree.ensure()`。内置 skill catalog 仍是一份，不按端裁剪。
+
 #### breaking
 
 本版把不属于 harness 的模块一次性删掉，**不加 DeprecationWarning、不留兼容 shim**。升级前请对照下表改代码；旧会话日志（JSONL）可以照常 `--resume`，里面残留的旧字段读取时被忽略、不会再发给模型。
