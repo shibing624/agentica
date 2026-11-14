@@ -7,7 +7,6 @@
 from typing import Dict, List, Any, Optional, Tuple
 from pydantic import BaseModel, ConfigDict
 
-from agentica.db.base import BASE64_PLACEHOLDER, clean_media_placeholders
 from agentica.compression.token_budget import is_pending_window_preamble
 from agentica.model.message import Message
 from agentica.utils.log import logger
@@ -31,72 +30,16 @@ def _content_has_text(content: Any) -> bool:
     return bool(content)
 
 
-def _clean_content_list(content_list: list) -> list:
-    """Clean a list-type content by removing BASE64 placeholder items."""
-    cleaned = []
-    for item in content_list:
-        if isinstance(item, dict):
-            item_type = item.get("type", "")
-            if item_type == "image_url":
-                image_url_data = item.get("image_url", {})
-                url = image_url_data.get("url", "") if isinstance(image_url_data, dict) else ""
-                if BASE64_PLACEHOLDER in str(url):
-                    continue
-            elif item_type == "input_audio":
-                audio_data = item.get("input_audio", {})
-                data = audio_data.get("data", "") if isinstance(audio_data, dict) else ""
-                if BASE64_PLACEHOLDER in str(data):
-                    continue
-            elif item_type == "text":
-                text = item.get("text", "")
-                if BASE64_PLACEHOLDER in str(text):
-                    continue
-            else:
-                if BASE64_PLACEHOLDER in str(item):
-                    continue
-            cleaned.append(item)
-        elif isinstance(item, str):
-            if BASE64_PLACEHOLDER not in item:
-                cleaned.append(item)
-        else:
-            cleaned.append(item)
-    return cleaned
-
-
-def _clean_media_list(media_list: list) -> Optional[list]:
-    """Clean a list of media items (images/videos) by removing placeholders."""
-    cleaned = []
-    for item in media_list:
-        if isinstance(item, str) and BASE64_PLACEHOLDER in item:
-            continue
-        elif isinstance(item, dict):
-            result = clean_media_placeholders(item)
-            if result is not None:
-                cleaned.append(result)
-        else:
-            cleaned.append(item)
-    return cleaned if cleaned else None
-
-
 def _clean_message_for_history(msg: Message) -> Message:
-    """Clean a message by removing filtered media placeholders."""
+    """Copy a message for history replay, dropping its one-turn attachments."""
     cleaned_msg = msg.model_copy(deep=True)
 
-    if cleaned_msg.content is not None:
-        if isinstance(cleaned_msg.content, list):
-            cleaned_content_list = _clean_content_list(cleaned_msg.content)
-            if len(cleaned_content_list) == 1 and isinstance(cleaned_content_list[0], dict):
-                if cleaned_content_list[0].get("type") == "text":
-                    cleaned_msg.content = cleaned_content_list[0].get("text", "")
-                else:
-                    cleaned_msg.content = cleaned_content_list
-            elif len(cleaned_content_list) == 0:
-                cleaned_msg.content = ""
-            else:
-                cleaned_msg.content = cleaned_content_list
-        elif isinstance(cleaned_msg.content, str):
-            if BASE64_PLACEHOLDER in cleaned_msg.content:
-                cleaned_msg.content = ""
+    if isinstance(cleaned_msg.content, list):
+        if len(cleaned_msg.content) == 1 and isinstance(cleaned_msg.content[0], dict):
+            if cleaned_msg.content[0].get("type") == "text":
+                cleaned_msg.content = cleaned_msg.content[0].get("text", "")
+        elif len(cleaned_msg.content) == 0:
+            cleaned_msg.content = ""
 
     # ``images`` / ``audio`` / ``videos`` are per-turn attachments, not durable
     # conversation facts. Replaying them from history resends screenshots,
@@ -109,8 +52,8 @@ def _clean_message_for_history(msg: Message) -> Message:
 
     # A tool result must be sent to pair with its assistant tool_call, but
     # Anthropic and compatible proxies reject empty tool_result content
-    # ("message has no content"). After placeholder stripping a tool result can become "" —
-    # substitute a placeholder so pairing is preserved without poisoning the
+    # ("message has no content"). A tool can return "" —
+    # substitute a marker so pairing is preserved without poisoning the
     # request. (Dropping it would break tool_call_id pairing.)
     if cleaned_msg.role == "tool" and not _content_has_text(cleaned_msg.content):
         cleaned_msg.content = "(tool returned no output)"
