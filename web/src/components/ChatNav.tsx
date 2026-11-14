@@ -14,7 +14,10 @@ import type { ChatMsg } from "../store";
  * Codex-style chat navigation minimap:
  * - Positioned in the left gutter of the chat area.
  * - Shows only subtle dashes by default.
- * - Hovering a dash opens a compact opaque popover to its right with the truncated query.
+ * - Hovering a dash opens a popover with the question and, under it, what the
+ *   turn answered (dsh `TurnNavigator` preview: one prompt line, up to three
+ *   response lines) — the query alone cannot distinguish two turns that asked
+ *   about the same file.
  * - Clicking jumps directly to that turn with a smooth scroll & subtle flash.
  * - Naturally hidden on narrower screens to avoid overlapping main conversation.
  */
@@ -102,7 +105,10 @@ export function ChatNav({
             }}
           >
             <span className="chat-nav-dash" />
-            <span className="chat-nav-label"><span className="chat-nav-label-text">{t.query || S.chat.navEmpty}</span></span>
+            <span className="chat-nav-label">
+              <span className="chat-nav-label-text">{t.query || S.chat.navEmpty}</span>
+              {t.answer && <span className="chat-nav-label-answer">{t.answer}</span>}
+            </span>
           </button>
         ))}
       </div>
