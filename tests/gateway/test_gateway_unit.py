@@ -1309,13 +1309,33 @@ class TestResponseFormatter:
         assert result["file_path"] == "new.py"
         assert result["content"] == "import os\nimport sys\n"
 
-    def test_format_read_file_truncates_one_liner(self):
+    def test_format_read_file_truncates_a_long_non_path_argument(self):
         from agentica_gateway.services.response_formatter import format_tool_call_args
         long_str = "x" * 200
-        result = format_tool_call_args("read_file", {"file_path": long_str, "offset": 0})
-        assert result["file_path"].endswith("...")
-        assert len(result["file_path"]) == 103
+        result = format_tool_call_args("grep", {"pattern": long_str, "path": "/tmp", "offset": 0})
+        assert result["pattern"].endswith("...")
+        assert len(result["pattern"]) == 103
+        assert result["path"] == "/tmp"
+
+    def test_format_read_file_keeps_a_long_path_intact(self):
+        """The Web row/card opens this value; a clipped path is a dead link.
+
+        Regression: a 145-char tool-results path was cut to 100 + "...", so the
+        side panel requested a file whose name literally ended in the ellipsis.
+        """
+        from agentica_gateway.services.response_formatter import format_tool_call_args
+        long_path = (
+            "/Users/xuming/.agentica/projects/default/"
+            "-Users-xuming-Documents-Codes-agentica-2037c358/"
+            "s_ur0a9hbamwgdip99/tool-results/execute-4cf6936a9fc1.txt"
+        )
+        assert len(long_path) > 100
+        result = format_tool_call_args("read_file", {"file_path": long_path, "offset": 0})
+        assert result["file_path"] == long_path
         assert result["offset"] == 0
+
+        globbed = format_tool_call_args("glob", {"pattern": "**/*.py", "path": long_path})
+        assert globbed["path"] == long_path
 
     def test_format_execute_keeps_full_command(self):
         from agentica_gateway.services.response_formatter import format_tool_call_args

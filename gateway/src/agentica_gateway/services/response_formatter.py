@@ -37,6 +37,12 @@ def extract_metrics(agent: Optional[Any]) -> Optional[Dict[str, Any]]:
 _HIDE_RESULT_TOOLS = frozenset({"read_file", "glob", "grep"})
 # Only runaway payloads are clipped; execute / wait / peers stay intact below this.
 _MAX_TOOL_RESULT_CHARS = 100_000
+# Arguments the Web turns back into a filesystem operation (the row's
+# "open file" link, the files card, /api/workspace/content). They must arrive
+# intact: the row renders them with CSS ellipsis, but the click target is the
+# argument itself, so a clipped path is a dead link. A 145-char spill path was
+# cut to 100 + "..." here, and the side panel then tried to open the ellipsis.
+_PATH_ARG_KEYS = frozenset({"file_path", "path", "target_file", "file", "work_dir", "cwd"})
 
 
 def _clip_value(value: Any) -> Any:
@@ -53,15 +59,18 @@ def _clip_value(value: Any) -> Any:
 def format_tool_call_args(tool_name: str, tool_args: dict) -> dict:
     """Format tool call arguments for frontend display.
 
-    ``read_file`` / ``glob`` / ``grep`` keep a short one-liner (100 chars).
-    Every other tool sends the full arguments so the web row can show
-    input and result together.
+    ``read_file`` / ``glob`` / ``grep`` keep a short one-liner (100 chars),
+    except for path-valued arguments: those stay intact because the Web row and
+    the files card use them to open the file. Clipping them there produces a
+    dead link (the panel would request the literal ``...`` suffix). Every other
+    tool sends the full arguments so the web row can show input and result
+    together.
     """
     raw = dict(tool_args or {})
     if tool_name in _HIDE_RESULT_TOOLS:
         display_args: dict = {}
         for k, v in raw.items():
-            if isinstance(v, str) and len(v) > 100:
+            if isinstance(v, str) and len(v) > 100 and k not in _PATH_ARG_KEYS:
                 display_args[k] = v[:100] + "..."
             else:
                 display_args[k] = v
