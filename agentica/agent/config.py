@@ -24,10 +24,9 @@ from typing import (
 
 # Imported at runtime (not TYPE_CHECKING) so the field annotation
 # ``Optional[SkillLifecycleHooks]`` below resolves at class-build time.
-# Pydantic 2.12+ eagerly resolves forward refs when a subclass of
-# ``Workflow`` exposes ``Agent`` typed fields; a deferred TYPE_CHECKING
-# import leaves the name undefined and raises ``PydanticUserError:
-# `<Workflow subclass>` is not fully defined``.
+# Pydantic 2.12+ eagerly resolves forward refs when a model exposes
+# ``Agent`` typed fields; a deferred TYPE_CHECKING import leaves the name
+# undefined and raises ``PydanticUserError: ... is not fully defined``.
 from agentica.experience.skill_lifecycle_hooks import SkillLifecycleHooks
 
 

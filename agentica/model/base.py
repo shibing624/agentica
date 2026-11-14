@@ -357,7 +357,7 @@ class Model(ABC):
     # Instructions from the model added to the Agent.
     instructions: Optional[List[str]] = None
 
-    # Session ID of the calling Agent or Workflow.
+    # Session ID of the calling Agent.
     session_id: Optional[str] = None
     # User ID of the calling Agent.
     user_id: Optional[str] = None
