@@ -1099,15 +1099,12 @@ def create_agent(
     # instance so /worktree, --worktree and the model tool see the same state.
     from agentica.tools.product import build_product_tools
 
-    from agentica.cli.session_resume import enter_work_dir as _enter_work_dir
-
     cli_tools = build_product_tools(
         surface="cli",
         work_dir=work_dir,
         agent_config=agent_config,
         cron_job_runner=cron_job_runner,
         extra_tools=list(extra_tools or []),
-        enter_work_dir=_enter_work_dir,
     )
     if worktree_binder is not None:
         for tool in cli_tools:

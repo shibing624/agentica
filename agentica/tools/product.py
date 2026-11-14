@@ -27,7 +27,6 @@ def build_product_tools(
     cron_job_runner: Optional[Any] = None,
     extra_tools: Optional[list] = None,
     restart_hint: str = "",
-    enter_work_dir: Optional[Any] = None,
 ) -> list:
     """Return the extra tools mounted on a product agent.
 
@@ -49,8 +48,9 @@ def build_product_tools(
         agent_config = dict(agent_config)
         agent_config["work_dir"] = resolved
 
+    binder = WorktreeBinder(agent_config=agent_config)
     tools = [
-        WorktreeTool(WorktreeBinder(agent_config=agent_config, enter_work_dir=enter_work_dir)),
+        WorktreeTool(binder),
         SelfManageTool(
             restart_hint=CLI_RESTART_HINT if surface == "cli" else (restart_hint or ""),
         ),

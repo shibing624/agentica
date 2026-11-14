@@ -11,7 +11,7 @@ is born inside a tree; ``release()`` then may delete a clean unused one on exit.
 from __future__ import annotations
 
 import os
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 
 from agentica.git import state as git_state, worktree as worktrees
 
@@ -23,10 +23,8 @@ class WorktreeBinder:
         self,
         *,
         agent_config: Dict[str, Any],
-        enter_work_dir: Optional[Callable[[str], bool]] = None,
     ) -> None:
         self._agent_config = agent_config
-        self._enter_work_dir = enter_work_dir
         # True only after ``--worktree``. Plain CLI sessions must not run git
         # teardown on every exit.
         self._entered = False
@@ -171,10 +169,7 @@ class WorktreeBinder:
                 return None
             if worktrees.has_unique_work(entry):
                 return None
-            if self._enter_work_dir is not None:
-                self._enter_work_dir(main)
-            else:
-                os.chdir(main)
+            os.chdir(main)
             try:
                 worktrees.remove(entry, main)
                 self._agent_config["work_dir"] = main
