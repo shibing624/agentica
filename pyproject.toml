@@ -229,6 +229,14 @@ Changelog     = "https://github.com/shibing624/agentica/blob/main/CHANGELOG.md"
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
+# A managed project is locked and synced before `uv run` executes the command.
+# Without uv.lock that lock is universal: it resolves *every* optional
+# dependency, not only the ones the command needs. This repo publishes a large
+# optional-dependency surface and CI installs it with `pip install -e .`, so
+# run commands in the active environment instead of managing a project env.
+[tool.uv]
+managed = false
+
 [tool.setuptools.packages.find]
 include = ["agentica*"]
 exclude = ["tests*", "examples*", "docs*", "scripts*"]
