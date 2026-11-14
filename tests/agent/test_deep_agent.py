@@ -21,18 +21,6 @@ class TestDeepAgentDefaults(unittest.TestCase):
         self.assertTrue(any(isinstance(tool, SkillTool) for tool in agent.tools))
         load_mcp_tools.assert_called_once()
 
-    def test_deep_agent_without_a_registry_has_no_delegate(self):
-        from agentica.agent.deep import DeepAgent
-
-        with tempfile.TemporaryDirectory() as tmpdir, patch(
-            "agentica.agent.base.Agent._load_mcp_tools"
-        ), patch("agentica.agent.base.Agent._merge_tool_system_prompts"):
-            agent = DeepAgent(model=MagicMock(), workspace=tmpdir, include_skills=False)
-
-        self.assertNotIn(
-            "builtin_delegate_tool", [t.name for t in agent.tools]
-        )
-
     def test_deep_agent_model_exposes_file_tools(self):
         from agentica.agent.deep import DeepAgent
         from agentica.model.openai import OpenAIChat

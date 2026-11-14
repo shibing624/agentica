@@ -861,46 +861,6 @@ class TestCLIConfiguration(unittest.TestCase):
 
         self.assertEqual(registry.user_id, "alice@example.com")
 
-    def _tool_names_from_create_agent(self, **create_agent_kwargs):
-        # An interactive session is the default here; a test standing in for an
-        # unattended path passes include_ask_user_question=False to say so.
-        create_agent_kwargs.setdefault("include_ask_user_question", True)
-        from agentica.cli.runtime import create_agent
-
-        captured = {}
-
-        from agentica.tools.builtin.delegate_tool import BuiltinDelegateTool
-        from agentica.tools.background_processes import BackgroundProcessRegistry
-
-        real_delegate = BuiltinDelegateTool(
-            background_process_registry=BackgroundProcessRegistry(),
-            permission_mode=lambda: "allow-all",
-        )
-
-        class FakeDeepAgent:
-            def __init__(self, **kwargs):
-                captured.update(kwargs)
-                self.tools = [real_delegate]
-
-        with (
-            patch("agentica.cli.runtime.get_model", return_value=MagicMock()),
-            patch("agentica.agent.deep.DeepAgent", FakeDeepAgent),
-        ):
-            agent = create_agent(
-                {
-                    "model_provider": "zhipuai",
-                    "model_name": "glm-5",
-                    "debug": False,
-                    "work_dir": None,
-                },
-                extra_tools=[],
-                workspace=None,
-                skills_registry=None,
-                **create_agent_kwargs,
-            )
-        tools = captured["tools"] + list(getattr(agent, "tools", []) or [])
-        return [tool.name for tool in tools]
-
     def test_create_agent_hands_the_session_profile_to_deep_agent(self):
         from agentica.cli.runtime import create_agent
 
