@@ -132,7 +132,10 @@ export function ChatPage() {
   const goalRun = s.curSess ? s.goalRuns[s.curSess] : undefined;
   const compacting = !!(s.curSess && s.commandRuns[s.curSess]);
   const busy = streaming || !!goalRun || compacting;
-  const showStop = busy && !compacting;
+  // dsh: a draft turns stop back into send (queue/steer); empty Enter stops,
+  // so the button shows stop only when there is nothing to send.
+  const hasDraft = !!s.inputText.trim() || s.pendingFiles.length > 0;
+  const showStop = busy && !compacting && !hasDraft;
   // dsh labels the send button with what Enter will actually do, so the
   // queue/steer choice is visible without opening Settings.
   const enterMode = resolveSubmitMode(
@@ -910,7 +913,7 @@ export function ChatPage() {
                 </div>
                 <button className={"act-btn " + (showStop ? "stop" : "send")}
                         // dsh: an empty draft dims the send button; anything to send lights it.
-                        disabled={compacting || (!showStop && !s.inputText.trim() && !s.pendingFiles.length)}
+                        disabled={compacting || (!showStop && !hasDraft)}
                         title={showStop ? S.chat.stop : sendLabel}
                         onClick={(e) => showStop
                           ? stopGen()
