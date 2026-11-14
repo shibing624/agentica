@@ -39,6 +39,18 @@ export function ChatNav({
   leaveRef.current = onLeaveFollow;
   const listRef = useRef<HTMLElement>(null);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
+  // The popover lives on the nav, outside the scrolling list: inside it, the
+  // list's overflow clip cut off anything taller than the rail itself.
+  const [hover, setHover] = useState<{ idx: number; top: number; left: number } | null>(null);
+
+  const showLabel = (idx: number, tick: HTMLElement) => {
+    const nav = listRef.current;
+    if (!nav) return;
+    const n = nav.getBoundingClientRect();
+    const r = tick.getBoundingClientRect();
+    setHover({ idx, top: r.top + r.height / 2 - n.top, left: r.right - n.left });
+  };
+  const hoverTick = hover ? ticks.find((t) => t.idx === hover.idx) : undefined;
 
   const syncActive = () => {
     const area = areaRef.current;
@@ -91,7 +103,7 @@ export function ChatNav({
 
   return (
     <nav ref={listRef} className="chat-nav" aria-label={S.chat.navAria}>
-      <div className="chat-nav-list">
+      <div className="chat-nav-list" onScroll={() => setHover(null)}>
         {ticks.map((t) => (
           <button
             key={t.idx}
@@ -99,19 +111,26 @@ export function ChatNav({
             className="chat-nav-tick"
             data-idx={t.idx}
             aria-current={t.idx === activeIdx ? "true" : undefined}
+            aria-label={t.query || S.chat.navEmpty}
+            onMouseEnter={(e) => showLabel(t.idx, e.currentTarget)}
+            onFocus={(e) => showLabel(t.idx, e.currentTarget)}
+            onMouseLeave={() => setHover(null)}
+            onBlur={() => setHover(null)}
             onClick={(e) => {
               e.preventDefault();
               jumpTo(t.idx);
             }}
           >
             <span className="chat-nav-dash" />
-            <span className="chat-nav-label">
-              <span className="chat-nav-label-text">{t.query || S.chat.navEmpty}</span>
-              {t.answer && <span className="chat-nav-label-answer">{t.answer}</span>}
-            </span>
           </button>
         ))}
       </div>
+      {hover && hoverTick && (
+        <span className="chat-nav-label" style={{ top: hover.top, left: hover.left }}>
+          <span className="chat-nav-label-text">{hoverTick.query || S.chat.navEmpty}</span>
+          {hoverTick.answer && <span className="chat-nav-label-answer">{hoverTick.answer}</span>}
+        </span>
+      )}
     </nav>
   );
 }

@@ -450,8 +450,7 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .chat-nav-dash{display:block;width:10px;height:2px;border-radius:1px;background:var(--fg3);opacity:.4;transition:width .15s ease,background .15s ease,opacity .15s ease}
 .chat-nav-tick[aria-current="true"] .chat-nav-dash{width:16px;background:var(--fg);opacity:.85}
 .chat-nav-tick:is(:hover,:focus-visible) .chat-nav-dash{width:16px;background:var(--fg);opacity:1}
-.chat-nav-label{position:absolute;left:100%;top:50%;transform:translateY(-50%);margin-left:8px;z-index:50;display:none;padding:6px 9px;background:var(--bg2);border:var(--hair) solid var(--border);border-radius:8px;box-shadow:var(--elev-pop);pointer-events:none;text-align:left}
-.chat-nav-tick:is(:hover,:focus-visible) .chat-nav-label{display:block}
+.chat-nav-label{position:absolute;transform:translateY(-50%);margin-left:8px;z-index:50;display:block;padding:6px 9px;background:var(--bg2);border:var(--hair) solid var(--border);border-radius:8px;box-shadow:var(--elev-pop);pointer-events:none;text-align:left}
 .chat-nav-label-text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;-webkit-box-align:start;overflow:hidden;width:max-content;max-width:16rem;max-height:36px;font-size:12px;line-height:18px;font-weight:500;color:var(--fg);text-align:left;white-space:normal;word-break:break-word}
 /* The answer under the question, one tier quieter and clamped to three lines
    (dsh `previewResponse`: xs/caption against the prompt's xs-strong). */
