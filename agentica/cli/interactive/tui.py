@@ -234,6 +234,9 @@ class _CleanResizeApplication(Application):
 # window — which is where a loop starved by background writes gets stuck while
 # an answer is pending. So this prompt is the one place the hint is true.
 _ASK_KEY_HINT = "    Enter to answer · Ctrl+C to cancel · Ctrl+\\ if frozen"
+_ASK_MULTI_HINT = (
+    "    Enter to answer — comma-separate to pick several, e.g. 1,3 · Ctrl+C to cancel"
+)
 
 # The idle countdown is shown only for its last stretch: a clock ticking for
 # five minutes is noise, the last 20 seconds are a warning.
@@ -295,7 +298,7 @@ def _ask_prompt_text(req) -> str:
         parts.append("")
         for i, opt in enumerate(req.options, 1):
             parts.append(f"    {i}. {opt}")
-    parts.append(_ASK_KEY_HINT)
+    parts.append(_ASK_MULTI_HINT if req.multi_select else _ASK_KEY_HINT)
     return "\n".join(parts)
 
 
@@ -1139,6 +1142,7 @@ def _setup_tui(
 __all__ = [
     '_CleanResizeApplication',
     '_ASK_KEY_HINT',
+    '_ASK_MULTI_HINT',
     '_ask_prompt_lines',
     '_ask_prompt_text',
     '_count_input_visual_rows',

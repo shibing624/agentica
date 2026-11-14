@@ -40,6 +40,8 @@ export type QuestionRequest = {
   questionId: string;
   prompt: string;
   options: string[];
+  /** The model asked for one-or-more; the card shows checkboxes. */
+  multiSelect?: boolean;
 };
 
 export type ChatMsg = {

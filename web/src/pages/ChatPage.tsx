@@ -1761,8 +1761,10 @@ function appendSteerBubble(sessId: string, text: string, files: File[] = [], ste
     // Local echo: the chip shows at once and the server's SSE `steer` event
     // confirms this same chip instead of adding a second one.
     appendSteerPart(live, text, Date.now(), previews, steerId, true);
-    if (sess) rememberSteersFromMsgs(sessId, sess.msgs, sess.olderTurns || 0);
-    saveSessions();
+    // Deliberately NOT saved: this chip is unconfirmed until the server echoes
+    // it, so persisting it now would record a steer that may still be refused
+    // (and then also queued as a fresh turn). The SSE `steer` handler persists
+    // once the echo arrives.
     bump();
     return;
   }
@@ -1997,7 +1999,7 @@ function applyLiveSseEvent(aiMsg: ChatMsg, evt: any, sessId?: string): boolean {
         for (let i = 0; i < pending.length;) {
           if (pending[i].afterToolCallId === resolvedId) {
             const st = pending.splice(i, 1)[0];
-            appendSteerPart(aiMsg, st.text, st.ts);
+            appendSteerPart(aiMsg, st.text, st.ts, [], st.steerId || "");
           } else {
             i += 1;
           }
@@ -2020,6 +2022,16 @@ function applyLiveSseEvent(aiMsg: ChatMsg, evt: any, sessId?: string): boolean {
         const idx = pending.findIndex((p) => p.steerId === steerId);
         if (idx >= 0) pending.splice(idx, 1);
       }
+      // The echo is the server's confirmation that this steer was accepted, so
+      // this is the first moment it may be written down. The optimistic chip in
+      // `appendSteerBubble` is memory-only for exactly this reason.
+      if (sessId) {
+        const sess = getState().sessions[sessId];
+        if (sess) {
+          rememberSteersFromMsgs(sessId, sess.msgs, sess.olderTurns || 0);
+          saveSessions();
+        }
+      }
       flushStream();
     }
     return true;
@@ -2031,6 +2043,7 @@ function applyLiveSseEvent(aiMsg: ChatMsg, evt: any, sessId?: string): boolean {
         questionId: qid,
         prompt: String(evt.data?.prompt || ""),
         options: Array.isArray(evt.data?.options) ? evt.data.options.map(String) : [],
+        ...(evt.data?.multi_select === true ? { multiSelect: true } : {}),
       });
     }
     flushStream();

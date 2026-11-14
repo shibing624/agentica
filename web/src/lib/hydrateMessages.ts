@@ -633,7 +633,12 @@ export function rememberSteersFromMsgs(sessionId: string, msgs: ChatMsg[], older
   let changed = false;
   for (const item of found) {
     const dup = existing.some(
-      (x) => x.text === item.text && (x.afterToolCallId === item.afterToolCallId || x.turnIdx === item.turnIdx),
+      (x) =>
+        // Same identity wins: two different steers can carry identical text
+        // (the user deliberately repeating a line), so text alone merges them
+        // into one anchor and the reloaded chip loses its id.
+        (item.steerId && x.steerId === item.steerId) ||
+        (x.text === item.text && (x.afterToolCallId === item.afterToolCallId || x.turnIdx === item.turnIdx)),
     );
     if (!dup) {
       existing.push(item);
@@ -722,7 +727,10 @@ export function mergeClientSteers(sessionId: string, msgs: ChatMsg[], olderTurns
         if (idx >= 0) {
           let insertAt = idx + 1;
           while (insertAt < m.parts.length && m.parts[insertAt].kind === "steer") insertAt++;
-          m.parts.splice(insertAt, 0, { kind: "steer", text: item.text, ts: item.ts });
+          m.parts.splice(insertAt, 0, {
+            kind: "steer", text: item.text, ts: item.ts,
+            ...(item.steerId ? { steerId: item.steerId } : {}),
+          });
           inserted = true;
           break;
         }
@@ -738,7 +746,10 @@ export function mergeClientSteers(sessionId: string, msgs: ChatMsg[], olderTurns
           if (turn === item.turnIdx) {
             const next = msgs[i + 1];
             if (next && next.role === "assistant" && !next.compact) {
-              (next.parts ||= []).unshift({ kind: "steer", text: item.text, ts: item.ts });
+              (next.parts ||= []).unshift({
+                kind: "steer", text: item.text, ts: item.ts,
+                ...(item.steerId ? { steerId: item.steerId } : {}),
+              });
             }
             break;
           }
@@ -899,7 +910,7 @@ export function reconcileLiveTurnMsgs(
   last.parts = [];
   last.steps = [];
   for (const st of steers) {
-    if (!st.afterToolCallId) appendSteerPart(last, st.text, st.ts);
+    if (!st.afterToolCallId) appendSteerPart(last, st.text, st.ts, [], st.steerId || "");
   }
   appendThink(last, "");
   return {

@@ -403,3 +403,39 @@ test("a refused steer leaves no chip behind", () => {
   removeSteerPart(m, "nope");
   assert.equal(steerParts(m).length, 1);
 });
+
+test("a chipless chip re-drawn from the cache is claimed, not duplicated", () => {
+  // Reload mid-turn: the hydration path re-draws the chip from the client steer
+  // cache, and an anchor written before ids existed has no steerId. The echo
+  // that arrives afterwards carries one, so without a claim it drew a second.
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendSteerPart(m, "刷新后重画", 1000);            // chipless, from the cache
+  appendSteerPart(m, "刷新后重画", 1100, [], "s11"); // echo, with an id
+  const chips = steerParts(m);
+  assert.equal(chips.length, 1);
+  assert.equal(chips[0].steerId, "s11");
+});
+
+test("the claim is narrow: a different text never merges into a chipless chip", () => {
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendSteerPart(m, "第一句", 1000);
+  appendSteerPart(m, "第二句", 1100, [], "s12");
+  assert.equal(steerParts(m).length, 2);
+});
+
+test("a chip that already has an id is not re-claimed by a same-text echo", () => {
+  // The user deliberately repeated a line; both carry distinct ids, so a later
+  // echo must not collapse them into one.
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendSteerPart(m, "重复", 1000, [], "s13");
+  appendSteerPart(m, "重复", 1100, [], "s14");
+  assert.equal(steerParts(m).length, 2);
+});
+
+test("settling a turn clears a pending mark that never got confirmed", () => {
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendSteerPart(m, "没等到回声", 1000, [], "s15", true);
+  assert.equal(steerParts(m)[0].pending, true);
+  settleWork(m, 2000);
+  assert.equal(steerParts(m)[0].pending, undefined);
+});

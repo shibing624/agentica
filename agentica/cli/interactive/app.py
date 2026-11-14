@@ -124,6 +124,11 @@ from .stream_loop import (
 )
 from .tui import IDLE_COUNTDOWN_SECONDS, _setup_tui
 
+# How many finished-job reports a quiet session holds for its next prompt.
+# Unbounded accumulation is a leak for a long-lived terminal that is never
+# spoken to again; 50 is far more than one sitting produces.
+MAX_PENDING_BACKGROUND_REPORTS = 50
+
 # ==================== Main entry ====================
 
 
@@ -271,7 +276,11 @@ def run_interactive(
     # deadlocks against prompt_toolkit's stdin ownership.
     _ui_holder: dict = {}
 
-    def _tui_ask_user_question_callback(prompt: str, options: Optional[List[str]] = None) -> str:
+    def _tui_ask_user_question_callback(
+        prompt: str,
+        options: Optional[List[str]] = None,
+        multi_select: bool = False,
+    ) -> str:
         state_ref = _ui_holder.get("state")
         app_ref = _ui_holder.get("app")
         # Fallback to bare input if the TUI isn't up yet (shouldn't happen in
@@ -283,6 +292,7 @@ def run_interactive(
         req = _InputRequest(
             prompt=prompt,
             options=options,
+            multi_select=multi_select,
             hook_request_id=request_id,
         )
         logger.info(
@@ -1064,6 +1074,13 @@ def run_interactive(
             if state.pending_background_reports and not queued.is_automated and not already_shown:
                 held = "\n\n".join(state.pending_background_reports)
                 state.pending_background_reports.clear()
+                if state.pending_background_reports_dropped:
+                    held += (
+                        f"\n\n[{state.pending_background_reports_dropped} earlier "
+                        "background report(s) were dropped — this is not the whole "
+                        "history of what finished while you were away.]"
+                    )
+                    state.pending_background_reports_dropped = 0
                 final_input = f"{held}\n\n{final_input}"
 
             turn_images = submit_images if submit_images else None
@@ -1301,7 +1318,20 @@ def run_interactive(
         if should_steer_report(state.agent_running, quiet_mode):
             _hand_to_agent(report, automated=True)
             return
+        # Bounded: a quiet session that is never asked anything would otherwise
+        # accumulate one string per finished job forever. The oldest go first —
+        # the newest completions are the ones a returning user still cares about,
+        # and "N more finished earlier" keeps the count honest.
+        # Bounded: a quiet session that is never asked anything would otherwise
+        # accumulate one string per finished job for as long as it lives. The
+        # oldest go first — a returning user cares about what just finished — and
+        # the drop is stated rather than silent, so the model is not told this is
+        # the whole story.
         state.pending_background_reports.append(report)
+        overflow = len(state.pending_background_reports) - MAX_PENDING_BACKGROUND_REPORTS
+        if overflow > 0:
+            del state.pending_background_reports[:overflow]
+            state.pending_background_reports_dropped += overflow
 
     def _deliver_finished_jobs() -> int:
         """Deliver every finished job this session owes a report for, once.

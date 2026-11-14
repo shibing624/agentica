@@ -411,3 +411,156 @@ class TestSeveralQuestionsInOneCall:
             "response": "yes",
             "options": ["Yes", "No"],
         }
+
+
+class TestMultiSelect:
+    """`multi_select` was declared in the schema and stored on the item, then
+    never consumed: the tool told the model the user could pick several while
+    every surface could only collect one line. These pin the three things that
+    make it real — the flag reaches the callback, the result says so, and a
+    callback that cannot honour it fails loudly instead of silently degrading.
+    """
+
+    def test_the_flag_reaches_the_callback_as_a_third_argument(self):
+        import asyncio
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        calls = []
+
+        def cb(prompt, options=None, multi_select=False):
+            calls.append((prompt, options, multi_select))
+            return "A, C"
+
+        tool = AskUserQuestionTool(input_callback=cb)
+        result = json.loads(asyncio.run(tool.ask_user_question(
+            questions=[{
+                "id": "pick", "question": "Which ones?",
+                "options": ["A", "B", "C"], "multi_select": True,
+            }],
+        )))
+        assert calls == [("Which ones?", ["A", "B", "C"], True)]
+        assert result["answers"][0]["multi_select"] is True
+        assert result["answers"][0]["response"] == "A, C"
+
+    def test_a_single_select_callback_still_takes_two_arguments(self):
+        """The compatibility that matters: every existing callback — SDK users,
+        the IM relay — is `(prompt, options)` and must keep working untouched."""
+        import asyncio
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        seen = []
+
+        def two_arg(prompt, options=None):
+            seen.append((prompt, options))
+            return "B"
+
+        tool = AskUserQuestionTool(input_callback=two_arg)
+        result = json.loads(asyncio.run(tool.ask_user_question(
+            prompt="Pick one", options=["A", "B"],
+        )))
+        assert result["response"] == "B"
+        assert "multi_select" not in result
+        assert len(seen) == 1
+
+    def test_a_two_argument_callback_asked_for_multi_select_fails_loudly(self):
+        """A callback that cannot collect several must not be handed the
+        question as if it could — that is the "schema promises what the surface
+        cannot do" bug this change exists to remove."""
+        import asyncio
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        tool = AskUserQuestionTool(input_callback=lambda p, o=None: "A")
+        result = json.loads(asyncio.run(tool.ask_user_question(
+            questions=[{
+                "id": "pick", "question": "Which ones?",
+                "options": ["A", "B"], "multi_select": True,
+            }],
+        )))
+        answer = result["answers"][0]
+        # The batch reports it per question rather than failing the whole call,
+        # and says TypeError rather than quietly answering as if single-select.
+        assert "TypeError" in answer["error"]
+        assert answer["response"] == ""
+
+
+class TestBatchAnswerShape:
+    """One shape for every answer in a batch, and no silent loss of options."""
+
+    def test_a_skipped_question_carries_the_same_keys_as_an_answered_one(self):
+        """A consumer reading `prompt` by position used to read nothing for a
+        skipped item, which also had no options and no note."""
+        import asyncio
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool, AskUserQuestionTimeout
+
+        def cb(prompt, options=None):
+            raise AskUserQuestionTimeout(600)
+
+        tool = AskUserQuestionTool(input_callback=cb)
+        result = json.loads(asyncio.run(tool.ask_user_question(
+            questions=[
+                {"id": "a", "question": "First?", "options": ["x", "y"]},
+                {"id": "b", "question": "Second?", "options": ["p", "q"]},
+            ],
+        )))
+        first, second = result["answers"]
+        # Both carry the same identity/answer keys; only the timeout-specific
+        # `waited_seconds` (how long the *asked* one blocked) belongs to one.
+        for key in ("prompt", "id", "response", "timed_out", "options", "note"):
+            assert key in first, f"the asked item lost {key}"
+            assert key in second, f"the skipped item lost {key}"
+        assert second["prompt"] == "Second?"
+        assert second["options"] == ["p", "q"]
+        assert second["skipped"] is True
+        assert "Silence is not consent" in second["note"]
+
+    def test_stringified_options_are_parsed_not_dropped(self):
+        """Models serialize nested arrays to a JSON string. Dropping it turned a
+        multiple-choice question into a free-form one, silently."""
+        import asyncio
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        seen = []
+
+        def cb(prompt, options=None):
+            seen.append(options)
+            return "A"
+
+        tool = AskUserQuestionTool(input_callback=cb)
+        asyncio.run(tool.ask_user_question(
+            questions=[{
+                "id": "q", "question": "Which?",
+                "options": '["A", "B"]',
+            }],
+        ))
+        assert seen == [["A", "B"]]
+
+    def test_unparseable_options_are_reported_rather_than_asked(self):
+        import asyncio
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        tool = AskUserQuestionTool(input_callback=lambda p, o=None: "x")
+        result = json.loads(asyncio.run(tool.ask_user_question(
+            questions=[{"id": "q", "question": "Which?", "options": "not json"}],
+        )))
+        assert "error" in result
+        assert "questions[0].options" in result["error"]
+
+    def test_one_question_failing_does_not_discard_the_answers_already_given(self):
+        import asyncio
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        def cb(prompt, options=None):
+            if prompt == "Second?":
+                raise RuntimeError("card was closed")
+            return "answered"
+
+        tool = AskUserQuestionTool(input_callback=cb)
+        result = json.loads(asyncio.run(tool.ask_user_question(
+            questions=[
+                {"id": "a", "question": "First?"},
+                {"id": "b", "question": "Second?"},
+            ],
+        )))
+        first, second = result["answers"]
+        assert first["response"] == "answered"
+        assert "RuntimeError" in second["error"]

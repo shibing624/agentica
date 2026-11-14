@@ -296,7 +296,11 @@ class AgentBuilderMixin:
         """``ask_user_question`` answered through the session's live turn."""
         owner_id = self._owner(owner)
 
-        def ask(prompt: str, options: Optional[List[str]] = None) -> str:
+        def ask(
+            prompt: str,
+            options: Optional[List[str]] = None,
+            multi_select: bool = False,
+        ) -> str:
             pkg = _pkg()
             wait_s = pkg.QUESTION_WAIT_S
             loop = self._loop
@@ -308,7 +312,7 @@ class AgentBuilderMixin:
             async def open_and_wait() -> Optional[str]:
                 if turn.done:
                     return None
-                question, future = turn.open_question(prompt, opts)
+                question, future = turn.open_question(prompt, opts, multi_select)
                 if turn.question_notifier is not None:
                     try:
                         await turn.question_notifier(question)

@@ -48,6 +48,9 @@ class PendingQuestion:
     question_id: str
     prompt: str
     options: List[str] = field(default_factory=list)
+    # The model asked for one-or-more answers; the card offers checkboxes
+    # instead of one-tap buttons.
+    multi_select: bool = False
 
 
 def _event_chars(ev: dict) -> int:
@@ -114,9 +117,19 @@ class LiveTurn:
     def open_questions(self) -> List[PendingQuestion]:
         return [q for q, _ in self._questions.values()]
 
-    def open_question(self, prompt: str, options: List[str]) -> Tuple[PendingQuestion, asyncio.Future]:
+    def open_question(
+        self,
+        prompt: str,
+        options: List[str],
+        multi_select: bool = False,
+    ) -> Tuple[PendingQuestion, asyncio.Future]:
         """Register a question and publish it. Must run on the event loop."""
-        question = PendingQuestion(question_id=f"q-{uuid.uuid4().hex[:10]}", prompt=prompt, options=list(options))
+        question = PendingQuestion(
+            question_id=f"q-{uuid.uuid4().hex[:10]}",
+            prompt=prompt,
+            options=list(options),
+            multi_select=multi_select,
+        )
         future: asyncio.Future = asyncio.get_running_loop().create_future()
         self._questions[question.question_id] = (question, future)
         self.publish(question_event(question))
@@ -363,7 +376,12 @@ def question_event(question: PendingQuestion) -> Dict[str, Any]:
     """SSE envelope for one open ``ask_user_question``."""
     return {
         "event": "question_request",
-        "data": {"question_id": question.question_id, "prompt": question.prompt, "options": list(question.options)},
+        "data": {
+            "question_id": question.question_id,
+            "prompt": question.prompt,
+            "options": list(question.options),
+            "multi_select": question.multi_select,
+        },
     }
 
 

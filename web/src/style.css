@@ -1244,6 +1244,7 @@ a.side-nav-item{text-decoration:none;color:inherit}
 .question-opt{display:flex;align-items:center;gap:8px;text-align:left;border:var(--hair) solid var(--border);background:transparent;border-radius:8px;padding:7px 10px;cursor:pointer;font-size:13px;color:var(--fg);font-family:var(--sans);line-height:1.4}
 .question-opt:hover{background:var(--bg3)}
 .question-opt.first{border-color:var(--accent)}
+.question-opt.picked{background:var(--bg3);border-color:var(--accent)}
 .question-opt:disabled{opacity:.55;cursor:default}
 .question-opt-n{flex-shrink:0;width:18px;height:18px;border-radius:50%;background:var(--bg2);color:var(--fg3);font-size:11px;display:inline-flex;align-items:center;justify-content:center;font-variant-numeric:tabular-nums}
 .question-free{display:flex;gap:8px}

@@ -5,7 +5,7 @@
 Pydantic request/response models shared across routes.
 """
 from typing import List, Optional, Literal
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from agentica.utils.string import replace_invalid_utf8
 
@@ -59,7 +59,10 @@ class SteerRequest(BaseModel):
     # Client-generated identity for this steer. The SSE echo carries it back so
     # the composer's optimistic chip is confirmed rather than duplicated; an
     # older client that sends none still works (the echo is appended instead).
-    steer_id: str = ""
+    # Bounded because it is echoed verbatim into the SSE stream and counted
+    # against the replay ring's byte budget: an oversized id is the client
+    # spending its own memory, but there is no reason to carry megabytes of it.
+    steer_id: str = Field(default="", max_length=64)
     images: List[ChatImage] = []
 
     @field_validator("message")

@@ -33,6 +33,9 @@ class _InputRequest:
 
     prompt: str
     options: Optional[List[str]] = None
+    # The model asked for one-or-more; the terminal says so instead of the
+    # usual "type a reply" hint.
+    multi_select: bool = False
     result: "queue.Queue" = field(default_factory=lambda: queue.Queue(maxsize=1))
     resolved: bool = False
     # "ask" is ask_user_question (typed line + Enter). "approval" is the
@@ -122,6 +125,9 @@ class SessionState:
     # the user still sees each completion block, and the model still learns what
     # finished — just not by being woken up for it.
     pending_background_reports: List[str] = field(default_factory=list)
+    # Reports dropped from that list by its size cap, so the transcript can say
+    # so instead of presenting a truncated history as complete.
+    pending_background_reports_dropped: int = 0
     # This terminal's end of the cross-session peer channel (agentica/live/__init__.py).
     peer_session: Any = None
     # Standing-goal loop (see agentica/agent/goals.py).

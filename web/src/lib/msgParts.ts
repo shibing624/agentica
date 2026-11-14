@@ -198,9 +198,20 @@ export function settleWork(m: ChatMsg, now?: number): boolean {
   const droppedParts = dropEmpty(m.parts as any);
   const droppedSteps = dropEmpty(m.steps as any);
   const dropped = droppedParts || droppedSteps;
+  // A steer still marked pending when the turn ends was never confirmed by the
+  // server (the echo never arrived — e.g. the run finished first). The mark
+  // only exists to let a chipless echo claim this chip; leaving it set lets it
+  // ride into the next save and be mistaken for a fresh local echo.
+  let unpending = false;
+  for (const p of m.parts || []) {
+    if (p.kind === "steer" && p.pending) {
+      delete p.pending;
+      unpending = true;
+    }
+  }
   const thinks = freezeOpenThinks(m, now);
   const tools = freezeOpenTools(m, now);
-  return dropped || thinks || tools;
+  return dropped || unpending || thinks || tools;
 }
 
 export function appendThink(m: ChatMsg, delta: string) {
@@ -345,6 +356,24 @@ export function appendSteerPart(
     // second insert of the same steer adds nothing either way.
     if (!pending) sameId.pending = false;
     return;
+  }
+  // An echo carrying an id whose chip is missing: the hydration path re-drew
+  // the chip from the client steer cache, which predates ids for steers
+  // recorded before `steerId` existed (and for any anchor written before this
+  // fix). Claim that chipless chip instead of drawing a second copy of it.
+  //
+  // Deliberately narrow: same text, and only the newest steer part that has no
+  // id of its own. Two steers the user really did repeat both carry distinct
+  // ids when the client sent them, so they are never merged by text.
+  if (!pending && steerId) {
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i];
+      if (p.kind !== "steer" || p.steerId || p.text !== text) continue;
+      p.steerId = steerId;
+      p.pending = false;
+      p.ts = ts;
+      return;
+    }
   }
   // A server that echoes no id (older gateway): the newest pending chip is it.
   if (!pending && !steerId) {

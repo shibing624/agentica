@@ -53,6 +53,14 @@ TIMED_OUT_NOTE = (
     "may ask again later if the question still matters."
 )
 
+SKIPPED_NOTE = (
+    "Not asked: the earlier question in this batch got no answer, so nobody is "
+    "at the keyboard. Silence is not consent. Pick your recommended option for "
+    "anything local and reversible and say what you chose; for anything hard to "
+    "undo or visible outside this machine (push, deploy, send, delete), leave "
+    "that step undone and list it in your reply as waiting for the user."
+)
+
 
 class AskUserQuestionTimeout(Exception):
     """Raised by an input callback when nobody answered within its deadline.
@@ -235,8 +243,21 @@ and make a recommendation for the ones that do not."""
         """Get the system prompt for user input tool usage guidance."""
         return self.ASK_USER_QUESTION_SYSTEM_PROMPT
 
-    def _get_input(self, prompt: str, options: Optional[List[str]] = None) -> str:
-        """Get user input via the callback or, as a last resort, bare input()."""
+    def _get_input(
+        self,
+        prompt: str,
+        options: Optional[List[str]] = None,
+        multi_select: bool = False,
+    ) -> str:
+        """Get user input via the callback or, as a last resort, bare input().
+
+        ``multi_select`` is passed as a third argument **only** when it is set.
+        Every surface that predates multi-select takes ``(prompt, options)``, and
+        a single-select question calls it exactly as it always did — so nothing
+        that works today changes. A callback that cannot take the third argument
+        raises TypeError on a multi-select question, which is the honest
+        outcome: it asked for a shape this callback does not implement.
+        """
         callback = (
             self.input_callback
             if self.input_callback is not None
@@ -244,6 +265,8 @@ and make a recommendation for the ones that do not."""
         )
         if callback is not None:
             try:
+                if multi_select:
+                    return callback(prompt, options, multi_select)
                 return callback(prompt, options)
             except AskUserQuestionTimeout:
                 raise
@@ -306,14 +329,28 @@ and make a recommendation for the ones that do not."""
             # (and the transcript rendering) read ``prompt``/``response``.
             return await self._ask_one(
                 items[0]["question"], items[0].get("options"), key=None, header=None,
+                multi_select=bool(items[0].get("multi_select")),
             )
 
         answers = []
         for item in items:
-            raw = await self._ask_one(
-                item["question"], item.get("options"),
-                key=item["id"], header=item.get("header"),
-            )
+            try:
+                raw = await self._ask_one(
+                    item["question"], item.get("options"),
+                    key=item["id"], header=item.get("header"),
+                    multi_select=bool(item.get("multi_select")),
+                )
+            except Exception as e:
+                # One question failing (the Web card's future was cancelled, the
+                # IM relay dropped) must not discard the answers already given.
+                # Report it as this question's outcome and let the model decide.
+                logger.warning(f"ask_user_question failed for {item['id']}: {e}")
+                answers.append({
+                    **self._result_shape(item, key=item["id"]),
+                    "response": "",
+                    "error": f"{type(e).__name__}: {e}",
+                })
+                continue
             answers.append(json.loads(raw))
             # A timeout means nobody is at the keyboard. Asking the remaining
             # questions would arm one prompt after another that nobody will
@@ -321,17 +358,33 @@ and make a recommendation for the ones that do not."""
             if answers[-1].get("timed_out"):
                 for remaining in items[len(answers):]:
                     answers.append({
-                        "id": remaining["id"],
-                        "question": remaining["question"],
+                        **self._result_shape(remaining, key=remaining["id"]),
                         "response": "",
                         "timed_out": True,
                         "skipped": True,
+                        "note": SKIPPED_NOTE,
                     })
                 break
         return json.dumps({"answers": answers}, ensure_ascii=False)
 
     @staticmethod
+    def _result_shape(item: dict, *, key: Optional[str]) -> dict:
+        """The fields every batch answer carries, so one key name serves all.
+
+        A skipped or failed item used to be shaped `{id, question, response}`
+        while an answered one was `{prompt, response, id, options}` — a consumer
+        reading `prompt` by position saw nothing. Both now carry `prompt`.
+        """
+        result = {"prompt": item["question"]}
+        if key is not None:
+            result["id"] = key
+        if item.get("options"):
+            result["options"] = list(item["options"])
+        return result
+
+    @classmethod
     def _normalize_questions(
+        cls,
         prompt: Optional[str],
         options: Optional[List[str]],
         questions: Optional[List[dict]],
@@ -369,8 +422,12 @@ and make a recommendation for the ones that do not."""
                 if header:
                     item["header"] = header
                 opts = raw.get("options")
-                if isinstance(opts, list) and opts:
-                    item["options"] = [str(option) for option in opts]
+                if opts is not None and opts != []:
+                    coerced, why = cls._coerce_options(opts, f"questions[{index}].options")
+                    if why is not None:
+                        return [], why
+                    if coerced:
+                        item["options"] = coerced
                 if raw.get("multi_select") is True:
                     item["multi_select"] = True
                 normalized.append(item)
@@ -383,9 +440,38 @@ and make a recommendation for the ones that do not."""
                 "Asking nothing is not a question."
             )
         item = {"id": "q1", "question": text}
-        if options:
-            item["options"] = [str(option) for option in options]
+        if options is not None and options != []:
+            coerced, why = cls._coerce_options(options, "options")
+            if why is not None:
+                return [], why
+            if coerced:
+                item["options"] = coerced
         return [item], None
+
+    @staticmethod
+    def _coerce_options(raw: object, where: str) -> tuple[list[str], Optional[str]]:
+        """Turn the options the model sent into a list of strings, or say why not.
+
+        Models routinely serialize the array to a JSON string when the item
+        schema is nested (`questions[].options`), and dropping it silently is
+        the worst outcome: the caller asked a multiple-choice question and got a
+        free-form prompt instead, with nothing in the result explaining why.
+        """
+        value = raw
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError as e:
+                return [], (
+                    f"`{where}` is a string that is not JSON ({e}); pass a JSON "
+                    'array of strings, e.g. ["A", "B"].'
+                )
+        if not isinstance(value, list):
+            return [], (
+                f"`{where}` must be a JSON array of strings, got "
+                f"{type(value).__name__}."
+            )
+        return [str(option) for option in value], None
 
     async def _ask_one(
         self,
@@ -394,6 +480,7 @@ and make a recommendation for the ones that do not."""
         *,
         key: Optional[str],
         header: Optional[str],
+        multi_select: bool = False,
     ) -> str:
         """Ask one question through the shared callback and shape one result."""
         shown = f"[{header}] {question}" if header else question
@@ -405,7 +492,7 @@ and make a recommendation for the ones that do not."""
         loop = asyncio.get_running_loop()
         try:
             response = await loop.run_in_executor(
-                None, lambda: self._get_input(shown, options)
+                None, lambda: self._get_input(shown, options, multi_select)
             )
         except AskUserQuestionTimeout as e:
             logger.info(f"User input timed out after {e.waited_seconds:.0f}s")
@@ -432,6 +519,11 @@ and make a recommendation for the ones that do not."""
             "prompt": question,
             "response": response,
         }
+        if multi_select:
+            # The answer is the user's line, verbatim, exactly like a single
+            # answer — this flag is what tells the model it may hold several
+            # labels and that it should read them against `options`.
+            result["multi_select"] = True
         if key is not None:
             result["id"] = key
         if options:
