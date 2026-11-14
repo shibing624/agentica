@@ -321,9 +321,14 @@ class TestCLIUserMessage(unittest.TestCase):
         )
 
 
-    def test_typing_a_line_reopens_the_peer_channel(self):
-        """A typed line is the human interrupting, so the agent-to-agent cap
-        must not refuse the instruction that line is about."""
+    def test_pressing_enter_queues_the_typed_line(self):
+        """Enter dispatches exactly one turn with the text on the line.
+
+        This used to also assert that a typed line cleared the agent-to-agent
+        send brakes. Those brakes served the deleted ``send_message`` model
+        tool, so the assertion is gone with them; what remains is the Enter
+        handler actually handing the line over.
+        """
         from types import SimpleNamespace
 
         from prompt_toolkit.keys import Keys
@@ -332,9 +337,7 @@ class TestCLIUserMessage(unittest.TestCase):
         from agentica.cli.interactive.session_state import SessionState
         from agentica.cli.interactive.tui import _setup_tui
 
-        peer_session = Mock()
         state = SessionState()
-        state.peer_session = peer_session
         pending_queue = PendingQueue()
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -360,8 +363,8 @@ class TestCLIUserMessage(unittest.TestCase):
         handler(SimpleNamespace(app=SimpleNamespace(
             current_buffer=buffer, invalidate=Mock())))
 
-        peer_session.note_user_turn.assert_called_once()
         self.assertEqual(pending_queue.qsize(), 1)
+        self.assertEqual(pending_queue.get(), "发送消息给 temp-30, 我们用的 claude 模型")
 
     def test_enter_with_lone_surrogate_does_not_crash_history(self):
         """Invalid UTF-8 in a paste (lone surrogates) must still submit.

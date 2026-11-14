@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Cross-session peer messaging between live agentica CLI sessions.
+@description: Delivery into a live agentica session, and discovery of live sessions.
 
-Two sessions running in separate terminals exchange short plain-text messages
-so the user does not have to copy-paste findings between them. Everything is
-plain files under ``$AGENTICA_CACHE_DIR/peers`` — no daemon, socket or broker:
+A running session publishes a presence record and owns a mailbox, so another
+process can hand it a prompt without being attached to its terminal. Since
+1.6.0 the *senders* are only system surfaces — cron, the gateway scheduler and
+the IM relays; the model has no peer-send tool, so nothing in this module is a
+conversation between two models. Everything is plain files under
+``$AGENTICA_CACHE_DIR/peers`` — no daemon, socket or broker:
 
     peers/live/<peer_id>.json       one record per live session (discovery)
     peers/mailbox/<peer_id>/*.md    one markdown file per undelivered message
@@ -15,10 +18,9 @@ heartbeat went stale. Delivery is a *pull*: the receiving session drains its
 own mailbox directory between tool calls (see ``Runner._inject_peer_messages``)
 or while idle (the CLI's peer loop), so a running tool is never interrupted.
 
-The tree is deliberately user-level rather than project-scoped. Coordinating
-two worktrees of the same repository is the main use case and those have
-different working directories, so scoping by cwd would hide exactly the peers
-that most need to talk.
+The tree is deliberately user-level rather than project-scoped: a terminal
+working in one worktree still has to be reachable when the project is another
+checkout of the same repository, and scoping by cwd would hide exactly that.
 
 A message is plain text. It never carries conversation history or files — to
 move a whole conversation, resume or fork the session instead. The receiving
@@ -29,7 +31,6 @@ and the outcome stays in that session's answer where the delivery side reads it.
 from __future__ import annotations
 
 import json
-import hashlib
 import os
 import re
 import time
@@ -74,17 +75,6 @@ def normalize_delivery(value: Optional[str]) -> str:
         f"'{DELIVERY_QUEUE}' (next turn after the current run); got {value!r}"
     )
 
-# Two agents left alone will keep replying to each other, and neither of them is
-# the user whose windows they are spending. Counting the exchange and cutting it
-# off at N is the wrong brake: a handoff that legitimately needs a few more
-# rounds gets refused, and the refusal lands on whatever the user asked for
-# next. What is never legitimate is saying the same thing twice, or filling a
-# peer's context faster than anyone could act on it — so the brake is a repeat
-# check plus a generous rate limit, both per target peer and both cleared the
-# moment a human joins in (``PeerSession.note_user_turn``).
-RATE_WINDOW_SECONDS = 300.0
-MAX_SENDS_PER_WINDOW = 20
-
 # A message is injected straight into the receiver's context, so the only thing
 # this bounds is how much of someone else's window one send can spend. Generous
 # enough for a full handoff write-up; past it, the filesystem is shared and a
@@ -116,12 +106,6 @@ def _ensure_private_dir(path: Path) -> None:
 
 def new_peer_id() -> str:
     return uuid.uuid4().hex[:8]
-
-
-def _text_digest(text: str) -> str:
-    """Identity of a message for the repeat check: whitespace and case do not
-    make a reworded point out of the same one."""
-    return hashlib.sha1(" ".join(text.split()).lower().encode("utf-8")).hexdigest()
 
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -492,10 +476,6 @@ class PeerSession:
             model_name=model_name or None,
         )
         self._last_publish = 0.0
-        # (sent_at, digest) of what this session recently sent each peer, which
-        # is what the repeat check and the rate limit read. Trimmed to
-        # RATE_WINDOW_SECONDS on every send, so it stays a handful of entries.
-        self._recent_sends: Dict[str, List[Tuple[float, str]]] = {}
 
     @property
     def name(self) -> str:
@@ -598,100 +578,17 @@ class PeerSession:
     def unread_count(self) -> int:
         return unread_count(self.peer_id)
 
-    def note_user_turn(self) -> None:
-        """The human said something in this terminal.
-
-        The repeat check and the rate limit exist to stop an *unattended* loop,
-        so a person typing here is precisely the interruption they are waiting
-        for. Whatever the two agents said to each other beforehand must never
-        refuse what the user just asked for.
-        """
-        self._recent_sends.clear()
-
     def drain(self, *, delivery: Optional[str] = None) -> List[PeerMessage]:
         """Take pending messages and notify ``on_drain`` about them.
 
         ``delivery=None`` takes every file (idle CLI / between-turn poll).
         ``delivery='steer'`` takes only urgent mail so a running turn can
         inject it between tool batches and leave ``queue`` files for after.
-
-        Mail is always another session's process talking, never the user: the
-        user's own turns reach this agent through the input line, which is the
-        only path that clears the send brakes (``note_user_turn``).
         """
         messages = drain_inbox(self.peer_id, delivery=delivery)
         if messages and self.on_drain is not None:
             self.on_drain(messages)
         return messages
-
-    def _check_send_rate(self, peer: PeerInfo, text: str) -> None:
-        """Refuse a repeat of what this peer was just told, or a flood of them.
-
-        Both are judged over the same window and only against *this* target, so
-        talking to three peers at once is unaffected.
-        """
-        now = time.time()
-        digest = _text_digest(text)
-        history = [
-            (sent_at, sent_digest)
-            for sent_at, sent_digest in self._recent_sends.get(peer.peer_id, [])
-            if now - sent_at < RATE_WINDOW_SECONDS
-        ]
-        self._recent_sends[peer.peer_id] = history
-        for sent_at, sent_digest in history:
-            if sent_digest == digest:
-                raise PeerMessageRefused(
-                    f"you already sent {peer.name} this exact message "
-                    f"{int(now - sent_at)}s ago and it was delivered; repeating it "
-                    "will not get a different answer. Wait for their reply, or "
-                    "tell your user the handoff is not moving"
-                )
-        if len(history) >= MAX_SENDS_PER_WINDOW:
-            raise PeerMessageRefused(
-                f"{len(history)} messages have gone to {peer.name} in the last "
-                f"{int(RATE_WINDOW_SECONDS / 60)} minutes; the channel hands over "
-                "information, it is not a discussion. Act on what you have and "
-                "report to your user — anything they say next reopens it"
-            )
-
-    def _note_send(self, peer: PeerInfo, text: str) -> None:
-        self._recent_sends.setdefault(peer.peer_id, []).append((time.time(), _text_digest(text)))
-
-    def send(
-        self,
-        target: str,
-        text: str,
-        *,
-        delivery: str = DELIVERY_STEER,
-    ) -> PeerMessage:
-        """Resolve ``target`` among live peers and deliver ``text`` to it.
-
-        "Nobody by that name" and "be more specific" are different problems
-        with different fixes, so an ambiguous target says so and names the
-        candidates instead of reporting the target as unknown.
-        """
-        matches = match_peers(target, exclude_peer_id=self.peer_id)
-        if not matches:
-            raise PeerMessageRefused(
-                f"no live session matches '{target}'; run /list-agents to see current names"
-            )
-        if len(matches) > 1:
-            names = ", ".join(info.name for info in matches)
-            raise PeerMessageRefused(
-                f"'{target}' matches {len(matches)} live sessions ({names}); "
-                "use the full name or the peer id"
-            )
-        peer = matches[0]
-        self._check_send_rate(peer, text)
-        message = send_message(
-            peer,
-            text=text,
-            from_name=self.info.name,
-            from_peer_id=self.peer_id,
-            delivery=delivery,
-        )
-        self._note_send(peer, text)
-        return message
 
 
 def list_live_peers(exclude_peer_id: Optional[str] = None) -> List[PeerInfo]:
@@ -717,43 +614,6 @@ def list_live_peers(exclude_peer_id: Optional[str] = None) -> List[PeerInfo]:
         peers.append(info)
     peers.sort(key=lambda p: p.updated_at, reverse=True)
     return peers
-
-
-def match_peers(target: str, *, exclude_peer_id: Optional[str] = None) -> List[PeerInfo]:
-    """Live peers matching ``target``, most specific interpretation first.
-
-    Tried in order — peer_id, whole session_id, session_id prefix, name, name
-    prefix — and the first interpretation that matches anything wins, so a
-    name that happens to prefix another name never shadows an exact hit.
-    Returns several entries only when the string is genuinely ambiguous, which
-    lets a caller distinguish "unknown" from "be more specific".
-    """
-    needle = (target or "").strip()
-    if not needle:
-        return []
-    peers = list_live_peers(exclude_peer_id=exclude_peer_id)
-    lowered = needle.casefold()
-    candidate_sets = [
-        [p for p in peers if p.peer_id == needle],
-        [p for p in peers if p.session_id == needle],
-        # A short prefix of a uuid is more likely a typo than an address.
-        [
-            p for p in peers
-            if len(needle) >= 8 and p.session_id and p.session_id.startswith(needle)
-        ],
-        [p for p in peers if p.name.casefold() == lowered],
-        [p for p in peers if p.name.casefold().startswith(lowered)],
-    ]
-    for candidates in candidate_sets:
-        if candidates:
-            return candidates
-    return []
-
-
-def resolve_peer(target: str, *, exclude_peer_id: Optional[str] = None) -> Optional[PeerInfo]:
-    """Find the one live peer ``target`` names, or None when it is not unique."""
-    matches = match_peers(target, exclude_peer_id=exclude_peer_id)
-    return matches[0] if len(matches) == 1 else None
 
 
 class PeerMessageRefused(Exception):
