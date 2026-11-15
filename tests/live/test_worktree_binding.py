@@ -1,147 +1,146 @@
 # -*- coding: utf-8 -*-
+"""WorktreeBinder: message/state decisions, with git orchestration stubbed.
+
+The binder's job is to translate "create / merge / remove this task worktree"
+into the right `worktrees.*` call and the right sentence for the model, never
+moving the session. Real git was tested here before; it is not the unit.
 """
-@author: XuMing(xuming624@qq.com)
-@description: Binder creates and disposes worktrees without moving the session.
-"""
-import shutil
-from pathlib import Path
+import os
+from types import SimpleNamespace
 
 import pytest
 
-from agentica.git import worktree as worktrees
-from agentica.cli.commands.context import CommandContext
-from agentica.cli.commands.worktree_cmd import _cmd_worktree
-from agentica.cli.worktree_binding import WorktreeBinder
-from agentica.git.worktree import WorktreeError, ensure
-
-
-def _git(cwd, *args):
-    import subprocess
-
-    subprocess.run(
-        ["git", *args], cwd=str(cwd), check=True, capture_output=True, text=True
-    )
+from agentica.git import binding
+from agentica.git.binding import WorktreeBinder
+from agentica.git.worktree import MergeResult, Worktree, WorktreeError
 
 
 @pytest.fixture
-def repo(clone_git_repo, tmp_path, monkeypatch):
-    monkeypatch.setattr(worktrees, "_configured_root", lambda: worktrees.DEFAULT_ROOT)
-    return clone_git_repo(tmp_path / "repo")
+def binder(tmp_path):
+    return WorktreeBinder(agent_config={"work_dir": str(tmp_path)})
 
 
-def _binder(work_dir):
-    cfg = {"work_dir": str(work_dir)}
-    return WorktreeBinder(agent_config=cfg), cfg
+def test_create_returns_the_path_and_keeps_the_session_put(monkeypatch, binder, tmp_path):
+    entry = Worktree(name="docs", path=str(tmp_path / ".worktrees" / "docs"), branch="refs/heads/wt/docs",
+                     linked=("AGENTS.md",))
+    monkeypatch.setattr(binding.worktrees, "ensure", lambda *a, **k: entry)
+    out = binder.create("docs")
+    assert entry.path in out
+    assert "stayed in" in out
+    assert "AGENTS.md" in out
+    assert binder.work_dir() == str(tmp_path)
 
 
-class TestCreateDoesNotMoveTheSession:
-    def test_create_returns_the_path_and_leaves_work_dir(self, repo):
-        binder, cfg = _binder(repo)
-        out = binder.create("docs")
-        assert str(repo / ".worktrees" / "docs") in out
-        assert "stayed in" in out
-        assert cfg["work_dir"] == str(repo)
+def test_create_propagates_a_refusal(monkeypatch, binder):
+    def boom(*a, **k):
+        raise WorktreeError("main is the main checkout")
 
-    def test_create_refuses_the_base_branch_name(self, repo):
-        binder, _ = _binder(repo)
-        with pytest.raises(WorktreeError, match="main checkout"):
-            binder.create("main")
-        assert not Path(repo, ".worktrees/main").exists()
+    monkeypatch.setattr(binding.worktrees, "ensure", boom)
+    with pytest.raises(WorktreeError, match="main checkout"):
+        binder.create("main")
 
 
-class TestMergeAndRemoveByName:
-    def test_merge_lands_and_deletes_without_moving(self, repo):
-        binder, cfg = _binder(repo)
-        binder.create("docs")
-        wt = worktrees.find(str(repo), "docs")
-        (Path(wt.path) / "feature.py").write_text("x = 1\n")
-        _git(wt.path, "add", "feature.py")
-        _git(wt.path, "commit", "-q", "-m", "add feature")
-
-        out = binder.merge("docs")
-        assert "Merged" in out or "already had" in out
-        assert cfg["work_dir"] == str(repo)
-        assert (repo / "feature.py").is_file()
-        assert not Path(wt.path).exists()
-
-    def test_remove_by_name_leaves_the_session(self, repo):
-        binder, cfg = _binder(repo)
-        binder.create("docs")
-        out = binder.remove("docs")
-        assert "Removed" in out
-        assert cfg["work_dir"] == str(repo)
-        assert worktrees.find(str(repo), "docs") is None
-
-    def test_remove_unknown_name_raises(self, repo):
-        binder, _ = _binder(repo)
-        with pytest.raises(WorktreeError, match="no worktree"):
-            binder.remove("nope")
-
-    def test_remove_clears_a_gone_sibling_so_new_can_reuse_the_name(
-        self, repo, monkeypatch
-    ):
-        monkeypatch.setattr(worktrees, "_configured_root", lambda: worktrees.SIBLING_ROOT)
-        binder, cfg = _binder(repo)
-        binder.create("docs")
-        entry = worktrees.find(str(repo), "docs")
-        assert entry is not None
-        shutil.rmtree(entry.path)
-
-        with pytest.raises(WorktreeError, match="not a checkout"):
-            binder.merge("docs")
-        with pytest.raises(WorktreeError, match="not a checkout"):
-            binder.create("docs")
-
-        out = binder.remove("docs")
-        assert "Removed" in out
-        assert cfg["work_dir"] == str(repo)
-        again = binder.create("docs")
-        assert str(repo.parent / f"{repo.name}-docs") in again
-        assert Path(repo.parent / f"{repo.name}-docs").is_dir()
+def _entry(tmp_path, name="docs", *, exists=True):
+    return Worktree(name=name, path=str(tmp_path / ".worktrees" / name),
+                    branch=f"refs/heads/wt/{name}", exists=exists)
 
 
-class TestReleaseOnlyAfterEntering:
-    def test_release_skips_git_when_session_never_entered_a_worktree(self, repo, monkeypatch):
-        wt = ensure(str(repo), "docs")
-        binder, _ = _binder(repo)
-        probed = []
-        monkeypatch.setattr(worktrees, "is_git_repo", lambda *_a, **_k: probed.append(True) or True)
-        assert binder.release() is None
-        assert probed == []
-        assert Path(wt.path).is_dir()
-
-    def test_release_leaves_dirty_worktree(self, repo):
-        wt = ensure(str(repo), "docs")
-        (Path(wt.path) / "dirty.py").write_text("nope\n")
-        binder, _ = _binder(wt.path)
-        binder.mark_entered()
-        assert binder.release() is None
-        assert Path(wt.path).is_dir()
-
-    def test_release_swallows_getcwd_eintr_when_entered(self, monkeypatch):
-        def boom():
-            raise InterruptedError(4, "Interrupted system call")
-
-        monkeypatch.setattr("os.getcwd", boom)
-        binder, _ = _binder("/unused")
-        binder.mark_entered()
-        binder._agent_config.clear()
-        assert binder.release() is None
+def test_merge_without_a_worktree_is_refused(monkeypatch, binder):
+    monkeypatch.setattr(binding.worktrees, "find", lambda cwd, name: None)
+    with pytest.raises(WorktreeError, match="no worktree named"):
+        binder.merge("docs")
 
 
-class TestSlashDispatch:
-    def test_new_without_a_name_prints_usage(self, capsys):
-        class Binder:
-            def create(self, name, *, base=None):
-                raise AssertionError("must not create")
+def test_merge_refuses_a_registration_that_is_not_a_checkout(monkeypatch, binder, tmp_path):
+    monkeypatch.setattr(binding.worktrees, "find", lambda cwd, name: _entry(tmp_path, exists=False))
+    with pytest.raises(WorktreeError, match="not a checkout"):
+        binder.merge("docs")
 
-        ctx = CommandContext(agent_config={}, current_agent=None, worktree_binder=Binder())
-        _cmd_worktree(ctx, "new")
-        assert "Usage" in capsys.readouterr().out
 
-    def test_main_is_refused(self, capsys):
-        ctx = CommandContext(
-            agent_config={}, current_agent=None, worktree_binder=object()
-        )
-        _cmd_worktree(ctx, "main")
-        assert "does not move" in capsys.readouterr().out
+def test_merge_conflict_reports_files_and_removes_nothing(monkeypatch, binder, tmp_path):
+    removed = []
+    monkeypatch.setattr(binding.worktrees, "find", lambda cwd, name: _entry(tmp_path))
+    monkeypatch.setattr(
+        binding.worktrees, "merge_back",
+        lambda path, base=None: MergeResult(branch="wt/docs", base="main", commits=2,
+                                            merged_sha="", conflicted_files=("a.py",)),
+    )
+    monkeypatch.setattr(binding.worktrees, "remove", lambda *a: removed.append(a))
+    out = binder.merge("docs")
+    assert "conflicted" in out and "a.py" in out
+    assert removed == []
+
+
+def test_merge_clean_lands_then_removes_the_checkout(monkeypatch, binder, tmp_path):
+    removed = []
+    monkeypatch.setattr(binding.worktrees, "find", lambda cwd, name: _entry(tmp_path))
+    monkeypatch.setattr(
+        binding.worktrees, "merge_back",
+        lambda path, base=None: MergeResult(branch="wt/docs", base="main", commits=1, merged_sha="abc"),
+    )
+    monkeypatch.setattr(binding.worktrees, "remove", lambda entry, cwd: removed.append(entry))
+    monkeypatch.setattr(binding.git_state, "invalidate", lambda: None)
+    out = binder.merge("docs")
+    assert "Merged 1 commit(s)" in out
+    assert "worktree removed" in out
+    assert removed
+
+
+def test_merge_reports_already_merged(monkeypatch, binder, tmp_path):
+    monkeypatch.setattr(binding.worktrees, "find", lambda cwd, name: _entry(tmp_path))
+    monkeypatch.setattr(
+        binding.worktrees, "merge_back",
+        lambda path, base=None: MergeResult(branch="wt/docs", base="main", commits=0,
+                                            merged_sha="abc", already_merged=True),
+    )
+    monkeypatch.setattr(binding.worktrees, "remove", lambda *a: None)
+    monkeypatch.setattr(binding.git_state, "invalidate", lambda: None)
+    assert "already had every commit" in binder.merge("docs")
+
+
+def test_remove_drops_the_checkout_without_moving(monkeypatch, binder, tmp_path):
+    entry = _entry(tmp_path)
+    monkeypatch.setattr(binding.worktrees, "find", lambda cwd, name: entry)
+    removed = []
+    monkeypatch.setattr(binding.worktrees, "remove", lambda e, cwd: removed.append(e))
+    out = binder.remove("docs")
+    assert "Removed worktree" in out and "stayed in" in out
+    assert removed == [entry]
+
+
+def test_status_says_when_there_is_no_repository(monkeypatch, binder):
+    monkeypatch.setattr(binding.worktrees, "is_git_repo", lambda cwd: False)
+    assert "not inside a git repository" in binder.status()
+
+
+def test_status_marks_the_current_tree(monkeypatch, binder, tmp_path):
+    entry = Worktree(name="docs", path=str(tmp_path / "docs"), branch="refs/heads/wt/docs")
+    monkeypatch.setattr(binding.worktrees, "is_git_repo", lambda cwd: True)
+    monkeypatch.setattr(binding.worktrees, "current_root", lambda cwd: entry.path)
+    monkeypatch.setattr(binding.worktrees, "list_worktrees", lambda cwd: [entry])
+    monkeypatch.setattr(
+        binding.git_state, "collect",
+        lambda cwd, ttl=0: SimpleNamespace(known=True, summary=lambda: "clean"),
+    )
+    out = binder.status()
+    assert "<- you are here" in out
+    assert "clean" in out
+
+
+def test_release_is_a_no_op_unless_started_with_worktree(binder):
+    assert binder.release() is None
+
+
+def test_release_removes_a_clean_managed_checkout(monkeypatch, binder, tmp_path):
+    entry = _entry(tmp_path)
+    monkeypatch.setattr(binding.worktrees, "is_git_repo", lambda cwd: True)
+    monkeypatch.setattr(binding.worktrees, "current_root", lambda cwd: entry.path)
+    monkeypatch.setattr(binding.worktrees, "main_root", lambda cwd: str(tmp_path))
+    monkeypatch.setattr(binding.worktrees, "resolve_entry", lambda path: entry)
+    monkeypatch.setattr(binding.worktrees, "is_managed", lambda e: True)
+    monkeypatch.setattr(binding.worktrees, "has_unique_work", lambda e: False)
+    monkeypatch.setattr(binding.worktrees, "remove", lambda e, cwd: None)
+    monkeypatch.setattr(binding.os, "chdir", lambda path: None)
+    binder.mark_entered()
+    assert binder.release() == entry.path
+    assert binder.work_dir() == str(tmp_path)

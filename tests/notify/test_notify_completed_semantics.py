@@ -83,7 +83,7 @@ class TestAGoalDoesNotReportDonePerLap:
             # Three laps of a standing goal.
             for _ in range(3):
                 notify_sink_dispatch(_record(), session_id="sess-1", agent=agent)
-            time.sleep(0.15)
+            time.sleep(0.06)
 
             assert _events(desktop) == []
         finally:
@@ -104,7 +104,7 @@ class TestAGoalDoesNotReportDonePerLap:
                 notify_sink_dispatch(
                     _record(RunEventType.run_started), session_id="sess-1", agent=agent,
                 )
-            time.sleep(0.15)
+            time.sleep(0.06)
 
             assert _events(desktop) == ["run.started"] * 3
         finally:
@@ -123,7 +123,7 @@ class TestAGoalDoesNotReportDonePerLap:
 
             notify_sink_dispatch(_record(RunEventType.run_failed), agent=agent)
             notify_sink_dispatch(_record(RunEventType.run_cancelled), agent=agent)
-            time.sleep(0.15)
+            time.sleep(0.06)
 
             assert sorted(_events(desktop)) == ["run.cancelled", "run.failed"]
         finally:
@@ -155,7 +155,7 @@ class TestAGoalDoesNotReportDonePerLap:
             from agentica.notify import goal_finished
 
             goal_finished(agent, session_id="sess-1")
-            time.sleep(0.15)
+            time.sleep(0.06)
 
             assert _events(desktop) == ["run.completed"]
         finally:
@@ -177,7 +177,7 @@ class TestAGoalDoesNotReportDonePerLap:
 
             goal_finished(agent, session_id="sess-1")
             goal_finished(agent, session_id="sess-1")
-            time.sleep(0.15)
+            time.sleep(0.06)
 
             assert _events(desktop) == ["run.completed"]
         finally:
@@ -192,7 +192,7 @@ class TestAGoalDoesNotReportDonePerLap:
             from agentica.notify import goal_finished
 
             goal_finished(agent, session_id="sess-1")
-            time.sleep(0.15)
+            time.sleep(0.06)
 
             assert _events(desktop) == []
         finally:
@@ -211,7 +211,7 @@ class TestAGoalDoesNotReportDonePerLap:
             mgr.pause(reason="user-interrupted")
 
             notify_sink_dispatch(_record(), agent=agent)
-            time.sleep(0.15)
+            time.sleep(0.06)
 
             assert _events(desktop) == ["run.completed"]
         finally:
@@ -253,7 +253,7 @@ class TestItReadsTheSignalThatIsActuallyCurrent:
             GoalManager(agent._session_log).set("设定目标")
 
             notify_sink_dispatch(_record(), agent=agent)
-            time.sleep(0.15)
+            time.sleep(0.06)
 
             assert _events(desktop) == [], "the stale-cache hazard must not resurface"
         finally:
@@ -275,7 +275,7 @@ class TestQueuedInputAlsoDefersDone:
             set_idle_provider(lambda: not queued)
 
             notify_sink_dispatch(_record(), agent=_agent(tmp_path))
-            time.sleep(0.15)
+            time.sleep(0.06)
 
             assert _events(desktop) == []
         finally:
@@ -291,7 +291,7 @@ class TestQueuedInputAlsoDefersDone:
             notify_sink_dispatch(_record(), agent=_agent(tmp_path))  # deferred
             queued.pop()                                             # nothing left
             notify_sink_dispatch(_record(), agent=_agent(tmp_path))  # reported
-            time.sleep(0.15)
+            time.sleep(0.06)
 
             assert _events(desktop) == ["run.completed"]
         finally:
@@ -305,7 +305,7 @@ class TestQueuedInputAlsoDefersDone:
 
             notify_sink_dispatch(_record(RunEventType.run_started), agent=_agent(tmp_path))
             notify_sink_dispatch(_record(RunEventType.run_failed), agent=_agent(tmp_path))
-            time.sleep(0.15)
+            time.sleep(0.06)
 
             assert sorted(_events(desktop)) == ["run.failed", "run.started"]
         finally:
@@ -318,7 +318,7 @@ class TestQueuedInputAlsoDefersDone:
             install_sink(NotifyConfig(enabled=True, socket=desktop.socket_path))
             set_idle_provider(None)
             notify_sink_dispatch(_record(), agent=_agent(tmp_path))
-            time.sleep(0.15)
+            time.sleep(0.06)
             assert _events(desktop) == ["run.completed"]
         finally:
             desktop.close()
@@ -335,7 +335,7 @@ class TestQueuedInputAlsoDefersDone:
 
             set_idle_provider(boom)
             notify_sink_dispatch(_record(), agent=_agent(tmp_path))
-            time.sleep(0.15)
+            time.sleep(0.06)
 
             assert _events(desktop) == ["run.completed"]
         finally:
@@ -359,7 +359,7 @@ class TestQueuedInputAlsoDefersDone:
         try:
             install_sink(NotifyConfig(enabled=True, socket=desktop.socket_path))
             notify_sink_dispatch(_record(), agent=_agent(tmp_path))
-            time.sleep(0.15)
+            time.sleep(0.06)
             assert _events(desktop) == []
         finally:
             desktop.close()
@@ -377,7 +377,7 @@ class TestDegradesToReporting:
             assert agent._session_log is None
 
             notify_sink_dispatch(_record(), agent=agent)
-            time.sleep(0.15)
+            time.sleep(0.06)
 
             assert _events(desktop) == ["run.completed"]
         finally:
@@ -397,7 +397,7 @@ class TestDegradesToReporting:
                 _session_log = _BrokenLog()
 
             notify_sink_dispatch(_record(), agent=_Agent())
-            time.sleep(0.15)
+            time.sleep(0.06)
 
             assert _events(desktop) == ["run.completed"]
         finally:
@@ -408,7 +408,7 @@ class TestDegradesToReporting:
         try:
             install_sink(NotifyConfig(enabled=True, socket=desktop.socket_path))
             notify_sink_dispatch(_record())
-            time.sleep(0.15)
+            time.sleep(0.06)
             assert _events(desktop) == ["run.completed"]
         finally:
             desktop.close()

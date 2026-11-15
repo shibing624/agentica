@@ -127,7 +127,7 @@ class TestTheSdkGoalLoopReleasesTheHeldCompletion:
             assert isinstance(result, GoalRunResult)
             assert result.status == "complete"
 
-            time.sleep(0.5)
+            time.sleep(0.15)
             bodies = _completed_bodies(desktop)
             assert len(bodies) == 1, f"expected exactly one completion, got {len(bodies)}"
         finally:
@@ -146,7 +146,7 @@ class TestTheSdkGoalLoopReleasesTheHeldCompletion:
             )
             assert result.status in {"paused", "budget_limited", "complete"}
 
-            time.sleep(0.5)
+            time.sleep(0.15)
             bodies = _completed_bodies(desktop)
             assert len(bodies) == 1, f"expected exactly one completion, got {len(bodies)}"
         finally:
@@ -165,7 +165,7 @@ class TestTheSdkGoalLoopReleasesTheHeldCompletion:
             _run_goal(
                 tmp_path, "sdk-goal-payload", desktop, judge='{"done": true, "reason": "ok"}'
             )
-            time.sleep(0.5)
+            time.sleep(0.15)
             bodies = _completed_bodies(desktop)
             assert len(bodies) == 1
             payload = bodies[0]
@@ -185,7 +185,7 @@ class TestTheSdkGoalLoopReleasesTheHeldCompletion:
 
             agent = _bare_agent(tmp_path, "sdk-goal-none", '{"done": true}')
             goal_finished(agent, session_id="sdk-goal-none")
-            time.sleep(0.3)
+            time.sleep(0.1)
             assert _completed_bodies(desktop) == []
         finally:
             desktop.close()
@@ -248,7 +248,7 @@ class TestTheCloneTrap:
                 "held and the assertions in this file would be vacuous"
             )
 
-            time.sleep(0.4)
+            time.sleep(0.12)
             # One lap, one completion: held by the sink, released by the loop.
             assert len(_completed_bodies(desktop)) == 1
         finally:
@@ -265,7 +265,7 @@ class TestTheCloneTrap:
             _run_goal(
                 tmp_path, "sdk-goal-clone", desktop, judge='{"done": true, "reason": "ok"}'
             )
-            time.sleep(0.5)
+            time.sleep(0.15)
             assert len(_completed_bodies(desktop)) == 1
         finally:
             desktop.close()

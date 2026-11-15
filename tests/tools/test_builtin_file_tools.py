@@ -345,8 +345,8 @@ class TestBuiltinFileToolReadCorrectness:
         """tail holds a bounded number of lines on any file size — the 256KB
         guard must not reject the call its own error message recommends."""
         p = Path(tmp_dir, "big.log")
-        n = 5000
-        p.write_text("\n".join(f"row{i} {'x' * 80}" for i in range(1, n + 1)))
+        n = 500
+        p.write_text("\n".join(f"row{i} {'x' * 800}" for i in range(1, n + 1)))
         assert p.stat().st_size > file_tool.MAX_FILE_SIZE_BYTES
 
         result = asyncio.run(file_tool.read_file(str(p), tail=5))
@@ -360,13 +360,13 @@ class TestBuiltinFileToolReadCorrectness:
         """The guard measures what is returned, not the file: `limit=1` on a
         multi-MB JSONL must return its first record (production refused it)."""
         p = Path(tmp_dir, "big.jsonl")
-        p.write_text("\n".join(f'{{"id": {i}, "pad": "{"y" * 4000}"}}' for i in range(800)))
+        p.write_text("\n".join(f'{{"id": {i}, "pad": "{"y" * 8000}"}}' for i in range(400)))
         assert p.stat().st_size > file_tool.MAX_FILE_SIZE_BYTES
 
         result = asyncio.run(file_tool.read_file(str(p), limit=1))
         assert '{"id": 0,' in result
         assert '"id": 1,' not in result
-        assert "[Showing lines 1-1 of 800 total lines]" in result
+        assert "[Showing lines 1-1 of 400 total lines]" in result
 
     def test_read_file_window_over_the_cap_is_refused(self, file_tool, tmp_dir):
         p = Path(tmp_dir, "wide.txt")
@@ -485,7 +485,7 @@ class TestBuiltinFileToolGlob:
              patch.object(Path, "glob", slow_glob):
             with pytest.raises(TimeoutError) as exc:
                 asyncio.run(tool.glob("**/*.py", str(tmp_dir)))
-            _time.sleep(0.3)
+            _time.sleep(0.1)
         message = str(exc.value)
         assert "1 matches before it stopped" in message
         assert "found_early.py" in message
@@ -567,7 +567,7 @@ class TestBuiltinFileToolGrep:
         )
         fake_rg.chmod(0o755)
         with patch("agentica.tools.builtin.file_tool.shutil.which", return_value=str(fake_rg)), \
-             patch("agentica.tools.builtin.file_tool._GREP_TIMEOUT", 1):
+             patch("agentica.tools.builtin.file_tool._GREP_TIMEOUT", 0.5):
             with pytest.raises(TimeoutError) as exc:
                 asyncio.run(file_tool.grep("def stratified_sample", tmp_dir, limit=3))
         message = str(exc.value)

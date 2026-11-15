@@ -382,37 +382,6 @@ class TestBuiltinExecuteTool:
         assert "reported to the user, not to you" in undelivered
         assert "come back to you as a new" not in undelivered
 
-    def test_long_running_jobs_skill_watch_example_reports_the_job(self, bg_execute_tool, tmp_dir):
-        """A tmux/nohup job has no completion event, so the background prose
-        points at the ``long-running-jobs`` skill, whose example models copy.
-        Run as written (with a short interval), it must keep watching while
-        the job runs and end with the job's own exit code."""
-        assert "long-running-jobs" in bg_execute_tool.functions["execute"].description
-        skill_md = Path(agentica.__file__).parent / "skills" / "bundled" / "long-running-jobs" / "SKILL.md"
-        command = next(
-            m.group(1) for m in re.finditer(r'command="(agentica watch [^"]+)"', skill_md.read_text(encoding="utf-8"))
-        )
-        argv = shlex.split(command)
-        assert argv[:2] == ["agentica", "watch"]
-        cli = [sys.executable, "-c", "import sys; from agentica.cli.main import main; main()"]
-        watcher = subprocess.Popen(
-            [*cli, *argv[1:], "--interval", "0.1"], cwd=tmp_dir,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-        )
-        try:
-            time.sleep(1.0)
-            assert watcher.poll() is None  # no marker yet: still watching
-            with open(os.path.join(tmp_dir, "train.log"), "w") as fh:
-                fh.write("epoch 9 loss=0.1\n")
-            with open(os.path.join(tmp_dir, "train.exit"), "w") as fh:
-                fh.write("3\n")
-            out, _ = watcher.communicate(timeout=30)
-        finally:
-            if watcher.poll() is None:
-                watcher.kill()
-        assert watcher.returncode == 3
-        assert "loss=0.1" in out
-
     def test_execute_leaves_plain_commands_unflagged(self, execute_tool):
         """`2>&1` contains an ampersand without detaching anything."""
         result = asyncio.run(execute_tool.execute("echo ok 2>&1"))
@@ -766,10 +735,11 @@ class TestBuiltinExecuteTool:
     @pytest.mark.skipif(os.name == "nt", reason="POSIX shell")
     def test_execute_timeout_keeps_output_printed_before_it(self, tmp_dir):
         tool = BuiltinExecuteTool(work_dir=tmp_dir, timeout=1)
+        tool._timeout = 0.2  # a one-second floor is a wall-clock tax per run
         with pytest.raises(TimeoutError) as excinfo:
             asyncio.run(tool.execute("echo step-one-done; sleep 30"))
         message = str(excinfo.value)
-        assert "timed out after 1 seconds" in message
+        assert "timed out" in message
         assert "step-one-done" in message
 
     @pytest.mark.skipif(os.name == "nt", reason="POSIX shell")

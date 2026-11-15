@@ -203,7 +203,7 @@ def test_the_terminal_answering_first_kills_the_loser(tmp_path, loop):
     assert _decide_on_loop(loop, registry, "call_1", "allow") is True
     assert future.result(timeout=5) == "allow"
 
-    time.sleep(1.0)
+    time.sleep(0.6)
     assert not marker.exists(), "the hook was not killed after the terminal answered"
 
 
@@ -216,7 +216,7 @@ def test_a_hook_with_no_decision_leaves_the_parked_approval_alone(tmp_path, loop
     pending = _pending()
     _offer_approval_to_hook(pending, _State(registry), loop, _request(pending))
 
-    time.sleep(1.0)
+    time.sleep(0.25)
     assert not future.done(), "an empty reply must not resolve the approval"
     # The terminal can still answer, which is the whole fallback contract.
     assert _decide_on_loop(loop, registry, "call_1", "allow") is True
@@ -228,7 +228,7 @@ def test_no_hook_is_a_no_op(tmp_path, loop):
     future = _park(loop, registry, _pending())
     pending = _pending()
     _offer_approval_to_hook(pending, _State(registry), loop, _request(pending))
-    time.sleep(0.4)
+    time.sleep(0.2)
     assert not future.done()
     assert _decide_on_loop(loop, registry, "call_1", "deny") is True
     assert future.result(timeout=5) == "deny"

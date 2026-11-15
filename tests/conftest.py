@@ -53,6 +53,18 @@ from agentica.agent import Agent
 from agentica.model.base import Model
 from agentica.model.response import ModelResponse
 
+# One session-wide root for the per-test isolation dirs. Creating a directory
+# per test is cheap; deleting one per test is not (rmtree per test added
+# seconds to the suite, and a background thread still writing during cleanup
+# turned into xdist teardown errors). Everything goes away with the root.
+_SESSION_TEST_ROOT = tempfile.mkdtemp(prefix="agentica-test-dirs-")
+atexit.register(shutil.rmtree, _SESSION_TEST_ROOT, ignore_errors=True)
+
+
+def _fresh_test_dir(prefix: str) -> str:
+    """A unique directory under the session root (never cleaned per test)."""
+    return tempfile.mkdtemp(prefix=prefix, dir=_SESSION_TEST_ROOT)
+
 
 @pytest.fixture(autouse=True)
 def _isolate_default_project_dir(monkeypatch):
@@ -63,9 +75,8 @@ def _isolate_default_project_dir(monkeypatch):
     for every test so accidental Agent/SessionLog construction cannot write
     into this repo's real projects tree.
     """
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-        monkeypatch.setenv("AGENTICA_PROJECTS_DIR", tmpdir)
-        yield
+    monkeypatch.setenv("AGENTICA_PROJECTS_DIR", _fresh_test_dir("projects-"))
+    yield
 
 
 @pytest.fixture(autouse=True)
@@ -81,12 +92,11 @@ def _isolate_gateway_accounts():
     except ImportError:
         yield
         return
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-        accounts.use_store_for_tests(os.path.join(tmpdir, "auth.json"))
-        try:
-            yield
-        finally:
-            accounts.use_store_for_tests(accounts.AUTH_FILE)
+    accounts.use_store_for_tests(os.path.join(_fresh_test_dir("gateway-"), "auth.json"))
+    try:
+        yield
+    finally:
+        accounts.use_store_for_tests(accounts.AUTH_FILE)
 
 
 @pytest.fixture(autouse=True)
@@ -124,11 +134,11 @@ def opened_externally(monkeypatch):
 def _isolate_skill_dir(monkeypatch):
     """Keep skill loading and skill CRUD off the user's real
     ``~/.agentica/skills``."""
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-        monkeypatch.setenv("AGENTICA_SKILL_DIR", tmpdir)
-        monkeypatch.setattr("agentica.config.AGENTICA_SKILL_DIR", tmpdir, raising=False)
-        monkeypatch.setattr("agentica.skills.skill_loader.AGENTICA_SKILL_DIR", tmpdir, raising=False)
-        yield
+    tmpdir = _fresh_test_dir("skills-")
+    monkeypatch.setenv("AGENTICA_SKILL_DIR", tmpdir)
+    monkeypatch.setattr("agentica.config.AGENTICA_SKILL_DIR", tmpdir, raising=False)
+    monkeypatch.setattr("agentica.skills.skill_loader.AGENTICA_SKILL_DIR", tmpdir, raising=False)
+    yield
 
 
 # ---------------------------------------------------------------------------

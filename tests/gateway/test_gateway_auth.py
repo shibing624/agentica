@@ -26,6 +26,21 @@ TOKEN = "test-token-not-a-real-secret"
 ADMIN_ID = "default"
 
 
+@pytest.fixture(autouse=True)
+def _cheap_password_hash(monkeypatch):
+    """scrypt cost is a production defence; tests do not need to pay it.
+
+    n=2**14 (~60ms per hash) times every seed/login in this file was a large
+    part of its runtime. The stored form carries n/r/p, so verification still
+    exercises the real format.
+    """
+    from agentica_gateway import accounts
+
+    monkeypatch.setattr(accounts, "_SCRYPT_N", 2 ** 8)
+    monkeypatch.setattr(accounts, "_SCRYPT_R", 1)
+    monkeypatch.setattr(accounts, "_SCRYPT_P", 1)
+
+
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
     """A gateway with the gate ON and a pinned token.

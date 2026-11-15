@@ -12,10 +12,14 @@ commit guidelines below.
 
 ```sh
 pip install -e ".[dev]" -e "./gateway[all]"
-python -m pytest tests -q                       # serial: ~2.5 min
-python -m pytest tests -q -n 8 --dist loadfile  # parallel (pytest-xdist): ~35 s
+python -m pytest tests -q                       # serial: ~1.5 min
+python -m pytest tests -q -n 8 --dist loadfile  # parallel (pytest-xdist): ~27 s
 ```
 
 `-n` is a local convenience. Bare CI installs the package without `[dev]`,
 where an unknown `-n` aborts collection, so it must stay out of `addopts`.
 Before opening a PR also run `python scripts/check_bare_ci_imports.py`.
+
+Tests assert on decisions (which argv, which branch, which message),
+not on a freshly created repository / pty / child process per scenario;
+real end-to-end runs are a development step, not a per-run tax.

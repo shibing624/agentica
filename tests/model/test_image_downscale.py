@@ -11,7 +11,7 @@ import os
 import random
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from agentica.model.base import (
     _VISION_PNG_BUDGET_BYTES,
@@ -87,7 +87,7 @@ def test_downscaled_output_is_smaller_than_input():
 
 def test_png_is_preferred_for_screenshots():
     """A text-like image must stay lossless PNG, not silently become JPEG."""
-    img = Image.new("RGB", (2200, 200), (255, 255, 255))
+    img = Image.new("RGB", (2001, 200), (255, 255, 255))
     for x in range(0, img.width, 3):  # thin strokes => JPEG would smear them
         for y in range(0, img.height, 7):
             img.putpixel((x, y), (0, 0, 0))
@@ -128,7 +128,7 @@ def test_alpha_is_preserved_when_downscaling():
 
 def test_palette_transparency_survives_downscale():
     """A P-mode PNG with a transparency key must not be flattened to RGB."""
-    img = Image.new("P", (2200, 100))
+    img = Image.new("P", (2001, 100))
     img.putpalette([0, 0, 0, 255, 255, 255] + [0] * 762)
     img.info["transparency"] = 0
     buf = io.BytesIO()
@@ -173,7 +173,7 @@ def test_jpeg_fallback_when_png_would_inflate():
     alpha-free image whose PNG re-encode is *larger* than the original is a
     regression, so JPEG takes over there.
     """
-    raw = _noisy_jpeg((2200, 2200), mode="RGB", quality=40)
+    raw = _noisy_jpeg((2001, 400), mode="RGB", quality=40)
 
     out, mime = _prepare_image_bytes(raw, "image/jpeg")
 
@@ -200,7 +200,7 @@ def test_screenshot_png_stays_png_even_though_jpeg_is_smaller():
     A downscaled screenshot gets smaller as JPEG, but silently lossy text is
     the wrong trade — the MIME must stay image/png.
     """
-    img = Image.new("RGB", (2200, 1500), (255, 255, 255))
+    img = Image.new("RGB", (2001, 400), (255, 255, 255))
     for x in range(0, img.width, 5):
         for y in range(0, img.height, 9):
             img.putpixel((x, y), (0, 0, 0))
@@ -223,7 +223,7 @@ def test_original_wins_when_nothing_else_shrinks():
     already compact for its size (an alpha image JPEG cannot represent), so the
     original is the right answer.
     """
-    img = Image.frombytes("RGBA", (2200, 2200), os.urandom(2200 * 2200 * 4))
+    img = Image.frombytes("RGBA", (2001, 400), os.urandom(2001 * 400 * 4))
     buf = io.BytesIO()
     img.save(buf, format="WEBP", quality=30, method=0)
     raw = buf.getvalue()
@@ -242,7 +242,7 @@ def test_opaque_oversized_image_always_shrinks():
     skip the JPEG fallback and inflate the payload.
     """
     # Opaque alpha, the way macOS writes a clipboard PNG.
-    img = Image.frombytes("RGB", (2880, 1800), os.urandom(2880 * 1800 * 3)).convert("RGBA")
+    img = Image.frombytes("RGB", (2001, 400), os.urandom(2001 * 400 * 3)).convert("RGBA")
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     raw = buf.getvalue()
@@ -275,18 +275,16 @@ def _screenshot_like_rgba(size=(2400, 1200), seed=11):
     """
     random.seed(seed)
     width, height = size
-    img = Image.new("RGB", size, (255, 255, 255))
-    px = img.load()
-    for y in range(height):
-        for x in range(width):
-            value = 255 if (x + y) % 2 else 250
-            px[x, y] = (value, value, value)
+    # One RGB row of a 1px checker, then repeat it: building 2.9M pixels one at
+    # a time in Python was most of this file's runtime.
+    dark, light = bytes((250, 250, 250)), bytes((255, 255, 255))
+    row = b"".join(dark if x % 2 else light for x in range(width))
+    img = Image.frombytes("RGB", size, row * height)
+    draw = ImageDraw.Draw(img)
     for _ in range(60):
         x0 = random.randrange(0, width - 200)
         y0 = random.randrange(0, height - 100)
-        for y in range(y0, y0 + 60):
-            for x in range(x0, x0 + 120):
-                px[x, y] = (30, 30, 40)
+        draw.rectangle([x0, y0, x0 + 120, y0 + 60], fill=(30, 30, 40))
     buf = io.BytesIO()
     img.convert("RGBA").save(buf, format="PNG")
     return buf.getvalue()
@@ -389,7 +387,7 @@ def test_oversized_pil_image_is_resized_before_encode():
     from agentica.model.openai import OpenAIChat
 
     model = OpenAIChat(id="gpt-4o", api_key="fake_openai_key")
-    img = Image.new("RGB", (2200, 800), (10, 20, 30))
+    img = Image.new("RGB", (2001, 400), (10, 20, 30))
     block = model.process_image(img)
     payload, mime = _decode(block["image_url"]["url"])
     assert mime == "image/png"

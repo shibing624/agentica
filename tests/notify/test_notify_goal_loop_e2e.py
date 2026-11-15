@@ -128,7 +128,7 @@ class TestARealGoalReportsExactlyOnce:
             _lap(agent, _decision("active", True, _CONTINUATION), state, queue, monkeypatch)
             _lap(agent, _decision("complete", False), state, queue, monkeypatch)
 
-            time.sleep(0.4)
+            time.sleep(0.12)
             got = _events(desktop)
             assert got.count("run.completed") == 1, f"expected exactly one, got {got}"
         finally:
@@ -147,7 +147,7 @@ class TestARealGoalReportsExactlyOnce:
             _lap(agent, _decision("active", True, _CONTINUATION), state, PendingQueue(), monkeypatch)
             _lap(agent, _decision("complete", False), state, PendingQueue(), monkeypatch)
 
-            time.sleep(0.4)
+            time.sleep(0.12)
             assert _events(desktop).count("run.completed") == 1
         finally:
             desktop.close()
@@ -164,7 +164,7 @@ class TestARealGoalReportsExactlyOnce:
             state = SessionState(current_agent=agent, goal_manager=mgr)
 
             _lap(agent, _decision("active", True, _CONTINUATION), state, PendingQueue(), monkeypatch)
-            time.sleep(0.3)
+            time.sleep(0.08)
 
             assert _events(desktop) == []
         finally:
@@ -191,7 +191,7 @@ class TestEveryStoppingPointReleases:
             # The manager's own verdict is what ends it.
             _lap(agent, _decision(status, False), state, PendingQueue(), monkeypatch)
 
-            time.sleep(0.4)
+            time.sleep(0.12)
             assert _events(desktop).count("run.completed") == 1, status
         finally:
             desktop.close()
@@ -211,7 +211,7 @@ class TestEveryStoppingPointReleases:
             agent._cancelled = True
             cli_goal_hook._maybe_continue_goal(state, PendingQueue(), {})
 
-            time.sleep(0.4)
+            time.sleep(0.12)
             assert _events(desktop).count("run.completed") == 1
         finally:
             desktop.close()
@@ -233,7 +233,7 @@ class TestEveryStoppingPointReleases:
             queue.put("actually, do this instead")
             cli_goal_hook._maybe_continue_goal(state, queue, {})
 
-            time.sleep(0.4)
+            time.sleep(0.12)
             assert _events(desktop).count("run.completed") == 1
         finally:
             desktop.close()
@@ -263,7 +263,7 @@ class TestEveryStoppingPointReleases:
             )
             cli_goal_hook._maybe_continue_goal(state, PendingQueue(), {})
 
-            time.sleep(0.4)
+            time.sleep(0.12)
             assert _events(desktop).count("run.completed") == 1
         finally:
             desktop.close()
@@ -288,7 +288,7 @@ class TestEveryStoppingPointReleases:
             monkeypatch.setattr(cli_goal_hook, "_cprint", lambda *a, **k: None)
             cli_goal_hook._maybe_continue_goal(state, PendingQueue(), {})
 
-            time.sleep(0.4)
+            time.sleep(0.12)
             assert _events(desktop).count("run.completed") == 1
         finally:
             desktop.close()
@@ -310,7 +310,7 @@ class TestOrderingAndNonInterference:
 
             for _ in range(5):
                 _lap(agent, _decision("active", True, _CONTINUATION), state, queue, monkeypatch)
-            time.sleep(0.3)
+            time.sleep(0.08)
 
             assert _events(desktop) == []
             assert queue.peek_all(), "the continuation must still be queued"
@@ -328,7 +328,7 @@ class TestOrderingAndNonInterference:
             state = SessionState(current_agent=agent, goal_manager=mgr)
 
             cli_goal_hook._maybe_continue_goal(state, PendingQueue(), {})
-            time.sleep(0.3)
+            time.sleep(0.08)
 
             assert _events(desktop) == []
         finally:
@@ -341,7 +341,7 @@ class TestOrderingAndNonInterference:
             install_sink(NotifyConfig(enabled=True, socket=desktop.socket_path))
             agent = _agent(tmp_path, "plain")
             notify_sink_dispatch(_record(), agent=agent)
-            time.sleep(0.3)
+            time.sleep(0.08)
             assert _events(desktop).count("run.completed") == 1
         finally:
             desktop.close()
