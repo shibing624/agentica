@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import threading
 from collections import OrderedDict, deque
@@ -493,6 +494,32 @@ def _binary_refusal(path: Path) -> Optional[str]:
     return None
 
 
+_GIT_ROOTS_TIMEOUT_SECONDS = 5
+
+
+def _git_worktree_roots(session_dir: str) -> List[str]:
+    """Real paths of the git dir and every worktree of ``session_dir``'s repository.
+
+    The writable part of :func:`agentica.tools.os_sandbox._repository_paths`,
+    so ``write_file`` grants exactly the checkouts a sandboxed ``execute``
+    may write. Empty outside a repository or without git.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "--no-optional-locks", "-C", session_dir, "worktree", "list", "--porcelain"],
+            capture_output=True, text=True, timeout=_GIT_ROOTS_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if result.returncode != 0:
+        return []
+    return [
+        os.path.realpath(line[len("worktree "):])
+        for line in result.stdout.splitlines()
+        if line.startswith("worktree ")
+    ]
+
+
 def _check_sensitive_write_path(filepath: str) -> Optional[str]:
     """Return an error message if the path targets a sensitive system location."""
     try:
@@ -616,16 +643,6 @@ class BuiltinFileTool(Tool):
                 self._seen_stamps[key] = now
         return changed
 
-    def set_work_dir(self, work_dir: str) -> None:
-        """Point the session default at another directory.
-
-        Per-call ``work_dir`` on read/write/apply_patch is the way to work in
-        another checkout without moving the session. This setter stays for
-        construction-time wiring (``--worktree`` builds the agent already
-        pointed at that process's directory).
-        """
-        self.work_dir = Path(work_dir)
-
     def _call_root(self, work_dir: str = "") -> Path:
         """Session work_dir, or the directory this call asked to use."""
         raw = (work_dir or "").strip()
@@ -672,10 +689,11 @@ class BuiltinFileTool(Tool):
         - ~ paths are expanded to user home directory
         - Absolute paths are used directly
         - Relative paths are resolved relative to ``root`` or the session work_dir
-        - If ``root`` is an explicit ``work_dir`` inside ``self.work_dir`` and
-          ``path`` already begins with that worktree's relative prefix (e.g.
-          ``path=".worktrees/feat/docs/a.md"`` with ``work_dir=".worktrees/feat"``),
-          deduplicate the prefix instead of doubling it.
+
+        Deterministic: a relative path is never re-read against another base.
+        When it does not exist, ``_missing_path_error`` names both readings so
+        the model corrects the call instead of this method guessing which one
+        it meant.
         """
         base = root if root is not None else self.work_dir
         if path.startswith("~"):
@@ -683,17 +701,7 @@ class BuiltinFileTool(Tool):
         p = Path(path)
         if p.is_absolute():
             return p
-        candidate = base / p
-        if root is not None and root != self.work_dir and not candidate.exists():
-            from_session = self.work_dir / p
-            try:
-                root_real = os.path.realpath(str(root))
-                sess_real = os.path.realpath(str(from_session))
-                if sess_real == root_real or sess_real.startswith(root_real + os.sep):
-                    return from_session
-            except OSError:
-                pass
-        return candidate
+        return base / p
 
     def _lexical_abs_path(self, path: Path) -> Path:
         """Return an absolute path without requiring the target to exist."""
@@ -709,8 +717,16 @@ class BuiltinFileTool(Tool):
                 return parent
         return None
 
-    def _missing_path_error(self, kind: str, raw_path: str, path: Path) -> str:
-        """Build a missing-path error that exposes real path state."""
+    def _missing_path_error(
+        self, kind: str, raw_path: str, path: Path, *, root: Optional[Path] = None
+    ) -> str:
+        """Build a missing-path error that exposes real path state.
+
+        With a per-call ``work_dir``, a relative path is resolved against that
+        directory only. When the same path does exist from the session
+        directory — typically the worktree prefix repeated in both ``work_dir``
+        and ``file_path`` — say so, and let the model fix the call.
+        """
         resolved = self._lexical_abs_path(path)
         nearest_parent = self._nearest_existing_parent(path)
 
@@ -722,6 +738,15 @@ class BuiltinFileTool(Tool):
             lines.append(f"Nearest existing parent: {nearest_parent}")
         else:
             lines.append("Nearest existing parent: <none>")
+        raw = Path(raw_path)
+        if root is not None and root != self.work_dir and not raw.is_absolute() and not raw_path.startswith("~"):
+            from_session = self._lexical_abs_path(self.work_dir / raw)
+            if from_session.exists():
+                lines.append(
+                    f"Relative paths resolve against work_dir ({root}). The same path from "
+                    f"the session directory exists: {from_session} — pass it as an absolute "
+                    "path, or make file_path relative to work_dir."
+                )
         return "\n".join(lines)
 
     def _result_path(self, raw_path: str, *, root: Optional[Path] = None) -> str:
@@ -827,32 +852,39 @@ class BuiltinFileTool(Tool):
             )
         return path
 
-    def _is_write_allowed(self, resolved: str, *, extra_root: Optional[Path] = None) -> bool:
-        """Whether `resolved` (an absolute path string) is inside a writable_dir,
-        the session work_dir, this call's work_dir, a platform temp area, or a
-        previously-escalated path.
+    def _is_write_allowed(self, resolved: str) -> bool:
+        """Whether `resolved` (an absolute path string) is inside a writable root.
 
-        The temp roots are the same ones ``execute``'s OS sandbox grants
-        (:func:`agentica.tools.os_sandbox.writable_temp_roots`). dsh keeps the
-        platform temp areas writable in workspace-write mode, and the two
-        layers must agree: a scratch file that a shell command may write must
-        not need an escalation just because it was written by ``write_file``.
+        The roots come from trusted state only: ``writable_dirs``, the session
+        work_dir, the worktrees of the session's git repository, the platform
+        temp areas, and paths the user granted. A call's ``work_dir`` argument
+        picks where a relative path resolves; it never adds a root — otherwise
+        one string from the model would make any existing directory writable.
+
+        The same root set ``execute``'s OS sandbox builds
+        (:func:`agentica.tools.os_sandbox.resolve_policy_paths`): the shell and
+        the file tools must agree, or a file one may write is refused by the
+        other.
         """
         if self._is_escalated(resolved):
             return True
-        for wd in self._sandbox_config.writable_dirs:
-            wd_resolved = str(Path(wd).expanduser().resolve())
-            if resolved.startswith(wd_resolved):
+        for root in self._writable_roots():
+            if resolved == root or resolved.startswith(root + os.sep):
                 return True
-        for temp_root in writable_temp_roots():
-            if resolved == temp_root or resolved.startswith(temp_root + os.sep):
-                return True
-        if extra_root is not None:
-            extra = str(extra_root.resolve())
-            if resolved == extra or resolved.startswith(extra + os.sep):
-                return True
+        return False
+
+    def _writable_roots(self) -> List[str]:
+        """Real paths of every trusted writable root, read now.
+
+        Worktrees are listed from git each time: one created mid-session must
+        be writable without a restart, which is what ``execute`` does too.
+        """
+        roots = [str(Path(wd).expanduser().resolve()) for wd in self._sandbox_config.writable_dirs]
         session = str(self.work_dir.resolve())
-        return resolved == session or resolved.startswith(session + os.sep)
+        roots.append(session)
+        roots.extend(_git_worktree_roots(session))
+        roots.extend(writable_temp_roots())
+        return roots
 
     def _sensitive_write_guard(self, filepath: str) -> Optional[str]:
         """Return an error message if `filepath` targets a sensitive system/credentials
@@ -875,9 +907,8 @@ class BuiltinFileTool(Tool):
     def _validate_write_path(self, path: str, *, root: Optional[Path] = None) -> str:
         """Validate that a write operation is allowed under sandbox restrictions.
 
-        Checks blocked_paths and the writable whitelist: ``writable_dirs``, the
-        session / call work_dir, and the platform temp areas (dsh parity — see
-        ``_is_write_allowed``).
+        Checks blocked_paths and the writable roots (see ``_is_write_allowed``).
+        ``root`` only decides where a relative path resolves.
 
         Raises:
             PermissionError: If write is not allowed
@@ -886,9 +917,7 @@ class BuiltinFileTool(Tool):
         if self._sandbox_config is None or not self._sandbox_config.enabled:
             return path
         resolved = str(self._resolve_path(path, root=root).resolve())
-        if self._sandbox_config.writable_dirs and not self._is_write_allowed(
-            resolved, extra_root=root
-        ):
+        if self._sandbox_config.writable_dirs and not self._is_write_allowed(resolved):
             raise PermissionError(
                 f"Sandbox: write to '{path}' is not allowed in the current permission mode. "
                 f"Writable dirs: {self._sandbox_config.writable_dirs}; the platform temp "
@@ -966,7 +995,7 @@ class BuiltinFileTool(Tool):
             )
 
         if not path.exists():
-            raise FileNotFoundError(self._missing_path_error("File", file_path, path))
+            raise FileNotFoundError(self._missing_path_error("File", file_path, path, root=root))
         if not path.is_file():
             raise IsADirectoryError(f"Not a file: {file_path}")
 
@@ -1248,7 +1277,9 @@ class BuiltinFileTool(Tool):
                         new_content = apply_diff("", operation.diff, mode="create")
                     else:
                         if not path.exists():
-                            raise FileNotFoundError("File not found.")
+                            raise FileNotFoundError(
+                                self._missing_path_error("File", operation.path, path, root=root)
+                            )
                         if not path.is_file():
                             raise IsADirectoryError("Path is not a file.")
                         async with aiofiles.open(path, "r", encoding="utf-8") as handle:
