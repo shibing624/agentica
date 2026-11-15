@@ -10,8 +10,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import asyncio
 import json
-import threading
-import time
 import re
 import sys
 from typing import Optional, List, AsyncIterator, Dict, Any, Union, Literal
@@ -52,7 +50,7 @@ from agentica.model.metrics import Metrics, StreamData
 from agentica.model.response import ModelResponse
 from agentica.model.openai.sse_sanitize import TolerantSSETransport
 from agentica.model.stream_retry import stream_with_retry
-from agentica.utils.log import log_file_only, logger
+from agentica.utils.log import logger
 
 
 class OpenAIImageTypeMeta(EnumMeta):
@@ -389,17 +387,6 @@ class OpenAIChat(Model):
     # to every OpenAI-compatible endpoint, hence default ON. Turn it off for an
     # endpoint strict enough to reject unknown request fields.
     enable_prompt_cache_key: bool = True
-    # Cache keep-alive: while the session sits idle, re-read the cached
-    # tools+system prefix every `cache_keepalive_interval` seconds (a cache read
-    # costs ~0.1x input price vs ~1.25x for a re-write after the 5-min TTL
-    # lapses; verified on a proxy that refreshes TTL on cache reads). The ping chain
-    # stops after `cache_keepalive_max_pings` pings without new traffic, so idle
-    # cost is bounded.
-    cache_keepalive: bool = True
-    cache_keepalive_interval: int = 240
-    cache_keepalive_max_pings: int = 3
-    _last_cache_payload: Any = field(default=None, init=False, repr=False)
-    _cache_keepalive_generation: int = field(default=0, init=False, repr=False)
     _requires_system_position_repair: bool = field(default=False, init=False, repr=False)
 
     # Client parameters
@@ -1012,91 +999,6 @@ class OpenAIChat(Model):
         headers.setdefault(header_name, sid)
         return headers
 
-    def _arm_cache_keepalive(self) -> None:
-        """(Re)start the idle cache keep-alive timer after a successful request.
-
-        Each call bumps a generation counter; any older worker thread exits when
-        it notices, so at most one ping chain is ever in flight. The chain stops
-        on its own after ``cache_keepalive_max_pings`` pings with no new traffic.
-        Requires a sticky routing header: without backend affinity a ping lands
-        on a random backend and becomes a full-price cache WRITE, which would
-        multiply cost instead of saving it.
-        """
-        if not (
-            self.enable_cache_control
-            and self.cache_keepalive
-            and self._effective_session_header()
-            and self._last_cache_payload
-        ):
-            return
-        self._cache_keepalive_generation += 1
-        worker = threading.Thread(
-            target=self._cache_keepalive_loop,
-            args=(self._cache_keepalive_generation,),
-            daemon=True,
-        )
-        worker.start()
-
-    def _cache_keepalive_loop(self, generation: int) -> None:
-        for _ in range(max(self.cache_keepalive_max_pings, 0)):
-            time.sleep(self.cache_keepalive_interval)
-            if generation != self._cache_keepalive_generation:
-                return  # newer traffic armed a fresh worker; this chain is done
-            try:
-                read_tokens = asyncio.run(self._cache_keepalive_ping())
-                if read_tokens:
-                    logger.debug(f"cache keepalive ping refreshed prefix (read={read_tokens} tokens)")
-            except Exception as e:
-                # File only. This thread outlives the turn, and a console
-                # handler (or /debug) would paint the provider error into the
-                # transcript after the answer has already finished.
-                log_file_only("cache keepalive ping failed, stopping chain: %s", e, exc_info=e)
-                return
-
-    async def _cache_keepalive_ping(self) -> Optional[int]:
-        """Re-read the cached tools+system prefix with a minimal request.
-
-        A cache read refreshes the entry TTL (verified on a proxy that does so), so pinging
-        during idle think-time keeps the expensive prefix alive instead of paying
-        a full re-write on the next real request. Runs in a worker thread with
-        its own event loop and a throwaway client so it never touches the main
-        loop's client. Returns the number of cache-read tokens, if reported.
-        """
-        payload = self._last_cache_payload
-        if payload is None:
-            return None
-        messages, request_kwargs = payload
-        system_messages = [m for m in messages if isinstance(m, dict) and m.get("role") == "system"]
-        if not system_messages:
-            return None
-        ping_kwargs: Dict[str, Any] = {
-            "model": self.id,
-            "messages": system_messages + [{"role": "user", "content": "cache keepalive"}],
-            "max_tokens": 1,
-        }
-        if request_kwargs.get("tools"):
-            ping_kwargs["tools"] = request_kwargs["tools"]
-        if request_kwargs.get("extra_headers"):
-            ping_kwargs["extra_headers"] = request_kwargs["extra_headers"]
-        if self.extra_body:
-            # Mirror the main request shape (e.g. thinking toggles) so strict
-            # backends don't reject the ping for differing params.
-            ping_kwargs["extra_body"] = self.extra_body
-        http_client = httpx.AsyncClient(limits=httpx.Limits(max_connections=10, max_keepalive_connections=2))
-        try:
-            client_params = self.get_client_params()
-            client_params.pop("http_client", None)  # we supply the throwaway one
-            client = AsyncOpenAIClient(http_client=http_client, **client_params)
-            response = await self._create_with_auto_cap(
-                lambda kwargs: client.chat.completions.create(**kwargs),
-                ping_kwargs,
-            )
-        finally:
-            await http_client.aclose()
-        usage = getattr(response, "usage", None)
-        details = getattr(usage, "prompt_tokens_details", None) if usage else None
-        return getattr(details, "cache_read_tokens", None) if details else None
-
     def _apply_cache_control(self, formatted: List[Dict[str, Any]], request_kwargs: Dict[str, Any]) -> tuple:
         """Inject Anthropic-style cache_control breakpoints within the 4-breakpoint budget.
 
@@ -1169,8 +1071,6 @@ class OpenAIChat(Model):
         # Sticky routing so consecutive invokes hit the same backend cache.
         if self._effective_session_header():
             new_kwargs["extra_headers"] = self._with_cache_session_header(new_kwargs.get("extra_headers"))
-        # Remember the tagged payload for cache keep-alive pings.
-        self._last_cache_payload = (out, new_kwargs)
         return out, new_kwargs
 
     async def _send_with_system_position_repair(
@@ -1235,7 +1135,6 @@ class OpenAIChat(Model):
                         )
 
                     response = await self._send_with_system_position_repair(formatted, _parse)
-                    self._arm_cache_keepalive()
                     return response
                 else:
                     raise ValueError("response_format must be a subclass of BaseModel if use_structured_outputs=True")
@@ -1257,7 +1156,6 @@ class OpenAIChat(Model):
 
         try:
             response = await self._send_with_system_position_repair(formatted, _create)
-            self._arm_cache_keepalive()
             return response
         except Exception as e:
             self._learn_context_limit_from_error(str(e))
@@ -1305,7 +1203,6 @@ class OpenAIChat(Model):
             provider_label=f"openai/{self.id}",
         ):
             yield chunk
-        self._arm_cache_keepalive()
 
     # handle_tool_calls and handle_stream_tool_calls are inherited from Model base class.
 

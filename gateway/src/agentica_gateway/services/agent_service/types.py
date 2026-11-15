@@ -88,7 +88,6 @@ def _profile_model_config(name: str, profile: Dict[str, Any]) -> Dict[str, Any]:
         "enable_cache_control": profile.get("enable_cache_control"),
         "cache_control_messages": profile.get("cache_control_messages"),
         "cache_control_session_header": profile.get("cache_control_session_header") or "",
-        "cache_keepalive": profile.get("cache_keepalive"),
         "extra_body": dict(profile["extra_body"]) if isinstance(profile.get("extra_body"), dict) else None,
         "extra_headers": dict(profile["extra_headers"]) if isinstance(profile.get("extra_headers"), dict) else None,
         "default_headers": dict(profile["default_headers"]) if isinstance(profile.get("default_headers"), dict) else None,

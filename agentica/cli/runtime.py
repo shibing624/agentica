@@ -607,7 +607,6 @@ def get_model(
     enable_cache_control=None,
     cache_control_messages=None,
     cache_control_session_header=None,
-    cache_keepalive=None,
     extra_body=None,
     extra_headers=None,
     default_headers=None,
@@ -701,15 +700,10 @@ def get_model(
         # Gated on the field, not on wire_api: the Anthropic provider needs it
         # too. Aggregating proxies fan requests out across upstreams unless a
         # sticky header pins the route, and unrouted requests hit a much higher
-        # rate of schema-validation 400s. cache_control_messages and
-        # cache_keepalive stay OpenAI-only — Claude manages its own message
-        # breakpoints and has no keep-alive thread.
+        # rate of schema-validation 400s.
         if "cache_control_session_header" in model_fields:
             if cache_control_session_header is not None:
                 params["cache_control_session_header"] = cache_control_session_header
-        if effective_wire_api == "chat_completions" and "cache_keepalive" in model_fields:
-            if cache_keepalive is not None:
-                params["cache_keepalive"] = cache_keepalive
     return model_class(**params)
 
 
@@ -750,7 +744,6 @@ def _build_sibling_model(agent_config: dict, prefix: str):
         enable_cache_control=agent_config.get("enable_cache_control"),
         cache_control_messages=agent_config.get("cache_control_messages"),
         cache_control_session_header=agent_config.get("cache_control_session_header"),
-        cache_keepalive=agent_config.get("cache_keepalive"),
         # Auxiliary passthrough dicts are their own field (auxiliary_extra_*),
         # never inherited from the main model even when same provider — a
         # different deployment/endpoint may not want the same raw params.
@@ -935,7 +928,6 @@ def create_agent(
         enable_cache_control=agent_config.get("enable_cache_control"),
         cache_control_messages=agent_config.get("cache_control_messages"),
         cache_control_session_header=agent_config.get("cache_control_session_header"),
-        cache_keepalive=agent_config.get("cache_keepalive"),
         extra_body=agent_config.get("extra_body"),
         extra_headers=agent_config.get("extra_headers"),
         default_headers=agent_config.get("default_headers"),

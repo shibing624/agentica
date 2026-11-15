@@ -43,7 +43,6 @@ PROFILES = {
             "enable_cache_control": True,
             "cache_control_messages": 2,
             "cache_control_session_header": "X-Session-Id",
-            "cache_keepalive": 180,
             "extra_body": {"thinking_enabled": True},
             "extra_headers": {"X-Route": "sticky"},
         },
@@ -196,7 +195,6 @@ def test_gateway_forwards_profile_cache_control_and_headers_to_model(svc):
     assert cfg["enable_cache_control"] is True
     assert cfg["cache_control_messages"] == 2
     assert cfg["cache_control_session_header"] == "X-Session-Id"
-    assert cfg["cache_keepalive"] == 180
     assert cfg["extra_body"] == {"thinking_enabled": True}
     assert cfg["extra_headers"] == {"X-Route": "sticky"}
 
@@ -209,14 +207,12 @@ def test_gateway_forwards_profile_cache_control_and_headers_to_model(svc):
         enable_cache_control=cfg["enable_cache_control"],
         cache_control_messages=cfg["cache_control_messages"],
         cache_control_session_header=cfg["cache_control_session_header"],
-        cache_keepalive=cfg["cache_keepalive"],
         extra_body=cfg["extra_body"],
         extra_headers=cfg["extra_headers"],
     )
     assert model.enable_cache_control is True
     assert model.cache_control_messages == 2
     assert model.cache_control_session_header == "X-Session-Id"
-    assert model.cache_keepalive == 180
     assert model.extra_headers == {"X-Route": "sticky"}
     assert model.extra_body["thinking_enabled"] is True
 
@@ -310,7 +306,6 @@ def test_sdk_gateway_and_self_manage_inherit_cli_cache_and_resilience_fields(svc
             "enable_cache_control": True,
             "cache_control_messages": 3,
             "cache_control_session_header": "X-Session-Id",
-            "cache_keepalive": 120,
             "max_api_retry": 3,
             "compact_token_limit": 400000,
             "auxiliary_model": {

@@ -100,7 +100,6 @@ class AgentBuilderMixin:
             enable_cache_control=cfg.get("enable_cache_control"),
             cache_control_messages=cfg.get("cache_control_messages"),
             cache_control_session_header=cfg.get("cache_control_session_header") or None,
-            cache_keepalive=cfg.get("cache_keepalive"),
             extra_body=cfg.get("extra_body"),
             extra_headers=cfg.get("extra_headers"),
             default_headers=cfg.get("default_headers"),

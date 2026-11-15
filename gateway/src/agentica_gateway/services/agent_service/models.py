@@ -149,7 +149,6 @@ class AgentModelMixin:
             "enable_cache_control": active.get("enable_cache_control") if matches_active else None,
             "cache_control_messages": active.get("cache_control_messages") if matches_active else None,
             "cache_control_session_header": (active.get("cache_control_session_header") or "") if matches_active else "",
-            "cache_keepalive": active.get("cache_keepalive") if matches_active else None,
             "extra_body": (dict(active["extra_body"]) if isinstance(active.get("extra_body"), dict) else None) if matches_active else None,
             "extra_headers": (dict(active["extra_headers"]) if isinstance(active.get("extra_headers"), dict) else None) if matches_active else None,
             "default_headers": (dict(active["default_headers"]) if isinstance(active.get("default_headers"), dict) else None) if matches_active else None,
@@ -250,7 +249,6 @@ class AgentModelMixin:
             enable_cache_control=cfg.get("enable_cache_control"),
             cache_control_messages=cfg.get("cache_control_messages"),
             cache_control_session_header=cfg.get("cache_control_session_header") or None,
-            cache_keepalive=cfg.get("cache_keepalive"),
             extra_body=cfg.get(f"{prefix}_extra_body"),
             extra_headers=cfg.get(f"{prefix}_extra_headers"),
         )

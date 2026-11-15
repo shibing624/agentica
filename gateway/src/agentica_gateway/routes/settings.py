@@ -78,7 +78,6 @@ class ProfileFields:
     enable_cache_control: Optional[bool] = None
     cache_control_messages: Optional[int] = None
     cache_control_session_header: str = ""
-    cache_keepalive: Optional[int] = None
     max_api_retry: Optional[int] = None
     extra_body: Optional[dict] = None
     extra_headers: Optional[dict] = None
@@ -93,7 +92,7 @@ TUNING_FIELD_NAMES = (
     "wire_api", "reasoning", "reasoning_effort", "max_tokens",
     "temperature", "top_p", "context_window", "compact_token_limit",
     "enable_cache_control", "cache_control_messages",
-    "cache_control_session_header", "cache_keepalive", "max_api_retry",
+    "cache_control_session_header", "max_api_retry",
 )
 
 

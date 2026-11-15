@@ -237,7 +237,6 @@ class ProfileUpsertRequest(BaseModel):
     enable_cache_control: Optional[bool] = None
     cache_control_messages: Optional[int] = None
     cache_control_session_header: Optional[str] = None
-    cache_keepalive: Optional[int] = None
     max_api_retry: Optional[int] = None
     extra_body: Optional[dict] = None
     extra_headers: Optional[dict] = None

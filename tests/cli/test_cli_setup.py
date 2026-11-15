@@ -686,16 +686,14 @@ class TestResolveFallbackModels(_CliSetupTestBase):
 
 
 class TestResolveCacheRoutingKnobs(_CliSetupTestBase):
-    def test_startup_resolution_returns_default_headers_and_keepalive(self):
+    def test_startup_resolution_returns_default_headers(self):
         self._write_profile({
             "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
             "base_url": "https://api.deepseek.com", "api_key": "sk-main",
             "default_headers": {"X-Sticky-Routing": "acct-1"},
-            "cache_keepalive": True,
         })
         resolved = cli_setup.resolve_model_config(_make_args(), console=None)
         self.assertEqual(resolved["default_headers"], {"X-Sticky-Routing": "acct-1"})
-        self.assertIs(resolved["cache_keepalive"], True)
 
 
 class TestResolveAutoReviewModel(_CliSetupTestBase):

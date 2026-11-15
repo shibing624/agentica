@@ -31,7 +31,6 @@ def create_model(
     enable_cache_control: Optional[bool] = None,
     cache_control_messages: Optional[int] = None,
     cache_control_session_header: Optional[str] = None,
-    cache_keepalive: Optional[int] = None,
     extra_body: Optional[dict[str, Any]] = None,
     extra_headers: Optional[dict[str, Any]] = None,
     default_headers: Optional[dict[str, Any]] = None,
@@ -157,8 +156,6 @@ def create_model(
         model.cache_control_messages = cache_control_messages
     if cache_control_session_header and "cache_control_session_header" in fields:
         model.cache_control_session_header = cache_control_session_header
-    if effective_wire_api == "chat_completions" and cache_keepalive is not None and "cache_keepalive" in fields:
-        model.cache_keepalive = cache_keepalive
 
     # context_window is NOT an API param — set on the instance for budget /
     # compression / status display. Overrides the catalog auto-detected value.
