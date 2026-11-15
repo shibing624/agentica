@@ -467,15 +467,6 @@ class BuiltinExecuteTool(Tool):
         execute_fn.parameters["required"] = ["description", "command"]
         execute_fn.skip_entrypoint_processing = True
 
-    def set_work_dir(self, work_dir: str) -> None:
-        """Point the session default cwd at another directory.
-
-        Per-call ``work_dir`` on ``execute`` is the way to run in another
-        checkout without moving the session. This setter stays for
-        construction-time wiring (``--worktree``).
-        """
-        self._work_dir = Path(work_dir)
-
     def _call_cwd(self, work_dir: str = "") -> Optional[str]:
         """Session cwd, or the directory this call asked to use."""
         raw = (work_dir or "").strip()

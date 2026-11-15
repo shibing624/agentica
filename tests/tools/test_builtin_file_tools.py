@@ -3,6 +3,8 @@
 import asyncio
 import json
 import os
+import subprocess
+import shutil
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -1116,27 +1118,76 @@ class TestPerCallWorkDir:
         assert (other / "edit.txt").read_text() == "hello agentica\n"
         assert not (session / "edit.txt").exists()
 
-    def test_sandbox_allows_the_call_work_dir_and_still_blocks_a_sibling(
-        self, tmp_dir, tmp_path
-    ):
+    def test_a_call_work_dir_does_not_make_a_directory_writable(self, tmp_dir):
+        """``work_dir`` picks where a relative path resolves; it grants nothing.
+
+        Passing an outside directory as ``work_dir`` used to add it to the
+        writable roots, so one string from the model unlocked any existing
+        directory. The same write by absolute path was already refused.
+        """
         from agentica.agent.config import SandboxConfig
 
         session = Path(tmp_dir)
-        other = tmp_path / "other"
         # Not under the platform temp root: temp dirs are writable in this mode.
-        third = Path.home() / "agentica-sandbox-third"
-        other.mkdir()
-        tool = BuiltinFileTool(
-            work_dir=str(session),
-            sandbox_config=SandboxConfig(enabled=True, writable_dirs=[str(session)]),
-        )
+        outside = Path.home() / f"agentica-sandbox-outside-{os.getpid()}"
+        outside.mkdir()
+        try:
+            tool = BuiltinFileTool(
+                work_dir=str(session),
+                sandbox_config=SandboxConfig(enabled=True, writable_dirs=[str(session)]),
+            )
+            with pytest.raises(PermissionError, match="not allowed"):
+                asyncio.run(tool.write_file("x.txt", "no\n", work_dir=str(outside)))
+            with pytest.raises(PermissionError, match="not allowed"):
+                asyncio.run(tool.write_file(str(outside / "x.txt"), "no\n"))
+            assert not (outside / "x.txt").exists()
+        finally:
+            shutil.rmtree(outside, ignore_errors=True)
 
-        asyncio.run(tool.write_file("ok.txt", "yes\n", work_dir=str(other)))
-        assert (other / "ok.txt").read_text() == "yes\n"
+    def test_a_worktree_of_the_session_repository_is_writable(self):
+        """The checkouts ``execute``'s OS sandbox may write, ``write_file`` may too.
 
-        with pytest.raises(PermissionError, match="not allowed"):
-            asyncio.run(tool.write_file(str(third / "nope.txt"), "blocked\n"))
-        assert not (third / "nope.txt").exists()
+        Not under ``tmp_path``: the platform temp areas are writable anyway,
+        so a fixture there could not tell a granted worktree from scratch space.
+        """
+        from agentica.agent.config import SandboxConfig
+
+        base = Path.home() / f"agentica-wt-probe-{os.getpid()}"
+        repo = base / "repo"
+        tree = base / "tree"  # outside the session dir on purpose
+        git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
+        try:
+            repo.mkdir(parents=True)
+            subprocess.run([*git, "init", "-q", str(repo)], check=True)
+            subprocess.run([*git, "-C", str(repo), "commit", "-q", "--allow-empty", "-m", "i"], check=True)
+            subprocess.run([*git, "-C", str(repo), "worktree", "add", "-q", str(tree)], check=True)
+            tool = BuiltinFileTool(
+                work_dir=str(repo),
+                sandbox_config=SandboxConfig(enabled=True, writable_dirs=[str(repo)]),
+            )
+
+            asyncio.run(tool.write_file("in-tree.txt", "yes\n", work_dir=str(tree)))
+            assert (tree / "in-tree.txt").read_text() == "yes\n"
+            # A sibling that is no worktree stays refused.
+            (base / "plain").mkdir()
+            with pytest.raises(PermissionError, match="not allowed"):
+                asyncio.run(tool.write_file("x.txt", "no\n", work_dir=str(base / "plain")))
+        finally:
+            shutil.rmtree(base, ignore_errors=True)
+
+    def test_a_doubled_worktree_prefix_is_named_not_guessed(self, tmp_dir):
+        """Relative paths resolve against ``work_dir`` only; the error shows the other reading."""
+        session = Path(tmp_dir)
+        tree = session / ".worktrees" / "feat"
+        (tree / "docs").mkdir(parents=True)
+        (tree / "docs" / "a.md").write_text("tree\n")
+        tool = BuiltinFileTool(work_dir=str(session))
+
+        with pytest.raises(FileNotFoundError) as err:
+            asyncio.run(tool.read_file(".worktrees/feat/docs/a.md", work_dir=".worktrees/feat"))
+        message = str(err.value)
+        assert f"Resolved path: {tree / '.worktrees' / 'feat' / 'docs' / 'a.md'}" in message
+        assert f"exists: {tree / 'docs' / 'a.md'}" in message
 
     def test_sandbox_keeps_the_platform_temp_dirs_writable(self, tmp_dir):
         """dsh parity: a scratch file in the temp area needs no escalation."""

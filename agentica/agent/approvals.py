@@ -1029,6 +1029,13 @@ def _file_needs_approval(resolved: str, *, work_dir: Optional[str]) -> bool:
     The platform temp directories count as inside: workspace-write keeps them
     silently writable, and asking per scratch file was the mismatch. Sensitive
     paths still ask (and still hit ``_is_hard_unsafe``) wherever they live.
+
+    So does every checkout git registers for the session's repository — a
+    worktree beside the repo or further up the tree, not only the default
+    ``<repo>/.worktrees/``. That is the set ``write_file``'s sandbox and a
+    sandboxed ``execute`` already treat as writable; asking here for what
+    both of them allow was the mismatch. Only git can widen it, never a call
+    argument, and a plain directory next to the repo still asks.
     """
     if _is_sensitive_path(resolved):
         return True
@@ -1037,7 +1044,12 @@ def _file_needs_approval(resolved: str, *, work_dir: Optional[str]) -> bool:
             return False
     if not work_dir:
         return True
-    return not _path_is_under(resolved, _resolve_tool_path(work_dir, None))
+    session = _resolve_tool_path(work_dir, None)
+    if _path_is_under(resolved, session):
+        return False
+    from agentica.tools.builtin.file_tool import _git_worktree_roots
+
+    return not any(_path_is_under(resolved, root) for root in _git_worktree_roots(session))
 
 
 def _is_sensitive_path(filepath: str) -> bool:
