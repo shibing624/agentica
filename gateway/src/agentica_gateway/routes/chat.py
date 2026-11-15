@@ -239,7 +239,8 @@ async def chat(
     account = _account(request)
     if body.work_dir:
         await _apply_session_work_dir(svc, body.session_id, body.work_dir, account)
-    svc.set_session_approval_mode(body.session_id, body.approval_mode, owner=account)
+    if body.approval_mode is not None:
+        svc.set_session_approval_mode(body.session_id, body.approval_mode, owner=account)
 
     message, media = _message_and_media(body)
     result = await svc.chat(
@@ -353,7 +354,8 @@ async def _start_chat_run(body: ChatRequest, request: Request, svc: AgentService
     session_id = body.session_id
     if body.work_dir:
         await _apply_session_work_dir(svc, session_id, body.work_dir, account)
-    svc.set_session_approval_mode(session_id, body.approval_mode, owner=account)
+    if body.approval_mode is not None:
+        svc.set_session_approval_mode(session_id, body.approval_mode, owner=account)
     _touch_session_log(svc, session_id, account)
     message, media = _message_and_media(body)
     return _spawn_live(

@@ -15,6 +15,7 @@ from agentica.agent.approvals import (
     ApprovalRegistry,
     PendingApproval,
     SessionGrants,
+    call_paths,
     classify,
     command_allows_prefix,
     command_class_tokens,
@@ -107,6 +108,18 @@ class TestClassifyAndGrants(unittest.TestCase):
     def test_allow_all_never_asks(self):
         fc = _fc("execute", {"command": "rm -rf /tmp/x"}, is_destructive=True)
         self.assertEqual(classify("allow-all", fc, self.grants, work_dir=self.work), "allow")
+
+    def test_file_work_dir_argument_resolves_like_builtin_file_tool(self):
+        session = tempfile.mkdtemp()
+        call_root = "/Users/agentica-review-outside/Documents/other"
+        fc = _file_fc(
+            "write_file",
+            "notes.txt",
+        )
+        fc.arguments["work_dir"] = call_root
+        paths = call_paths(fc, work_dir=session)
+        self.assertEqual(paths, [os.path.realpath(os.path.join(call_root, "notes.txt"))])
+        self.assertEqual(classify("auto", fc, self.grants, work_dir=session), "ask")
 
     def test_read_only_parks_workspace_write(self):
         path = os.path.join(self.work, "a.txt")
@@ -715,6 +728,39 @@ class TestMakeApproveReviewer(unittest.TestCase):
                 get_work_dir=lambda: "/tmp/agentica-review-work",
                 publish=lambda p: None,
                 apply_path_grant=lambda path, prefix: None,
+                review=review,
+            )
+            fc = self._outside_fc()
+            self.assertEqual(await approve(fc), "deny")
+            self.assertEqual(fc.approval_trace["reason"], "deny_grant")
+            self.assertIsNone(fc.approval_trace.get("reviewer"))
+
+        asyncio.run(_run())
+
+    def test_a_durable_deny_added_during_the_review_beats_a_stale_allow(self):
+        from agentica.agent.reviewer import ReviewOutcome
+        from agentica.config.project import project_base_dir, write_project_file
+
+        async def _run():
+            work = tempfile.mkdtemp()
+            grants = SessionGrants()
+            registry = ApprovalRegistry()
+
+            async def review(fc):
+                base = project_base_dir(work, "default")
+                write_project_file(base, {
+                    "approvals": {"deny_path_prefixes": [str(Path.home())]},
+                })
+                return ReviewOutcome(decision="allow", risk="low")
+
+            approve = make_approve(
+                get_mode=lambda: "auto",
+                get_grants=lambda: grants,
+                get_registry=lambda: registry,
+                get_work_dir=lambda: work,
+                publish=lambda p: None,
+                apply_path_grant=lambda path, prefix: None,
+                get_user_id=lambda: "default",
                 review=review,
             )
             fc = self._outside_fc()

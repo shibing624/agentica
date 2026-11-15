@@ -49,7 +49,7 @@ class ChatRequest(BaseModel):
     goal: str = ""
     skill: str = ""
     tool: str = ""
-    approval_mode: ApprovalMode = "auto"
+    approval_mode: Optional[ApprovalMode] = None
     images: List[ChatImage] = []
 
     @field_validator("message", "goal", "skill")

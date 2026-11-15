@@ -164,6 +164,25 @@ class TestChatEndpoint:
         bad = client.post("/api/sessions/s1/approval_mode", json={"approval_mode": "yolo"})
         assert bad.status_code == 422
 
+    def test_chat_without_approval_mode_keeps_the_saved_session_tier(self, mock_app):
+        client, mock_svc = mock_app
+        resp = client.post("/api/chat", json={
+            "message": "Hello",
+            "session_id": "test-session",
+        })
+        assert resp.status_code == 200
+        mock_svc.set_session_approval_mode.assert_not_called()
+
+    def test_chat_with_explicit_approval_mode_updates_the_session_tier(self, mock_app):
+        client, mock_svc = mock_app
+        resp = client.post("/api/chat", json={
+            "message": "Hello",
+            "session_id": "test-session",
+            "approval_mode": "read-only",
+        })
+        assert resp.status_code == 200
+        assert mock_svc.set_session_approval_mode.call_args.args[1] == "read-only"
+
 
 class TestSteerEndpoint:
     """POST /api/chat/steer is the web interrupt; false is not an HTTP error."""

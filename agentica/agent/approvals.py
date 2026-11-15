@@ -610,6 +610,9 @@ def call_paths(fc: FunctionCall, *, work_dir: Optional[str]) -> List[str]:
     """Resolved filesystem paths this file-tool call would touch. Empty = unknown."""
     args = fc.arguments or {}
     name = fc.function.name
+    call_work_dir = args.get("work_dir")
+    if isinstance(call_work_dir, str) and call_work_dir:
+        work_dir = _resolve_tool_path(call_work_dir, work_dir)
     raw: List[str] = []
     if name in ("read_file", "write_file", "publish_file"):
         path = args.get("file_path")
@@ -729,6 +732,9 @@ def make_approve(
                 reviewer_trace = outcome.trace()
                 reviewer_note = outcome.note()
                 if outcome.decision == "allow":
+                    sync_grants_from_project(
+                        grants, work_dir=work_dir, user_id=user_id,
+                    )
                     # The review spends up to ``auto_review_timeout`` seconds,
                     # and the session can change under it: the user switches the
                     # tier, or another card records a deny-similar grant. Only a
