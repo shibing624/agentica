@@ -1147,6 +1147,7 @@ class LoopMixin:
                                 _content_filter_advance = False
                                 model_response_stream = model_call.response
                                 active_model = model_call.used_model
+                                agent._answered_model = active_model
                                 if model_call.used_fallback:
                                     agent.run_response.fallback_used = True
                                 if model_call.used_fallback or fallback_transaction_model is not None:
@@ -1530,6 +1531,7 @@ class LoopMixin:
                             )
                             model_response = model_call.response
                             active_model = model_call.used_model
+                            agent._answered_model = active_model
                             if model_call.used_fallback:
                                 agent.run_response.fallback_used = True
                             if model_call.used_fallback or fallback_transaction_model is not None:

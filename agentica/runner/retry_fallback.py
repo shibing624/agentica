@@ -278,6 +278,7 @@ class RetryMixin:
                 trace_is_fallback=True,
             )
             recovery = recovery_call.response
+            agent._answered_model = recovery_call.used_model
         except Exception as exc:
             logger.error(
                 f"[fallback.on_break] recovery inference failed (reason={break_reason}, primary={primary_id}): {exc}"

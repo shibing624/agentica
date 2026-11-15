@@ -647,6 +647,11 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         # Model the working_memory history was written for; see
         # ``ensure_history_portable``. None until a run sends a request.
         self._history_model_identity = None
+        # The model that produced the last reply, fallback included. The
+        # session notes request replays that request's prefix, so it goes to
+        # this model: a fallback or a /model switch since then would otherwise
+        # send it to one that has none of it cached.
+        self._answered_model = None
         self._parent_run_id = None
         self.run_response = RunResponse()
         self.stream = None

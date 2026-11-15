@@ -251,5 +251,118 @@ class TestCutWritesNotes(unittest.TestCase):
         self.assertIn("记下了", repr([m.content for m in request]))
 
 
+class _ClaudeScribe(_Scribe):
+    """Same scripted stream under another model identity (class, id)."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.id = "claude-opus-5"
+
+
+class TestNotesGoToTheModelThatAnswered(unittest.TestCase):
+    """The notes request replays the last reply's prefix: only the model that
+    produced that reply has it cached."""
+
+    def _agent(self, model, session_id):
+        from agentica.agent import Agent
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        agent = Agent(
+            model=model, session_id=session_id, session_base_dir=tmp.name,
+            add_history_to_context=True,
+        )
+        turn = [
+            Message(role="user", content="工单 ZX-41827"),
+            Message(
+                role="assistant",
+                content=[
+                    {"type": "thinking", "thinking": "plan", "signature": "sig-from-opus"},
+                    {"type": "text", "text": "记下了"},
+                ],
+            ),
+        ]
+        agent.working_memory.add_messages(turn)
+        agent.working_memory.collapse_runs(turn)
+        return agent
+
+    def test_compact_after_model_switch_asks_the_previous_model_on_the_history_it_sent(self):
+        opus = _ClaudeScribe(context_window=128_000)
+        from agentica.agent.history_filter import model_identity
+
+        agent = self._agent(opus, "switch-answered")
+        agent._history_model_identity = model_identity(opus)
+        agent._answered_model = opus
+        gpt = _Scribe(context_window=128_000)
+        agent.model = gpt  # /model, no request since
+
+        with patch.object(_ClaudeScribe, "detached_copy", lambda self: self):
+            self.assertTrue(asyncio.run(apply_idle_compact(agent)))
+        self.assertEqual(gpt.requests, [], "the new model has none of this window cached")
+        (request,) = opus.requests
+        # The history goes out as opus sent it, signed thinking included:
+        # those are the bytes its cache holds.
+        self.assertIn("sig-from-opus", repr([m.content for m in request]))
+        self.assertTrue(agent.tool_config.compression_manager.last_notes_authored)
+
+    def test_a_failed_answering_model_falls_back_to_the_serving_one(self):
+        opus = _ClaudeScribe(fail=RuntimeError("401 key revoked"), context_window=128_000)
+        agent = self._agent(opus, "switch-answered-fails")
+        agent._answered_model = opus
+        gpt = _Scribe(context_window=128_000)
+        agent.model = gpt
+
+        with patch.object(_ClaudeScribe, "detached_copy", lambda self: self):
+            self.assertTrue(asyncio.run(apply_idle_compact(agent)))
+        self.assertEqual(len(opus.requests), 1)
+        self.assertEqual(len(gpt.requests), 1)
+        self.assertTrue(agent.tool_config.compression_manager.last_notes_authored)
+
+    def test_same_model_answered_sends_to_it_directly(self):
+        model = _Scribe(context_window=128_000)
+        agent = self._agent(model, "same-answered")
+        agent._answered_model = model
+        self.assertTrue(asyncio.run(apply_idle_compact(agent)))
+        self.assertEqual(len(model.requests), 1)
+
+    def test_auto_cut_after_a_fallback_answered_writes_notes_on_the_fallback(self):
+        from agentica.runner.compress import CompressMixin
+
+        primary = _Scribe(context_window=128_000)
+        fallback = _ClaudeScribe(context_window=128_000)
+        agent = self._agent(primary, "fallback-answered")
+        agent._answered_model = fallback
+        self.assertIs(CompressMixin._notes_model(agent, primary), fallback)
+        # Same identity rebuilt by a profile switch: no reason to go elsewhere.
+        agent._answered_model = _Scribe(context_window=128_000)
+        self.assertIs(CompressMixin._notes_model(agent, primary), primary)
+
+        msgs = _window() + [Message(role="user", content="继续")]
+        primary._agent_ref = weakref.ref(agent)
+        cm = CompressionManager()
+        with patch.object(_ClaudeScribe, "detached_copy", lambda self: self):
+            asyncio.run(cm.auto_compact(msgs, model=primary, force=True, notes_request=list(msgs),
+                                        notes_model=fallback))
+        self.assertEqual(primary.requests, [])
+        self.assertEqual(len(fallback.requests), 1)
+
+    def test_the_runners_cut_sends_its_notes_to_the_model_that_answered(self):
+        from agentica.model.loop_state import LoopState
+        from agentica.runner.compress import CompressMixin
+
+        primary = _Scribe(context_window=128_000)
+        fallback = _ClaudeScribe(context_window=128_000)
+        agent = self._agent(primary, "runner-cut")
+        agent._answered_model = fallback
+        primary._agent_ref = weakref.ref(agent)
+        msgs = _window() + [Message(role="user", content="继续")]
+        with patch.object(_ClaudeScribe, "detached_copy", lambda self: self):
+            asyncio.run(CompressMixin._install_new_window(
+                msgs, agent, primary, LoopState(), keep_trailing_turn=True,
+            ))
+        self.assertEqual(primary.requests, [])
+        self.assertEqual(len(fallback.requests), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

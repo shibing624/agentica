@@ -405,6 +405,8 @@ def hydrate_resumed_session(agent, resume_at: str | None = None) -> tuple[list[d
         session_log.cache_warmth_hint(model_id),
     )
     agent.working_memory.clear()
+    # The last reply was produced on another session's window.
+    agent._answered_model = None
     runs_built = agent.working_memory.hydrate_runs_from_history(resumed) if resumed else 0
     return resumed, runs_built
 

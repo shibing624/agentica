@@ -18,6 +18,7 @@ from typing import (
 
 
 from agentica.utils.log import logger
+from agentica.agent.history_filter import model_identity
 from agentica.compression.calibration import ContextCalibration
 from agentica.compression.evict import evict_context, under_pressure
 from agentica.compression.manager import compact_token_limit_of, working_context_window
@@ -219,6 +220,19 @@ class CompressMixin:
         calibration.record_send(messages, count_tokens(messages, model.tools, model.id))
 
     @staticmethod
+    def _notes_model(agent: "Agent", model: "Model") -> "Model":
+        """Who writes the session notes for a cut ``model`` is about to serve.
+
+        The notes request replays the window the last reply was produced on,
+        so it reads the prompt cache only on the model that produced it. That
+        is ``model`` unless a fallback answered or ``/model`` switched since.
+        """
+        answered = agent._answered_model
+        if answered is None or model_identity(answered) == model_identity(model):
+            return model
+        return answered
+
+    @staticmethod
     def _calibration(model: "Model") -> ContextCalibration:
         if model._context_calibration is None:
             model._context_calibration = ContextCalibration()
@@ -252,6 +266,7 @@ class CompressMixin:
                 force=True,
                 keep_trailing_turn=keep_trailing_turn,
                 notes_request=messages,
+                notes_model=CompressMixin._notes_model(agent, model),
             )
         finally:
             if cb is not None:

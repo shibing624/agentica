@@ -15,7 +15,7 @@ import weakref
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from agentica.agent.history_filter import ensure_history_portable
+from agentica.agent.history_filter import ensure_history_portable, model_identity
 from agentica.compression.evict import trailing_user_turn_start
 from agentica.compression.new_window import notes_path_for, start_new_context_window
 from agentica.compression.notes import rollover_handover
@@ -169,6 +169,7 @@ class CompressionManager:
         keep_trailing_turn: bool = True,
         notes_request: Optional[List["Message"]] = None,
         trigger: str = "auto",
+        notes_model: Optional[Any] = None,
     ) -> bool:
         """Layer 2: install a fresh context window. No LLM summary.
 
@@ -178,11 +179,17 @@ class CompressionManager:
 
         ``notes_request`` is the window as the model last saw it (system
         prompt included, so the request reads the prompt cache). When given,
-        ``model`` first rewrites the session notes file from it
+        ``notes_model`` (default ``model``) first rewrites the session notes
+        file from it
         (``author_session_notes``). None for the cuts where that request
         cannot work: after a ``prompt_too_long`` rejection the same prompt
         would be rejected again, and before a cross-provider fallback the
         window still carries the failed provider's checkpoint.
+
+        ``model`` sizes the new window; ``notes_model`` is the one that
+        answered the request ``notes_request`` replays. They differ after a
+        fallback answered or ``/model`` switched: the window is about to be
+        served by ``model``, but only the answering model has the prefix cached.
 
         ``trigger`` goes onto the ``compact_boundary`` row: ``"manual"`` from
         ``apply_idle_compact`` (the user's ``/compact``), else ``"auto"``.
@@ -196,10 +203,33 @@ class CompressionManager:
         slog = agent._session_log if agent is not None else None
         notes_path = notes_path_for(slog)
         self.last_notes_authored = False
-        if notes_request is not None and model is not None:
-            self.last_notes_authored = (
-                await author_session_notes(notes_request, model, notes_path) is not None
-            )
+        writer = notes_model if notes_model is not None else model
+        if notes_request is not None and writer is not None:
+            if writer is model:
+                self.last_notes_authored = (
+                    await author_session_notes(notes_request, writer, notes_path) is not None
+                )
+            else:
+                # Its HTTP client can belong to an earlier turn's event loop
+                # (a fallback copy is never closed, and the CLI runs each turn
+                # on a fresh loop), so the request goes through a copy with none.
+                side = writer.detached_copy()
+                try:
+                    self.last_notes_authored = (
+                        await author_session_notes(notes_request, side, notes_path) is not None
+                    )
+                finally:
+                    await side.close_client()
+            if not self.last_notes_authored and writer is not model and model is not None:
+                # The answering model can be gone (credentials, quota, a
+                # fallback that only stood in for one call). A cold request on
+                # the model that serves next still beats a digest-only cut.
+                logger.warning(
+                    f"Session notes on {writer.id} failed; retrying on {model.id} without the cached prefix"
+                )
+                self.last_notes_authored = (
+                    await author_session_notes(notes_request, model, notes_path) is not None
+                )
 
         self.window_id += 1
         self.reminder_claimed = False
@@ -283,16 +313,30 @@ async def apply_idle_compact(agent: Any) -> bool:
     cm = agent.tool_config.compression_manager if agent.tool_config else None
     if cm is None:
         return False
+    # After /model the window was last answered by the previous model, and
+    # only that model has its prefix cached. The notes go there, on the
+    # history as it last sent it: rewriting it for the new model first (signed
+    # thinking dropped, tool rounds reshaped) would change the very bytes the
+    # cache holds. The rewrite still happens at the next run on the new model.
+    answered = agent._answered_model
+    notes_model = None
+    if (
+        answered is not None
+        and agent.model is not None
+        and model_identity(answered) != model_identity(agent.model)
+    ):
+        notes_model = answered
     # auto_compact resolves the session log (and so the notes path) through
     # model._agent_ref, which run() binds. An idle /compact can come before
     # any run on this model: right after /resume, or after /model swapped in
     # a fresh Model object.
     if agent.model is not None:
         agent.model._agent_ref = weakref.ref(agent)
-        # The notes request goes to agent.model like a run would; after /model
-        # the history may still be the previous model's, signed thinking
-        # included. Rebinds wm.messages, so it is read only after this.
-        if agent.add_history_to_context:
+        # Without an answering model to send it to, the notes request goes to
+        # agent.model like a run would; after /model the history may still be
+        # the previous model's, signed thinking included. Rebinds wm.messages,
+        # so it is read only after this.
+        if agent.add_history_to_context and notes_model is None:
             ensure_history_portable(agent)
         agent._restore_prelude_from_session_log()
         agent.update_model()
@@ -308,6 +352,7 @@ async def apply_idle_compact(agent: Any) -> bool:
         keep_trailing_turn=False,
         notes_request=notes_request,
         trigger="manual",
+        notes_model=notes_model,
     )
     if compacted:
         wm.collapse_runs(messages)

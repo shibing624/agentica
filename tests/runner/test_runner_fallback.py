@@ -704,6 +704,33 @@ class TestPerCallNotPerRun(unittest.TestCase):
 class TestLastUsedModelTruthfulness(unittest.TestCase):
     """LoopState.last_used_model_id reflects the model that actually answered."""
 
+    def test_a_turn_answered_by_the_fallback_is_recorded_for_the_notes_request(self):
+        # The next window cut sends its notes to whoever produced the reply:
+        # only that model has the window cached.
+        from agentica.agent import Agent
+        from agentica.model.openai import OpenAIChat
+        from agentica.run.config import RunConfig
+
+        primary = OpenAIChat(id="primary", api_key="fake_openai_key")
+        fallback = OpenAIChat(id="fallback", api_key="fake_openai_key")
+
+        async def _down(messages):
+            raise RuntimeError("503 service unavailable")
+
+        async def _ok(messages):
+            messages.append(Message(role="assistant", content="ok"))
+            return ModelResponse(content="ok", finish_reason="stop")
+
+        agent = Agent(model=primary)
+        with unittest.mock.patch.object(primary, "response", new=_down), \
+                unittest.mock.patch.object(fallback, "response", new=_ok):
+            agent.run_sync("hi", config=RunConfig(fallback_models=[fallback]))
+        self.assertEqual(agent._answered_model.id, "fallback")
+
+        with unittest.mock.patch.object(primary, "response", new=_ok):
+            agent.run_sync("again")
+        self.assertIs(agent._answered_model, primary)
+
     def test_last_used_model_id_is_primary_on_clean_response(self):
         primary = _fake_model("p")
         agent = _make_agent()
