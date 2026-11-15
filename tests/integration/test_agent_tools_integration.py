@@ -172,25 +172,55 @@ class TestParallelToolExecution:
         return m
 
     @pytest.mark.asyncio
-    async def test_parallel_tools_faster_than_serial(self):
-        """Three 0.1s tools should complete in ≈0.1s, not 0.3s."""
+    async def test_parallel_tools_run_concurrently(self):
+        """Three concurrency-safe calls overlap; the schedule, not a clock.
+
+        Asserting wall-clock time ("three 0.1s sleeps finish in <0.25s") makes
+        this fail on a loaded machine without the schedule being wrong. Count
+        how many bodies are in flight at once instead: peak 3 can only happen
+        when the executor gathered them.
+        """
         model = self._make_model()
-        # Mark all three as concurrency_safe so they run in parallel
-        fa = Function.from_callable(async_slow_a); fa.concurrency_safe = True
-        fb = Function.from_callable(async_slow_b); fb.concurrency_safe = True
-        fc_fn = Function.from_callable(async_slow_c); fc_fn.concurrency_safe = True
-        fcs = [
-            FunctionCall(function=fa, arguments={"x": 1}, call_id="ca"),
-            FunctionCall(function=fb, arguments={"x": 2}, call_id="cb"),
-            FunctionCall(function=fc_fn, arguments={"x": 3}, call_id="cc"),
-        ]
+        in_flight = 0
+        peak = 0
+
+        async def tool_a(x: int) -> str:
+            """Wait briefly and report."""
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            await asyncio.sleep(0.02)
+            in_flight -= 1
+            return f"a{x}"
+
+        async def tool_b(x: int) -> str:
+            """Wait briefly and report."""
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            await asyncio.sleep(0.02)
+            in_flight -= 1
+            return f"b{x}"
+
+        async def tool_c(x: int) -> str:
+            """Wait briefly and report."""
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            await asyncio.sleep(0.02)
+            in_flight -= 1
+            return f"c{x}"
+
+        fcs = []
+        for i, fn in enumerate((tool_a, tool_b, tool_c), 1):
+            function = Function.from_callable(fn)
+            function.concurrency_safe = True  # from_callable does not infer it
+            fcs.append(FunctionCall(function=function, arguments={"x": i}, call_id=f"c{i}"))
         results = []
-        start = time.monotonic()
         async for _ in model.run_function_calls(fcs, results):
             pass
-        elapsed = time.monotonic() - start
-        assert elapsed < 0.25, f"Took {elapsed:.2f}s — not parallel?"
         assert len(results) == 3
+        assert peak == 3, f"peak concurrency {peak} — the batch did not run in parallel"
 
     @pytest.mark.asyncio
     async def test_tool_run_hooks_record_to_agent_metadata(self):

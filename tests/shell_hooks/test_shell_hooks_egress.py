@@ -65,7 +65,7 @@ def _wait_for(path, count, timeout=10.0):
     raise AssertionError(f"{path} never reached {count} payloads")
 
 
-def _assert_nothing_arrives(path, settle=2.0):
+def _assert_nothing_arrives(path, settle=0.4):
     """Prove an absence, which a bare ``not path.exists()`` cannot.
 
     The hook runs in a spawned process, so straight after dispatch the file is

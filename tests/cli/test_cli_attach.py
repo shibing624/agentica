@@ -979,6 +979,17 @@ class TestLifecycle:
         finally:
             server.stop()
 
+    def test_stop_wakes_a_blocked_accept_instead_of_waiting_out_its_timeout(self, tmp_path):
+        """Shutdown latency, not a timing benchmark: closing a listening socket
+        does not interrupt every platform's accept(), so a stop that only closes
+        it sits on the socket timeout. That was 0.5s per CLI exit and per test."""
+        server, _, _ = _server(tmp_path)
+        # What a real blocked accept() waits behind; stop() must not wait it out.
+        server._sock.settimeout(30.0)
+        started = time.monotonic()
+        server.stop()
+        assert time.monotonic() - started < 1.0
+
     def test_no_attach_row_when_not_serving(self, tmp_path, monkeypatch):
         """A session with attach off must not advertise a socket that is not there."""
         monkeypatch.setattr(peers, "AGENTICA_CACHE_DIR", str(tmp_path))

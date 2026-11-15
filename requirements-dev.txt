@@ -23,6 +23,7 @@ ipykernel~=6.27.0
 docling
 tiktoken
 pytest
+pytest-xdist
 langfuse
 python-frontmatter
 litellm>=1.80.10

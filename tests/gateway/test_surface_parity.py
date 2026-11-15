@@ -36,10 +36,17 @@ def _tool_schemas(agent) -> str:
     return json.dumps(agent.model.tools, default=str)
 
 
-@pytest.fixture
-def pair(tmp_path, monkeypatch):
-    monkeypatch.setenv("AGENTICA_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("AGENTICA_PROJECTS_DIR", str(tmp_path / "projects"))
+@pytest.fixture(scope="module")
+def pair(tmp_path_factory):
+    """Build both agents once for this module's two byte-comparison tests.
+
+    Function scope rebuilt two full agents per test (1.6s each); the env is only
+    read while building, so a module-scoped patch is enough.
+    """
+    tmp_path = tmp_path_factory.mktemp("parity")
+    mp = pytest.MonkeyPatch()
+    mp.setenv("AGENTICA_HOME", str(tmp_path / "home"))
+    mp.setenv("AGENTICA_PROJECTS_DIR", str(tmp_path / "projects"))
     (tmp_path / "home").mkdir()
     work = tmp_path / "proj"
     work.mkdir()
@@ -65,7 +72,10 @@ def pair(tmp_path, monkeypatch):
         ask_user_question_callback=lambda *a, **k: "",
         background_process_registry=BackgroundProcessRegistry(),
     )
-    return cli, gateway
+    try:
+        yield cli, gateway
+    finally:
+        mp.undo()
 
 
 def test_cli_and_gateway_send_the_same_system_prompt(pair):

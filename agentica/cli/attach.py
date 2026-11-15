@@ -304,6 +304,18 @@ class AttachServer:
 
     def stop(self) -> None:
         self._stop.set()
+        if self._sock is not None:
+            # Wake the accept loop. Closing a listening socket from another
+            # thread does not necessarily interrupt a blocked accept(), so the
+            # 0.5s accept timeout would become this call's latency — paid on
+            # every CLI exit and by every test that starts a server. A throwaway
+            # connection returns accept() at once; the loop sees _stop and exits.
+            try:
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as waker:
+                    waker.settimeout(0.2)
+                    waker.connect(str(self.path))
+            except OSError:
+                pass
         with self._lock:
             clients = list(self._clients)
         for client in clients:
@@ -347,6 +359,13 @@ class AttachServer:
             except socket.timeout:
                 continue
             except OSError:
+                return
+            if self._stop.is_set():
+                # The connection that woke us is a shutdown waker, not a client.
+                try:
+                    client.close()
+                except OSError:
+                    pass
                 return
             with self._lock:
                 self._clients.append(client)

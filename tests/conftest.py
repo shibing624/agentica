@@ -63,7 +63,7 @@ def _isolate_default_project_dir(monkeypatch):
     for every test so accidental Agent/SessionLog construction cannot write
     into this repo's real projects tree.
     """
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         monkeypatch.setenv("AGENTICA_PROJECTS_DIR", tmpdir)
         yield
 
@@ -81,7 +81,7 @@ def _isolate_gateway_accounts():
     except ImportError:
         yield
         return
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         accounts.use_store_for_tests(os.path.join(tmpdir, "auth.json"))
         try:
             yield
@@ -124,7 +124,7 @@ def opened_externally(monkeypatch):
 def _isolate_skill_dir(monkeypatch):
     """Keep skill loading and skill CRUD off the user's real
     ``~/.agentica/skills``."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         monkeypatch.setenv("AGENTICA_SKILL_DIR", tmpdir)
         monkeypatch.setattr("agentica.config.AGENTICA_SKILL_DIR", tmpdir, raising=False)
         monkeypatch.setattr("agentica.skills.skill_loader.AGENTICA_SKILL_DIR", tmpdir, raising=False)
