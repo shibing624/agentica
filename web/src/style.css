@@ -1553,6 +1553,9 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .ws-preview-body.source .ws-trunc{margin:0;padding:6px 16px 10px;border-top:var(--hair) solid var(--border2);font-size:12px;color:var(--fg3)}
 .ws-preview-body > .ws-preview-img img{max-width:100%;border-radius:8px;border:var(--hair) solid var(--border)}
 .ws-preview-body iframe{width:100%;min-height:60vh;border:var(--hair) solid var(--border);border-radius:8px;background:#fff}
+.ws-preview-body.frame{padding:0;overflow:hidden;display:flex;flex-direction:column}
+.ws-preview-body.frame iframe{flex:1;min-height:0;height:100%;border:0;border-radius:0}
+.ws-preview-body.frame .ws-trunc{margin:0;padding:6px 16px 10px;border-top:var(--hair) solid var(--border2);font-size:12px;color:var(--fg3)}
 /* Document Markdown (file preview, SKILL.md): dsh desktop's reading layout. */
 .md-doc{--md-link:#2563eb;--md-inline-code:#f3f4f6;--md-rule:#e5e7eb;--md-quote:#c4c8cf;padding:4px 6px 12px;min-width:0;overflow-wrap:anywhere;font-size:14px;line-height:24px;color:var(--fg)}
 [data-theme="dark"] .md-doc{--md-link:#7aa2ff;--md-inline-code:#1f1f22;--md-rule:#2a2a2e;--md-quote:#4a4a50}

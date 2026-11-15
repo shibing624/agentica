@@ -197,7 +197,8 @@ export function FilePreview({
         />
       </div>
       <div className={"ws-preview-body" + (view === "code" || view === "text" ? " source" : "")
-        + (view === "table" || preview.kind === "workbook" ? " sheet" : "")}>
+        + (view === "table" || preview.kind === "workbook" ? " sheet" : "")
+        + (view === "web" || preview.kind === "pdf" ? " frame" : "")}>
         {preview.kind === "image" && <PreviewableImage className="ws-preview-img" src={src} alt={preview.name} />}
         {preview.kind === "pdf" && <iframe src={src} title={preview.name} />}
         {preview.kind === "workbook" && <SheetView key={refreshKey} name={preview.name} src={src} />}
