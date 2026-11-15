@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **轮次开头触发自动压缩时，召回 / hook 块不再写进用户消息**：自动压缩把本轮问题作为新窗口的尾巴补写到会话日志，此时它仍是发给模型的那份副本，带着 `<memory_recall>`、`<session_recall>`、`UserPromptSubmit` hook 注入的上下文（如 `<relevant-memories>`）。这些块原样落盘后，Web 回放会把它们显示在用户气泡里，`/resume` 也会把过期的召回结果重放一遍。现在 `append_post_compact_messages` 写入前按 `_request_only_blocks` 精确去掉这些块（新增 `Message.durable_content()`，`strip_request_only_blocks` 也改用它），发给模型的请求不受影响（`agentica/memory/session_log.py`、`agentica/model/message.py`、`agentica/runner/persist.py`）。
+
 #### added
 
 - **多端 worktree 对齐**：`worktree` 工具从 CLI 专属改为统一产品工具面，CLI / Web / Desktop / IM / headless / cron 共用同一套内置能力；Web/Desktop 的 `/worktree` 面板可对当前 session 执行 `status` / `bind` / `new` / `merge` / `remove`，不再需要手写 Python 调用 `agentica.git.worktree.ensure()`。内置 skill catalog 仍是一份，不按端裁剪。

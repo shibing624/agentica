@@ -646,6 +646,9 @@ class SessionLog:
         appear twice); without it, ``/compact`` followed by ``/fork`` or
         ``/resume`` keeps the summary and drops the pending question.
         System messages are skipped — they are rebuilt when the Agent is created.
+        This runs before the request goes out, so the trailing user message is
+        still the request copy: it is written without its request-only blocks
+        (recall, hook context), which ``load()`` must not replay.
         """
         written = 0
         for msg in messages:
@@ -662,9 +665,10 @@ class SessionLog:
                 meta["tool_calls"] = msg.tool_calls
             if msg.reasoning_content:
                 meta["reasoning_content"] = msg.reasoning_content
+            content = msg.durable_content()
             self.append(
                 msg.role,
-                msg.content if isinstance(msg.content, str) else json.dumps(msg.content, ensure_ascii=False),
+                content if isinstance(content, str) else json.dumps(content, ensure_ascii=False),
                 **meta,
             )
             written += 1

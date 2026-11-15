@@ -43,13 +43,9 @@ def strip_request_only_blocks(messages: List[Message]) -> None:
     each is removed by its exact text; anything the user typed stays.
     """
     for message in messages:
-        if not message._request_only_blocks or not isinstance(message.content, str):
-            continue
-        content = message.content
-        for block in message._request_only_blocks:
-            content = content.replace(f"{block}\n\n", "", 1)
-        message.content = content
-        message._request_only_blocks = []
+        if message._request_only_blocks:
+            message.content = message.durable_content()
+            message._request_only_blocks = []
 
 
 class PersistMixin:

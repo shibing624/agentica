@@ -358,6 +358,40 @@ class TestAutoCompactWritesNotes(unittest.TestCase):
             self.assertIn("ZX-41827", joined)
             self.assertIn("继续", joined)
 
+    def test_logged_tail_drops_request_only_blocks(self):
+        """Auto compact at turn start logs the request copy of the question.
+
+        Its recall / hook blocks belong to that one request: the logged tail
+        must hold the question as the user typed it, or every client replays
+        ``<relevant-memories>`` inside the user's bubble.
+        """
+        import asyncio
+        import json
+
+        with tempfile.TemporaryDirectory() as tmp:
+            slog = SessionLog("notes-request-only", base_dir=tmp)
+            cm = CompressionManager()
+            agent = type("A", (), {"_session_log": slog})()
+            model = type("M", (), {"id": "gpt-4o", "context_window": 128_000})()
+            model._agent_ref = lambda: agent
+            hook = "<relevant-memories>\n- the user lives in Beijing\n</relevant-memories>"
+            sent = Message(role="user", content=f"{hook}\n\nhi")
+            sent._request_only_blocks = [hook]
+            msgs = [
+                Message(role="system", content="sys"),
+                Message(role="user", content="earlier question"),
+                Message(role="assistant", content="earlier answer"),
+                sent,
+            ]
+            asyncio.run(cm.auto_compact(msgs, model=model, force=True))
+
+            self.assertIn(hook, msgs[-1].content)
+            rows = [json.loads(line) for line in Path(slog.path).read_text(encoding="utf-8").splitlines()]
+            tail = [r for r in rows if r.get("type") == "user"][-1]
+            self.assertNotIn("relevant-memories", tail["content"])
+            self.assertTrue(tail["content"].startswith("<context_window>"))
+            self.assertTrue(tail["content"].endswith("</dropped_span>\n\nhi"))
+
     def test_existing_notes_inject_both_session_notes_and_dropped_span(self):
         import asyncio
 

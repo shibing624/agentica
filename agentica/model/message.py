@@ -176,6 +176,19 @@ class Message(BaseModel):
                 return json.dumps(self.content, ensure_ascii=False)
         return ""
 
+    def durable_content(self) -> Optional[Union[List[Any], str]]:
+        """``content`` without the request-only blocks, for anything stored.
+
+        The request copy of a user message keeps its blocks until the request
+        is sent; history and the session log must not.
+        """
+        if not self._request_only_blocks or not isinstance(self.content, str):
+            return self.content
+        content = self.content
+        for block in self._request_only_blocks:
+            content = content.replace(f"{block}\n\n", "", 1)
+        return content
+
     def get_content(self, use_compressed_content: bool = False) -> Optional[Union[List[Any], str]]:
         """
         Returns the content, optionally using compressed content if available.
