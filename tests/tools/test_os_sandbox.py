@@ -168,6 +168,73 @@ def test_writable_roots_cover_every_worktree_and_the_shared_git_dir(tmp_path):
     assert read_only == (real(str(repo / ".git" / "hooks")), real(str(repo / ".git" / "config")))
 
 
+def _fake_git(monkeypatch, common, porcelain_z):
+    """Stand in for git: ``rev-parse`` answers ``common``, ``worktree list -z`` the listing."""
+    import agentica.tools.os_sandbox as sb
+
+    calls = []
+
+    def run(argv, **_kw):
+        calls.append(argv)
+        out = common + "\n" if "rev-parse" in argv else porcelain_z
+        return subprocess.CompletedProcess(argv, 0, stdout=out, stderr="")
+
+    monkeypatch.setattr(sb.subprocess, "run", run)
+    sb._REPOSITORY_CACHE.clear()
+    return calls
+
+
+def test_repository_paths_parses_nul_separated_porcelain(tmp_path, monkeypatch):
+    """``-z`` keeps a path with a space, CJK or a newline verbatim; hooks/config are read-only."""
+    import agentica.tools.os_sandbox as sb
+
+    repo = tmp_path / "repo"
+    common = repo / ".git"
+    (common / "worktrees").mkdir(parents=True)
+    trees = [repo, tmp_path / "with space", tmp_path / "中文树", tmp_path / "new\nline"]
+    listing = "".join(f"worktree {t}\0HEAD abc\0branch refs/heads/x\0\0" for t in trees)
+    _fake_git(monkeypatch, str(common), listing)
+
+    writable, read_only = sb.repository_paths(str(repo))
+
+    real = os.path.realpath
+    assert writable == (real(str(common)), *(real(str(t)) for t in trees))
+    assert read_only == (os.path.join(real(str(common)), "hooks"), os.path.join(real(str(common)), "config"))
+
+
+def test_repository_paths_spawns_git_only_after_worktrees_change(tmp_path, monkeypatch):
+    """Two stats per write, not a git process; adding a worktree is seen without a restart."""
+    import agentica.tools.os_sandbox as sb
+
+    repo = tmp_path / "repo"
+    common = repo / ".git"
+    common.mkdir(parents=True)
+    calls = _fake_git(monkeypatch, str(common), f"worktree {repo}\0\0")
+
+    first = sb.repository_paths(str(repo))
+    sb.repository_paths(str(repo))
+    sb.repository_paths(str(repo))
+    assert len(calls) == 2  # rev-parse + worktree list, once
+
+    # `git worktree add` creates <common>/worktrees/<name>/gitdir.
+    entry = common / "worktrees" / "feat"
+    entry.mkdir(parents=True)
+    (entry / "gitdir").write_text(str(tmp_path / "feat" / ".git"))
+    os.utime(common, ns=(1, 1))  # a stale mtime must not hide the new entry
+    sb.repository_paths(str(repo))
+    assert len(calls) == 4
+    assert first[0] == (os.path.realpath(str(common)), os.path.realpath(str(repo)))
+
+
+def test_repository_paths_outside_a_repository_runs_no_git(tmp_path, monkeypatch):
+    import agentica.tools.os_sandbox as sb
+
+    calls = _fake_git(monkeypatch, "", "")
+    monkeypatch.setattr(sb, "_inside_a_repository", lambda _root: False)
+    assert sb.repository_paths(str(tmp_path)) == ((), ())
+    assert calls == []
+
+
 def test_writable_roots_for_a_plain_directory(tmp_path):
     roots, read_only = asyncio.run(resolve_policy_paths([str(tmp_path)]))
     assert roots[0] == os.path.realpath(str(tmp_path))

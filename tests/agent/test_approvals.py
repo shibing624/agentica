@@ -2,11 +2,10 @@
 """ApprovalRegistry, classify/grants, make_approve, and runner deny-as-result."""
 import asyncio
 import os
-import shutil
-import subprocess
 import tempfile
 import time
 import unittest
+from unittest import mock
 import weakref
 from pathlib import Path
 
@@ -243,32 +242,38 @@ class TestClassifyAndGrants(unittest.TestCase):
     def test_auto_writes_any_registered_worktree_of_the_session_repo(self):
         """A worktree beside the repo or further up counts as inside, like the sandboxes.
 
-        The layout lives under home, not tmp: a temp tree is exempt on its own,
-        and the test would pass without the worktree rule being there at all.
+        The trees are faked under home, not tmp: a temp tree is exempt on its
+        own, and the test would pass without the worktree rule at all. Only
+        paths are compared; nothing is created there.
         """
-        base = tempfile.mkdtemp(prefix="agentica-approval-wt-", dir=str(Path.home()))
-        try:
-            parent = os.path.join(base, "parent")
-            repo = os.path.join(parent, "proj")
-            os.makedirs(repo)
-            git = ["git", "-c", "user.email=t@t", "-c", "user.name=t", "-C", repo]
-            subprocess.run(["git", "init", "-q", repo], check=True)
-            subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "init"], check=True)
-            sibling = os.path.join(parent, "proj-v1")
-            upward = os.path.join(base, "parent-root-v2")
-            for path, branch in ((sibling, "v1"), (upward, "v2")):
-                subprocess.run([*git, "worktree", "add", "-q", "-b", branch, path], check=True)
-            plain = os.path.join(parent, "plain-sibling")
-            os.makedirs(plain)
-
+        home = str(Path.home())
+        repo = os.path.join(home, "agentica-approval", "parent", "proj")
+        sibling = os.path.join(home, "agentica-approval", "parent", "proj-v1")
+        upward = os.path.join(home, "agentica-approval", "parent-root-v2")
+        plain = os.path.join(home, "agentica-approval", "parent", "plain-sibling")
+        fake = ((os.path.join(repo, ".git"), repo, sibling, upward), ())
+        with mock.patch("agentica.agent.approvals.repository_paths", return_value=fake):
             for tree in (sibling, upward):
                 fc = _file_fc("write_file", os.path.join(tree, "src", "a.py"))
                 self.assertEqual(classify("auto", fc, self.grants, work_dir=repo), "allow", tree)
                 self.assertEqual(classify("read-only", fc, self.grants, work_dir=repo), "ask", tree)
             outside = _file_fc("write_file", os.path.join(plain, "a.py"))
             self.assertEqual(classify("auto", outside, self.grants, work_dir=repo), "ask")
-        finally:
-            shutil.rmtree(base, ignore_errors=True)
+
+    def test_auto_asks_before_writing_git_hooks_or_config(self):
+        """Inside the session directory too: a hook runs as the user at ``git commit``."""
+        work = os.path.realpath(self.work)
+        git_dir = os.path.join(work, ".git")
+        protected = (os.path.join(git_dir, "hooks"), os.path.join(git_dir, "config"))
+        with mock.patch(
+            "agentica.agent.approvals.repository_paths",
+            return_value=((git_dir, work), protected),
+        ):
+            for target in (os.path.join(git_dir, "hooks", "pre-commit"), os.path.join(git_dir, "config")):
+                fc = _file_fc("write_file", target)
+                self.assertEqual(classify("auto", fc, self.grants, work_dir=work), "ask", target)
+            ok = _file_fc("write_file", os.path.join(work, "src", "a.py"))
+            self.assertEqual(classify("auto", ok, self.grants, work_dir=work), "allow")
 
     def test_unlabeled_tool_allows_in_ask_and_auto(self):
         fc = _fc("custom_tool", {"x": 1})

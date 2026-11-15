@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple
 
 from agentica.tools.base import Function, FunctionCall
-from agentica.tools.os_sandbox import writable_temp_roots
+from agentica.tools.os_sandbox import repository_paths, writable_temp_roots
 from agentica.tools.safety import (
     check_command_safety,
     command_matches_blocked,
@@ -1036,20 +1036,25 @@ def _file_needs_approval(resolved: str, *, work_dir: Optional[str]) -> bool:
     sandboxed ``execute`` already treat as writable; asking here for what
     both of them allow was the mismatch. Only git can widen it, never a call
     argument, and a plain directory next to the repo still asks.
+
+    The git dir's ``hooks`` and ``config`` always ask, even inside the
+    session directory: a hook written there runs as the user, outside every
+    sandbox, at the next ``git commit``.
     """
     if _is_sensitive_path(resolved):
+        return True
+    session = _resolve_tool_path(work_dir, None) if work_dir else None
+    writable, read_only = repository_paths(session) if session else ((), ())
+    if any(_path_is_under(resolved, path) for path in read_only):
         return True
     for temp_root in writable_temp_roots():
         if _path_is_under(resolved, temp_root):
             return False
-    if not work_dir:
+    if session is None:
         return True
-    session = _resolve_tool_path(work_dir, None)
     if _path_is_under(resolved, session):
         return False
-    from agentica.tools.builtin.file_tool import _git_worktree_roots
-
-    return not any(_path_is_under(resolved, root) for root in _git_worktree_roots(session))
+    return not any(_path_is_under(resolved, root) for root in writable)
 
 
 def _is_sensitive_path(filepath: str) -> bool:

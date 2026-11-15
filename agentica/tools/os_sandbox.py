@@ -39,7 +39,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 # Package caches a build writes into even offline. Only existing ones are added.
 _CACHE_DIRS = ("~/.cache", "~/Library/Caches", "~/.npm")
@@ -142,39 +142,101 @@ def writable_temp_roots() -> Tuple[str, ...]:
     return tuple(roots)
 
 
-async def _git_lines(root: str, *args: str) -> List[str]:
-    """stdout lines of ``git -C root <args>``; empty when ``root`` is no repository."""
-    proc = await asyncio.create_subprocess_exec(
-        "git", "-C", root, *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
-    )
+def _git_output(root: str, *args: str) -> Optional[str]:
+    """stdout of ``git -C root args``, or ``None`` when git fails or is missing."""
     try:
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=_GIT_PROBE_TIMEOUT_SECONDS)
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.wait()
-        return []
-    if proc.returncode != 0:
-        return []
-    return out.decode("utf-8", errors="replace").splitlines()
+        result = subprocess.run(
+            ["git", "--no-optional-locks", "-C", root, *args],
+            capture_output=True, text=True, timeout=_GIT_PROBE_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return result.stdout if result.returncode == 0 else None
 
 
-async def _repository_paths(root: str) -> Tuple[List[str], List[str]]:
-    """``(writable, read_only)`` for the git repository ``root`` is in.
+def _inside_a_repository(root: str) -> bool:
+    """Is there a ``.git`` entry at ``root`` or above? A few stats, no process.
+
+    A file counts too: a linked worktree and ``--separate-git-dir`` both
+    leave a ``.git`` file pointing at the real git dir.
+    """
+    path = _real(root)
+    while True:
+        if os.path.lexists(os.path.join(path, ".git")):
+            return True
+        parent = os.path.dirname(path)
+        if parent == path:
+            return False
+        path = parent
+
+
+def _mtime_ns(path: str) -> Optional[int]:
+    try:
+        return os.stat(path).st_mtime_ns
+    except OSError:
+        return None
+
+
+_Token = Tuple[Optional[int], Tuple[Tuple[str, Optional[int]], ...]]
+# root -> (git common dir, its stat token, (writable, read_only)).
+_REPOSITORY_CACHE: Dict[str, Tuple[str, _Token, Tuple[Tuple[str, ...], Tuple[str, ...]]]] = {}
+
+
+def _repository_token(common_dir: str) -> _Token:
+    """Changes whenever the set of worktrees or where they live changes.
+
+    ``git worktree add`` / ``remove`` / ``prune`` create or delete an entry in
+    ``<common>/worktrees`` (the first add creates that directory, which
+    changes ``<common>``); ``git worktree move`` rewrites the entry's
+    ``gitdir`` file. A few stats instead of a git process per write.
+    """
+    entries_dir = os.path.join(common_dir, "worktrees")
+    try:
+        names = sorted(os.listdir(entries_dir))
+    except OSError:
+        names = []
+    return _mtime_ns(common_dir), tuple(
+        (name, _mtime_ns(os.path.join(entries_dir, name, "gitdir"))) for name in names
+    )
+
+
+def repository_paths(root: str) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    """``(writable, read_only)`` real paths for the git repository ``root`` is in.
 
     Writable: the shared git dir and every worktree. Read-only: the hooks dir
-    and config of that git dir. Both empty when ``root`` is no repository.
+    and config of that git dir — a write there becomes code the user later
+    runs outside any sandbox (``git commit`` runs hooks as the user). Both
+    empty when ``root`` is no repository.
+
+    The one parser both layers use: ``execute``'s OS sandbox through
+    :func:`resolve_policy_paths`, the file tools and the auto-tier approval
+    directly. Cached per root and revalidated with two stats, so a write
+    spawns git only after a worktree was added or removed.
     """
-    common, worktrees = await asyncio.gather(
-        _git_lines(root, "rev-parse", "--path-format=absolute", "--git-common-dir"),
-        _git_lines(root, "worktree", "list", "--porcelain"),
-    )
-    git_dirs = [line for line in common if line]
-    writable = list(git_dirs)
-    writable.extend(line[len("worktree "):] for line in worktrees if line.startswith("worktree "))
-    read_only = [os.path.join(d, name) for d in git_dirs for name in ("hooks", "config")]
-    return writable, read_only
+    key = _real(root)
+    cached = _REPOSITORY_CACHE.get(key)
+    if cached is not None and _repository_token(cached[0]) == cached[1]:
+        return cached[2]
+    if not _inside_a_repository(key):
+        return (), ()
+    common = (_git_output(key, "rev-parse", "--path-format=absolute", "--git-common-dir") or "").strip()
+    listing = _git_output(key, "worktree", "list", "--porcelain", "-z")
+    if not common or listing is None:
+        return (), ()
+    common = _real(common)
+    # ``-z``: every attribute line ends in NUL, so a path with a newline or
+    # quotes arrives verbatim instead of C-quoted.
+    trees = [_real(field[len("worktree "):]) for field in listing.split("\0") if field.startswith("worktree ")]
+    writable = tuple(dict.fromkeys([common, *trees]))
+    read_only = tuple(os.path.join(common, name) for name in ("hooks", "config"))
+    paths = (writable, read_only)
+    _REPOSITORY_CACHE[key] = (common, _repository_token(common), paths)
+    return paths
+
+
+def cache_roots() -> Tuple[str, ...]:
+    """Existing package caches a build writes into even offline."""
+    return tuple(path for path in (_real(p) for p in _CACHE_DIRS) if os.path.isdir(path))
 
 
 async def resolve_policy_paths(dirs: Iterable[str]) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
@@ -186,14 +248,14 @@ async def resolve_policy_paths(dirs: Iterable[str]) -> Tuple[Tuple[str, ...], Tu
     stops a command from creating them.
     """
     base = [_real(d) for d in dirs if d]
-    repos = await asyncio.gather(*(_repository_paths(d) for d in base if os.path.isdir(d)))
+    repos = await asyncio.gather(*(asyncio.to_thread(repository_paths, d) for d in base if os.path.isdir(d)))
     candidates = list(base)
     read_only: List[str] = []
     for writable, protected in repos:
         candidates.extend(_real(p) for p in writable)
         read_only.extend(_real(p) for p in protected if _real(p) not in read_only)
     candidates.extend(writable_temp_roots())
-    candidates.extend(_real(p) for p in _CACHE_DIRS)
+    candidates.extend(cache_roots())
     roots: List[str] = []
     for path in candidates:
         if os.path.exists(path) and path not in roots:

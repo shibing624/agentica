@@ -3,8 +3,6 @@
 import asyncio
 import json
 import os
-import subprocess
-import shutil
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -1118,62 +1116,104 @@ class TestPerCallWorkDir:
         assert (other / "edit.txt").read_text() == "hello agentica\n"
         assert not (session / "edit.txt").exists()
 
-    def test_a_call_work_dir_does_not_make_a_directory_writable(self, tmp_dir):
+    @staticmethod
+    def _sandboxed(session, monkeypatch, *, repo=((), ())):
+        """A sandboxed tool where temp is not writable, so ``tmp_path`` is outside.
+
+        Every fixture lives under ``tmp_path``; with the temp roots and package
+        caches switched off, a directory there is writable only through the
+        rule under test. ``repo`` stands in for what git reports.
+        """
+        from agentica.agent.config import SandboxConfig
+        from agentica.tools.builtin import file_tool as file_tool_mod
+
+        monkeypatch.setattr(file_tool_mod, "writable_temp_roots", lambda: ())
+        monkeypatch.setattr(file_tool_mod, "cache_roots", lambda: ())
+        monkeypatch.setattr(file_tool_mod, "repository_paths", lambda _root: repo)
+        return BuiltinFileTool(
+            work_dir=str(session),
+            sandbox_config=SandboxConfig(enabled=True, writable_dirs=[str(session)]),
+        )
+
+    def test_a_call_work_dir_does_not_make_a_directory_writable(self, tmp_path, monkeypatch):
         """``work_dir`` picks where a relative path resolves; it grants nothing.
 
         Passing an outside directory as ``work_dir`` used to add it to the
         writable roots, so one string from the model unlocked any existing
         directory. The same write by absolute path was already refused.
         """
-        from agentica.agent.config import SandboxConfig
-
-        session = Path(tmp_dir)
-        # Not under the platform temp root: temp dirs are writable in this mode.
-        outside = Path.home() / f"agentica-sandbox-outside-{os.getpid()}"
+        session, outside = tmp_path / "session", tmp_path / "outside"
+        session.mkdir()
         outside.mkdir()
-        try:
-            tool = BuiltinFileTool(
-                work_dir=str(session),
-                sandbox_config=SandboxConfig(enabled=True, writable_dirs=[str(session)]),
-            )
-            with pytest.raises(PermissionError, match="not allowed"):
-                asyncio.run(tool.write_file("x.txt", "no\n", work_dir=str(outside)))
-            with pytest.raises(PermissionError, match="not allowed"):
-                asyncio.run(tool.write_file(str(outside / "x.txt"), "no\n"))
-            assert not (outside / "x.txt").exists()
-        finally:
-            shutil.rmtree(outside, ignore_errors=True)
+        (outside / "edit.txt").write_text("hello\n")
+        tool = self._sandboxed(session, monkeypatch)
 
-    def test_a_worktree_of_the_session_repository_is_writable(self):
-        """The checkouts ``execute``'s OS sandbox may write, ``write_file`` may too.
+        with pytest.raises(PermissionError, match="not allowed"):
+            asyncio.run(tool.write_file("x.txt", "no\n", work_dir=str(outside)))
+        with pytest.raises(PermissionError, match="not allowed"):
+            asyncio.run(tool.write_file(str(outside / "x.txt"), "no\n"))
+        with pytest.raises(PermissionError, match="not allowed"):
+            asyncio.run(tool.apply_patch(
+                "*** Begin Patch\n*** Update File: edit.txt\n@@\n-hello\n+bye\n*** End Patch",
+                work_dir=str(outside),
+            ))
+        assert not (outside / "x.txt").exists()
+        assert (outside / "edit.txt").read_text() == "hello\n"
 
-        Not under ``tmp_path``: the platform temp areas are writable anyway,
-        so a fixture there could not tell a granted worktree from scratch space.
+    def test_a_worktree_of_the_session_repository_is_writable(self, tmp_path, monkeypatch):
+        """The checkouts ``execute``'s OS sandbox may write, ``write_file`` may too."""
+        session, tree, plain = tmp_path / "repo", tmp_path / "tree", tmp_path / "plain"
+        for path in (session, tree, plain):
+            path.mkdir()
+        tool = self._sandboxed(session, monkeypatch, repo=((str(tree.resolve()),), ()))
+
+        asyncio.run(tool.write_file("in-tree.txt", "yes\n", work_dir=str(tree)))
+        assert (tree / "in-tree.txt").read_text() == "yes\n"
+        # A sibling that is no worktree stays refused.
+        with pytest.raises(PermissionError, match="not allowed"):
+            asyncio.run(tool.write_file("x.txt", "no\n", work_dir=str(plain)))
+
+    def test_git_hooks_and_config_are_refused_inside_the_session(self, tmp_path, monkeypatch):
+        """A hook written by the model runs as the user at the next ``git commit``.
+
+        ``execute``'s OS sandbox keeps ``<git dir>/hooks`` and ``config``
+        read-only; the file tools refused nothing there, inside the session
+        directory, so a sandboxed agent could plant code that runs unsandboxed.
         """
-        from agentica.agent.config import SandboxConfig
+        session = tmp_path / "repo"
+        git_dir = session / ".git"
+        (git_dir / "hooks").mkdir(parents=True)
+        (git_dir / "config").write_text("[core]\n")
+        protected = (str((git_dir / "hooks").resolve()), str((git_dir / "config").resolve()))
+        tool = self._sandboxed(session, monkeypatch, repo=((str(git_dir.resolve()),), protected))
 
-        base = Path.home() / f"agentica-wt-probe-{os.getpid()}"
-        repo = base / "repo"
-        tree = base / "tree"  # outside the session dir on purpose
-        git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
-        try:
-            repo.mkdir(parents=True)
-            subprocess.run([*git, "init", "-q", str(repo)], check=True)
-            subprocess.run([*git, "-C", str(repo), "commit", "-q", "--allow-empty", "-m", "i"], check=True)
-            subprocess.run([*git, "-C", str(repo), "worktree", "add", "-q", str(tree)], check=True)
-            tool = BuiltinFileTool(
-                work_dir=str(repo),
-                sandbox_config=SandboxConfig(enabled=True, writable_dirs=[str(repo)]),
-            )
+        with pytest.raises(PermissionError, match="not allowed"):
+            asyncio.run(tool.write_file(".git/hooks/pre-commit", "#!/bin/sh\n"))
+        with pytest.raises(PermissionError, match="not allowed"):
+            asyncio.run(tool.write_file(".git/config", "[core]\n\thooksPath = /tmp\n"))
+        assert not (git_dir / "hooks" / "pre-commit").exists()
+        assert (git_dir / "config").read_text() == "[core]\n"
+        # The rest of the repository and the git dir itself stay writable.
+        asyncio.run(tool.write_file("src/a.py", "ok\n"))
+        asyncio.run(tool.write_file(".git/info-scratch", "ok\n"))
 
-            asyncio.run(tool.write_file("in-tree.txt", "yes\n", work_dir=str(tree)))
-            assert (tree / "in-tree.txt").read_text() == "yes\n"
-            # A sibling that is no worktree stays refused.
-            (base / "plain").mkdir()
-            with pytest.raises(PermissionError, match="not allowed"):
-                asyncio.run(tool.write_file("x.txt", "no\n", work_dir=str(base / "plain")))
-        finally:
-            shutil.rmtree(base, ignore_errors=True)
+    def test_apply_patch_reads_the_repository_once_per_call(self, tmp_path, monkeypatch):
+        """Write validation used to run git once per patched file."""
+        session = tmp_path / "repo"
+        session.mkdir()
+        for name in ("a.txt", "b.txt", "c.txt"):
+            (session / name).write_text("x\n")
+        tool = self._sandboxed(session, monkeypatch)
+        from agentica.tools.builtin import file_tool as file_tool_mod
+
+        calls = []
+        monkeypatch.setattr(file_tool_mod, "repository_paths", lambda root: calls.append(root) or ((), ()))
+        patch = "*** Begin Patch\n" + "".join(
+            f"*** Update File: {name}\n@@\n-x\n+y\n" for name in ("a.txt", "b.txt", "c.txt")
+        ) + "*** End Patch"
+        asyncio.run(tool.apply_patch(patch))
+        assert (session / "c.txt").read_text() == "y\n"
+        assert len(calls) == 1
 
     def test_a_doubled_worktree_prefix_is_named_not_guessed(self, tmp_dir):
         """Relative paths resolve against ``work_dir`` only; the error shows the other reading."""

@@ -9,7 +9,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import tempfile
 import threading
 from collections import OrderedDict, deque
@@ -21,7 +20,7 @@ import aiofiles
 
 from agentica.tools.base import Tool
 from agentica.tools.helpers import ToolDisplayOutput, file_change_meta, file_display_meta
-from agentica.tools.os_sandbox import writable_temp_roots
+from agentica.tools.os_sandbox import cache_roots, repository_paths, writable_temp_roots
 from agentica.tools.patch import PatchContextError, PatchNoChangeError, apply_diff, parse_patch_envelope
 from agentica.utils.async_utils import close_subprocess_transport, terminate_subprocess
 from agentica.utils.log import logger
@@ -494,30 +493,8 @@ def _binary_refusal(path: Path) -> Optional[str]:
     return None
 
 
-_GIT_ROOTS_TIMEOUT_SECONDS = 5
-
-
-def _git_worktree_roots(session_dir: str) -> List[str]:
-    """Real paths of the git dir and every worktree of ``session_dir``'s repository.
-
-    The writable part of :func:`agentica.tools.os_sandbox._repository_paths`,
-    so ``write_file`` grants exactly the checkouts a sandboxed ``execute``
-    may write. Empty outside a repository or without git.
-    """
-    try:
-        result = subprocess.run(
-            ["git", "--no-optional-locks", "-C", session_dir, "worktree", "list", "--porcelain"],
-            capture_output=True, text=True, timeout=_GIT_ROOTS_TIMEOUT_SECONDS,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return []
-    if result.returncode != 0:
-        return []
-    return [
-        os.path.realpath(line[len("worktree "):])
-        for line in result.stdout.splitlines()
-        if line.startswith("worktree ")
-    ]
+def _path_within(path: str, root: str) -> bool:
+    return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
 
 
 def _check_sensitive_write_path(filepath: str) -> Optional[str]:
@@ -852,39 +829,50 @@ class BuiltinFileTool(Tool):
             )
         return path
 
-    def _is_write_allowed(self, resolved: str) -> bool:
+    def _is_write_allowed(
+        self, resolved: str, policy: Optional[Tuple[List[str], Tuple[str, ...]]] = None,
+    ) -> bool:
         """Whether `resolved` (an absolute path string) is inside a writable root.
 
         The roots come from trusted state only: ``writable_dirs``, the session
-        work_dir, the worktrees of the session's git repository, the platform
-        temp areas, and paths the user granted. A call's ``work_dir`` argument
-        picks where a relative path resolves; it never adds a root — otherwise
-        one string from the model would make any existing directory writable.
+        work_dir, the git dir and worktrees of the session's repository, the
+        platform temp areas, the package caches, and paths the user granted. A
+        call's ``work_dir`` argument picks where a relative path resolves; it
+        never adds a root — otherwise one string from the model would make any
+        existing directory writable.
 
-        The same root set ``execute``'s OS sandbox builds
-        (:func:`agentica.tools.os_sandbox.resolve_policy_paths`): the shell and
-        the file tools must agree, or a file one may write is refused by the
-        other.
+        The git dir's ``hooks`` and ``config`` are subtracted even though the
+        git dir is a root: a hook written there runs as the user, outside any
+        sandbox, at the next ``git commit``. Granting such a path explicitly
+        still works.
+
+        Same sets as ``execute``'s OS sandbox
+        (:func:`agentica.tools.os_sandbox.resolve_policy_paths`), from the same
+        parser (:func:`agentica.tools.os_sandbox.repository_paths`): the shell
+        and the file tools must agree, or a file one may write the other refuses.
         """
         if self._is_escalated(resolved):
             return True
-        for root in self._writable_roots():
-            if resolved == root or resolved.startswith(root + os.sep):
-                return True
-        return False
+        writable, read_only = policy or self._policy_paths()
+        if any(_path_within(resolved, path) for path in read_only):
+            return False
+        return any(_path_within(resolved, root) for root in writable)
 
-    def _writable_roots(self) -> List[str]:
-        """Real paths of every trusted writable root, read now.
+    def _policy_paths(self) -> Tuple[List[str], Tuple[str, ...]]:
+        """``(writable_roots, read_only_paths)`` as real paths, read now.
 
-        Worktrees are listed from git each time: one created mid-session must
-        be writable without a restart, which is what ``execute`` does too.
+        Worktrees come from git: one created mid-session is writable without
+        a restart. :func:`repository_paths` caches them and revalidates with a
+        few stats, so this spawns git only after a worktree changed.
         """
         roots = [str(Path(wd).expanduser().resolve()) for wd in self._sandbox_config.writable_dirs]
         session = str(self.work_dir.resolve())
         roots.append(session)
-        roots.extend(_git_worktree_roots(session))
+        repo_writable, read_only = repository_paths(session)
+        roots.extend(repo_writable)
         roots.extend(writable_temp_roots())
-        return roots
+        roots.extend(cache_roots())
+        return roots, read_only
 
     def _sensitive_write_guard(self, filepath: str) -> Optional[str]:
         """Return an error message if `filepath` targets a sensitive system/credentials
@@ -904,11 +892,18 @@ class BuiltinFileTool(Tool):
             return None
         return err + self._escalation_hint(repr(filepath))
 
-    def _validate_write_path(self, path: str, *, root: Optional[Path] = None) -> str:
+    def _validate_write_path(
+        self,
+        path: str,
+        *,
+        root: Optional[Path] = None,
+        policy: Optional[Tuple[List[str], Tuple[str, ...]]] = None,
+    ) -> str:
         """Validate that a write operation is allowed under sandbox restrictions.
 
         Checks blocked_paths and the writable roots (see ``_is_write_allowed``).
-        ``root`` only decides where a relative path resolves.
+        ``root`` only decides where a relative path resolves. ``policy`` is
+        :meth:`_policy_paths` already read, for a caller checking many paths.
 
         Raises:
             PermissionError: If write is not allowed
@@ -917,7 +912,7 @@ class BuiltinFileTool(Tool):
         if self._sandbox_config is None or not self._sandbox_config.enabled:
             return path
         resolved = str(self._resolve_path(path, root=root).resolve())
-        if self._sandbox_config.writable_dirs and not self._is_write_allowed(resolved):
+        if self._sandbox_config.writable_dirs and not self._is_write_allowed(resolved, policy):
             raise PermissionError(
                 f"Sandbox: write to '{path}' is not allowed in the current permission mode. "
                 f"Writable dirs: {self._sandbox_config.writable_dirs}; the platform temp "
@@ -1239,8 +1234,13 @@ class BuiltinFileTool(Tool):
 
         resolved = []
         seen_paths = set()
+        policy = (
+            self._policy_paths()
+            if self._sandbox_config is not None and self._sandbox_config.enabled
+            else None
+        )
         for operation in operations:
-            self._validate_write_path(operation.path, root=root)
+            self._validate_write_path(operation.path, root=root, policy=policy)
             path = self._resolve_path(operation.path, root=root).resolve()
             path_key = str(path)
             if path_key in seen_paths:
