@@ -159,7 +159,7 @@ class TestWorkspace:
 
         assert "AGENTS.md" in context or "Project Agent" in context
         assert "session-start snapshot" in context
-        assert "read_file" in context
+        assert "updated rules arrive in a <system-reminder>" in context
         assert len(context) > 0
 
     def test_write_memory_daily(self, temp_workspace_path):

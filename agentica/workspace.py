@@ -184,11 +184,10 @@ class Workspace:
         self._context_snapshot: Optional[str] = None
         self._memory_snapshot: Optional[str] = None
         self._experience_snapshot: Optional[str] = None
-        # Per user: bumped when that user's AGENTS.md is replaced. Agents pin
-        # ``(user_id, epoch)``; the gateway switching between accounts on a
-        # shared Workspace leaves each account's pin intact.
-        self._context_epochs: Dict[str, int] = {}
-        self._agents_md_digest: Optional[Tuple[Path, int, int, str]] = None
+        # ``(stamp, digest)`` of the rendered AGENTS.md chain; the stamp is the
+        # (path, mtime_ns, size) of every file the chain reads, so an unchanged
+        # tree is answered without reading any file.
+        self._agents_md_digest: Optional[Tuple[Tuple[Tuple[str, int, int], ...], str]] = None
 
     @property
     def user_id(self) -> str:
@@ -394,7 +393,11 @@ class Workspace:
         filepath.write_text(new_content, encoding="utf-8")
 
     async def get_context_prompt(self) -> str:
-        """Get workspace context (for injecting into System Prompt).
+        """Get workspace context (for injecting into System Prompt)."""
+        return self.context_text()
+
+    def context_text(self) -> str:
+        """Workspace context as injected into the system prompt.
 
         Everything comes from one kind of file, AGENTS.md, read from two kinds
         of place: this user's own (``users/{user_id}/AGENTS.md``) and the
@@ -410,9 +413,9 @@ class Workspace:
             return ""
         snapshot_note = (
             "Note: This AGENTS.md context is a session-start snapshot for "
-            "prompt-cache stability. If these rules change during this session, "
-            "use the read_file tool on the file paths shown below when the latest "
-            "content is needed; new sessions load the latest content automatically."
+            "prompt-cache stability. If AGENTS.md changes during this session, "
+            "the updated rules arrive in a <system-reminder> and take precedence "
+            "over this copy."
         )
         return f"<!-- AGENTS.md chain -->\n{snapshot_note}\n\n{chain_contents}"
 
@@ -457,28 +460,50 @@ class Workspace:
         """
         return self._experience_snapshot
 
-    @property
-    def context_epoch(self) -> Tuple[str, int]:
-        """Changes when the pinned AGENTS.md chain must be rendered again."""
-        return self._user_id, self._context_epochs.get(self._user_id, 0)
+    def refresh_context_snapshot(self) -> None:
+        """Re-read the AGENTS.md chain into an existing frozen snapshot.
 
-    def user_agents_md_digest(self) -> str:
-        """Content hash of this user's AGENTS.md, for the session-log prelude.
-
-        Asked on every request; re-hashed only when the file's mtime or size
-        changes.
+        Called once the agent has delivered the new rules in-history, so the
+        next window (after compaction) renders them into ``messages[0]``. An
+        unfrozen workspace stays unfrozen: the Runner freezes context, memory
+        and experiences together.
         """
-        path = self.user_agent_md_path()
-        try:
-            stat = path.stat()
-        except FileNotFoundError:
-            return hashlib.sha1(b"").hexdigest()
+        if self._context_snapshot is not None:
+            self._context_snapshot = self.context_text()
+
+    def agents_md_chain(self) -> str:
+        """The AGENTS.md chain body, read from disk now."""
+        return self._load_agent_md_chain()
+
+    @staticmethod
+    def context_digest(text: str) -> str:
+        """Content hash of a rendered workspace context."""
+        return hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+    def agents_md_digest(self) -> str:
+        """Hash of ``context_text()`` as it would render now.
+
+        Asked on every request; re-rendered only when a file the chain reads
+        is added, removed, or changes mtime/size. Covers this user's AGENTS.md
+        and the project chain, so a hand edit of either is noticed.
+        """
+        stamp = self._agent_md_stamp()
         cached = self._agents_md_digest
-        if cached is not None and cached[:3] == (path, stat.st_mtime_ns, stat.st_size):
-            return cached[3]
-        digest = hashlib.sha1(path.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
-        self._agents_md_digest = (path, stat.st_mtime_ns, stat.st_size, digest)
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
+        digest = self.context_digest(self.context_text())
+        self._agents_md_digest = (stamp, digest)
         return digest
+
+    def _agent_md_stamp(self) -> Tuple[Tuple[str, int, int], ...]:
+        entries: List[Tuple[str, int, int]] = []
+        for path in [self.user_agent_md_path(), *self._project_agent_md_candidates()]:
+            try:
+                stat = path.stat()
+            except FileNotFoundError:
+                continue
+            entries.append((str(path), stat.st_mtime_ns, stat.st_size))
+        return tuple(entries)
 
     # =========================================================================
     # Cross-product project config compatibility (Hermes-style)
@@ -524,7 +549,6 @@ class Workspace:
         used to inject shared scaffolding into every tenant's prompt, and
         standing rules already have a home under ``users/``.
         """
-        cwd = Path(os.getcwd())
         found: List[Tuple[str, str]] = []
         seen_paths: set[Path] = set()
 
@@ -540,47 +564,52 @@ class Workspace:
                 logger.debug("Skipping unreadable user agent file %s: %s", user_agent_md, exc)
 
         project_chain: List[Tuple[str, str]] = []
+        for candidate in self._project_agent_md_candidates():
+            source_path = candidate.resolve()
+            if source_path in seen_paths:
+                continue
+            if candidate.name in self._PATH_ONLY_CONFIG_NAMES:
+                # Don't inline developer docs; surface the path so the
+                # agent can pull them via read_file when relevant.
+                note = (
+                    f"`{candidate}` is available for on-demand reading "
+                    "(developer reference, not auto-loaded). "
+                    "Use the read_file tool when its contents are needed."
+                )
+                project_chain.append((str(candidate), note))
+                seen_paths.add(source_path)
+                continue
+            try:
+                text = candidate.read_text(encoding="utf-8").strip()
+                if text:
+                    project_chain.append((str(candidate), text))
+                    seen_paths.add(source_path)
+            except (OSError, UnicodeError) as exc:
+                logger.debug("Skipping unreadable project config %s: %s", candidate, exc)
+
+        project_chain.reverse()
+        found.extend(project_chain)
+        return found
+
+    def _project_agent_md_candidates(self) -> List[Path]:
+        """First existing config file per directory, CWD up to the repo root."""
+        cwd = Path(os.getcwd())
+        candidates: List[Path] = []
         visited = set()
         for dir_path in [cwd] + list(cwd.parents):
             resolved = dir_path.resolve()
             if resolved in visited:
                 break
             visited.add(resolved)
-
             # First-match-wins per directory (Hermes-style priority)
             for name in self._PROJECT_CONFIG_NAMES:
                 candidate = resolved / name
-                if not candidate.is_file():
-                    continue
-                source_path = candidate.resolve()
-                if source_path in seen_paths:
+                if candidate.is_file():
+                    candidates.append(candidate)
                     break
-                if name in self._PATH_ONLY_CONFIG_NAMES:
-                    # Don't inline developer docs; surface the path so the
-                    # agent can pull them via read_file when relevant.
-                    note = (
-                        f"`{candidate}` is available for on-demand reading "
-                        "(developer reference, not auto-loaded). "
-                        "Use the read_file tool when its contents are needed."
-                    )
-                    project_chain.append((str(candidate), note))
-                    seen_paths.add(source_path)
-                    break
-                try:
-                    text = candidate.read_text(encoding="utf-8").strip()
-                    if text:
-                        project_chain.append((str(candidate), text))
-                        seen_paths.add(source_path)
-                except (OSError, UnicodeError) as exc:
-                    logger.debug("Skipping unreadable project config %s: %s", candidate, exc)
-                break  # first-match-wins: stop searching this directory
-
             if (resolved / ".git").exists():
                 break
-
-        project_chain.reverse()
-        found.extend(project_chain)
-        return found
+        return candidates
 
     @staticmethod
     def _truncate_agent_md_content(content: str, max_chars: int) -> str:
@@ -681,7 +710,6 @@ class Workspace:
         tmp.write_text(content, encoding="utf-8")
         tmp.replace(path)
         self._context_snapshot = None
-        self._context_epochs[self._user_id] = self._context_epochs.get(self._user_id, 0) + 1
         return path
 
     def _ensure_home_agent_md_symlink(self, target: Path) -> None:

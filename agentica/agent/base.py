@@ -26,7 +26,6 @@ from typing import (
     NamedTuple,
     Optional,
     Sequence,
-    Tuple,
     Type,
     TypeVar,
     TYPE_CHECKING,
@@ -693,7 +692,10 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         # live table on the next request so a tool deleted since the log was
         # written is called out once instead of being silently called.
         self._pinned_logged_tools: List[str] = []
-        self._pinned_context_epoch: Optional[Tuple[str, int]] = None
+        # Digest of the AGENTS.md rules the model has been given in this
+        # window: the copy in the pinned prompt, or the last in-history
+        # reminder. A different live digest means the next turn carries one.
+        self._agents_md_known_digest: Optional[str] = None
 
         # Mid-run steering: guidance pushed (possibly from another thread) while
         # the agent is inside its tool loop. Drained between tool batches and
@@ -1064,13 +1066,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self._pinned_tool_order = []
         self._pinned_tool_policies = []
         self._pinned_logged_tools = []
-        self._pinned_context_epoch = None
-
-    def _logged_agents_md_still_current(self, logged: Optional[str]) -> bool:
-        """A settings-page edit of AGENTS.md must win over the logged prompt."""
-        if logged is None or self.workspace is None:
-            return True
-        return self.workspace.user_agents_md_digest() == logged
+        self._agents_md_known_digest = None
 
     def _logged_tool_policies(self, logged_keys: List[str]) -> List[str]:
         """The guides the recovered ``system_prompt`` already contains.
@@ -1096,7 +1092,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             return
         model_id = self.model.id if self.model is not None else None
         prelude = self._session_log.load_active_prelude(model=model_id)
-        if prelude.system_prompt and self._logged_agents_md_still_current(prelude.agents_md_digest):
+        if prelude.system_prompt:
             self._pinned_system_prompt = prelude.system_prompt
             self._pinned_runtime_state = (
                 dict(prelude.runtime_state)
@@ -1108,8 +1104,9 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             # no longer exist (1.5.x log after the 1.6.0 deletions, or a tool
             # this rebuild did not mount). The next request names those once.
             self._pinned_logged_tools = list(prelude.tools)
-            workspace = self.workspace
-            self._pinned_context_epoch = workspace.context_epoch if workspace is not None else None
+            # What the restored prompt (plus any reminder already in history)
+            # told the model. If AGENTS.md changed since, the next turn says so.
+            self._agents_md_known_digest = prelude.agents_md_digest
         if prelude.tools and not self._pinned_tool_order:
             self._pinned_tool_order = list(prelude.tools)
 

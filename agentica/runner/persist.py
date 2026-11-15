@@ -923,7 +923,6 @@ class PersistMixin:
                     k for k, fn in model.functions.items()
                     if not fn.deferred and fn.is_available()
                 ]
-        workspace = agent.workspace
         slog.append_trace_prelude(
             model=model.id if model is not None else None,
             provider=model.provider if model is not None else None,
@@ -931,7 +930,7 @@ class PersistMixin:
             tools=ordered_tools,
             system_prompt=system_prompt,
             runtime_state=dict(agent._pinned_runtime_state) if agent._pinned_runtime_state else None,
-            agents_md_digest=workspace.user_agents_md_digest() if workspace is not None else None,
+            agents_md_digest=agent._agents_md_known_digest,
             tool_policies=list(agent._pinned_tool_policies),
         )
 

@@ -253,18 +253,59 @@ class PromptsMixin:
             "summary": summary_val,
         }
 
-    def _context_epoch_moved(self) -> bool:
+    def _loads_agents_md(self) -> bool:
         workspace = self.workspace
-        if workspace is None:
-            return False
-        return workspace.context_epoch != self._pinned_context_epoch
+        return (
+            workspace is not None
+            and self.long_term_memory_config.load_workspace_context
+            and workspace.exists()
+        )
 
     def _bind_system_pin(self, prompt: str) -> None:
         self._pinned_system_prompt = prompt
         self._pinned_runtime_state = self._current_runtime_state()
         self._pinned_tool_policies = list(self._tool_policy_prompts)
+        self._agents_md_known_digest = None
+        if self._loads_agents_md():
+            workspace = self.workspace
+            frozen = workspace.get_frozen_context()
+            # The digest of the rules this prompt actually carries: the frozen
+            # snapshot when there is one, otherwise what was just read live.
+            self._agents_md_known_digest = (
+                workspace.context_digest(frozen) if frozen is not None else workspace.agents_md_digest()
+            )
+
+    def _take_agents_md_reminder(self) -> Optional[str]:
+        """Deliver an AGENTS.md change without touching the pinned ``messages[0]``.
+
+        The chain is part of the cached system prompt; re-rendering it would
+        re-price the whole conversation behind it. The full new chain is
+        appended once instead and declared to supersede the pinned copy. The
+        next window (after compaction) renders it into ``messages[0]`` again.
+        """
+        if self._pinned_system_prompt is None or not self._loads_agents_md():
+            return None
         workspace = self.workspace
-        self._pinned_context_epoch = workspace.context_epoch if workspace is not None else None
+        current = workspace.agents_md_digest()
+        if current == self._agents_md_known_digest:
+            return None
+        self._agents_md_known_digest = current
+        workspace.refresh_context_snapshot()
+        chain = workspace.agents_md_chain()
+        if not chain:
+            return (
+                "<system-reminder>\n"
+                "AGENTS.md changed during this session and now contains no rules. "
+                "Disregard the AGENTS.md chain in your instructions.\n"
+                "</system-reminder>"
+            )
+        return (
+            "<system-reminder>\n"
+            "AGENTS.md changed during this session. The rules below replace the "
+            "AGENTS.md chain in your instructions; where they differ, follow these.\n\n"
+            f"{chain}\n"
+            "</system-reminder>"
+        )
 
     def _take_tool_policy_reminder(self) -> Optional[str]:
         """Surface a tool guide that arrived after ``messages[0]`` was pinned.
@@ -370,11 +411,7 @@ class PromptsMixin:
         has_active_history = bool(self.working_memory.runs)
 
         if can_pin and has_active_history and self._pinned_system_prompt is not None:
-            if self._context_epoch_moved():
-                self._pinned_system_prompt = None
-                self._pinned_runtime_state = None
-            else:
-                return Message(role=pc.system_message_role, content=self._pinned_system_prompt)
+            return Message(role=pc.system_message_role, content=self._pinned_system_prompt)
 
         rendered = await self._render_system_message_raw()
         if can_pin and rendered is not None and isinstance(rendered.content, str):
@@ -1046,6 +1083,7 @@ class PromptsMixin:
                 piece
                 for piece in (
                     self._take_removed_pinned_tools_reminder(),
+                    self._take_agents_md_reminder(),
                     self._take_tool_policy_reminder(),
                     self._take_runtime_context_reminder(),
                 )

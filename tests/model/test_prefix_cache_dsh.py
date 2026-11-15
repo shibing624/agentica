@@ -545,25 +545,54 @@ def test_trace_records_prefix_reuse_ratio_and_detects_cache_cliffs(tmp_path):
     assert slog.trajectory_stats()["cache_cliffs"] == 1
 
 
-def test_agents_md_edit_replaces_the_pinned_system_prompt(tmp_path):
-    from agentica.workspace import Workspace
+def _agents_md_agent(tmp_path, ws, spy, session_id="sess-agents-md"):
+    return Agent(
+        model=spy,
+        workspace=ws,
+        add_history_to_context=True,
+        tool_config=ToolConfig(auto_load_mcp=False),
+        session_id=session_id,
+        session_base_dir=str(tmp_path / "sessions"),
+    )
 
+
+def _agents_md_reminders(messages):
+    return [
+        m for m in messages
+        if m["role"] == "user"
+        and isinstance(m["content"], str)
+        and "AGENTS.md changed during this session" in m["content"]
+    ]
+
+
+def test_agents_md_edit_keeps_messages0_and_delivers_the_new_rules(tmp_path, monkeypatch):
+    """A settings-page edit used to re-render messages[0] (a full cache cliff)."""
+    monkeypatch.setenv("AGENTICA_HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
     ws = Workspace(tmp_path / "ws", user_id="alice")
     ws.initialize()
     ws.write_user_agents_md("RULE-V1\n")
-    agent = Agent(
-        model=OpenAIChat(id="gpt-4o-mini", api_key="fake_key"),
-        workspace=ws,
-        tool_config=ToolConfig(auto_load_mcp=False),
-    )
-    agent.working_memory.runs.append(SimpleNamespace())
-    first = asyncio.run(agent.get_system_message())
-    assert "RULE-V1" in first.content
+    spy = _SpyOpenAIChat(id="DeepSeek-V4.1-Flash")
+    agent = _agents_md_agent(tmp_path, ws, spy)
 
+    asyncio.run(agent.run("turn 1"))
     ws.write_user_agents_md("RULE-V2\n")
-    second = asyncio.run(agent.get_system_message())
-    assert "RULE-V2" in second.content
-    assert "RULE-V1" not in second.content
+    asyncio.run(agent.run("turn 2"))
+    asyncio.run(agent.run("turn 3"))
+
+    m1, m2, m3 = (spy.captured[i][0] for i in range(3))
+    assert m1[0] == m2[0] == m3[0], "AGENTS.md edit re-rendered messages[0]"
+    assert "RULE-V1" in m1[0]["content"] and "RULE-V2" not in m1[0]["content"]
+    # turn 2 carries the whole new chain, declared to supersede the pinned copy
+    assert m2[-1]["content"].startswith("<system-reminder>")
+    assert "AGENTS.md changed during this session" in m2[-1]["content"]
+    assert "RULE-V2" in m2[-1]["content"]
+    assert m2[-1]["content"].endswith("turn 2")
+    # sent once: it stays in history and is not repeated
+    assert m3[-1]["content"] == "turn 3"
+    assert len(_agents_md_reminders(m3)) == 1
+    # the next window renders the new rules into messages[0]
+    assert "RULE-V2" in ws.get_frozen_context()
 
 
 def test_resume_uses_logged_runtime_state(tmp_path):
@@ -768,37 +797,124 @@ def test_a_real_turn_records_the_rendered_guide_fingerprints(tmp_path, monkeypat
     assert metas[0]["tool_policy_keys"] == [tool_policy_key("GUIDE-TEXT-IN-THE-SYSTEM-PROMPT")]
 
 
-def test_resume_skips_a_pinned_prompt_when_agents_md_changed(tmp_path):
-    from agentica.workspace import Workspace
-
+def test_resume_keeps_the_logged_prompt_when_agents_md_changed(tmp_path, monkeypatch):
+    """A changed AGENTS.md used to discard the logged prompt: a cliff on resume."""
+    monkeypatch.setenv("AGENTICA_HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
     ws = Workspace(tmp_path / "ws", user_id="alice")
     ws.initialize()
     ws.write_user_agents_md("RULE-V1\n")
-    slog = SessionLog(session_id="pin-agents", base_dir=str(tmp_path / "log"))
-    slog.append_trace_prelude(
-        model="gpt-4o-mini",
-        provider="openai",
-        context_window=128000,
-        tools=["search_session"],
-        system_prompt="system with RULE-V1",
-        runtime_state={"date": "", "channel": "", "summary": ""},
-        agents_md_digest=ws.user_agents_md_digest(),
-    )
+    spy1 = _SpyOpenAIChat(id="DeepSeek-V4.1-Flash")
+    asyncio.run(_agents_md_agent(tmp_path, ws, spy1).run("turn 1"))
+    first, _ = spy1.captured[0]
+
     ws.write_user_agents_md("RULE-V2\n")
+    ws2 = Workspace(tmp_path / "ws", user_id="alice")
+    spy2 = _SpyOpenAIChat(id="DeepSeek-V4.1-Flash")
+    resumed = _agents_md_agent(tmp_path, ws2, spy2)
+    asyncio.run(resumed.run("turn 2"))
+    asyncio.run(resumed.run("turn 3"))
+
+    m2, m3 = spy2.captured[0][0], spy2.captured[1][0]
+    assert m2[0] == first[0], "resume discarded the logged system prompt"
+    assert m2[: len(first)] == first, "resume changed the turn-1 prefix"
+    assert "RULE-V2" in m2[-1]["content"]
+    assert "AGENTS.md changed during this session" in m2[-1]["content"]
+    assert m3[-1]["content"] == "turn 3"
+
+
+def test_a_delivered_reminder_is_not_resent_after_resume(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTICA_HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    ws = Workspace(tmp_path / "ws", user_id="alice")
+    ws.initialize()
+    ws.write_user_agents_md("RULE-V1\n")
+    spy1 = _SpyOpenAIChat(id="DeepSeek-V4.1-Flash")
+    agent = _agents_md_agent(tmp_path, ws, spy1)
+    asyncio.run(agent.run("turn 1"))
+    ws.write_user_agents_md("RULE-V2\n")
+    asyncio.run(agent.run("turn 2"))
+    delivered = spy1.captured[1][0]
+    assert len(_agents_md_reminders(delivered)) == 1
+
+    spy2 = _SpyOpenAIChat(id="DeepSeek-V4.1-Flash")
+    resumed = _agents_md_agent(tmp_path, Workspace(tmp_path / "ws", user_id="alice"), spy2)
+    asyncio.run(resumed.run("turn 3"))
+    m3 = spy2.captured[0][0]
+    assert m3[: len(delivered)] == delivered, "resume changed the delivered prefix"
+    assert m3[-1]["content"] == "turn 3"
+    assert len(_agents_md_reminders(m3)) == 1
+
+
+def test_hand_edit_of_project_agents_md_is_delivered(tmp_path, monkeypatch):
+    """Before, only a settings-page write of the user file was noticed."""
+    monkeypatch.setenv("AGENTICA_HOME", str(tmp_path))
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / ".git").mkdir()
+    (project / "AGENTS.md").write_text("PROJECT-V1\n", encoding="utf-8")
+    monkeypatch.chdir(project)
+    ws = Workspace(tmp_path / "ws", user_id="alice")
+    ws.initialize()
+    spy = _SpyOpenAIChat(id="DeepSeek-V4.1-Flash")
+    agent = _agents_md_agent(tmp_path, ws, spy)
+
+    asyncio.run(agent.run("turn 1"))
+    (project / "AGENTS.md").write_text("PROJECT-V2 edited by hand\n", encoding="utf-8")
+    asyncio.run(agent.run("turn 2"))
+
+    m1, m2 = spy.captured[0][0], spy.captured[1][0]
+    assert m1[0] == m2[0]
+    assert "PROJECT-V1" in m1[0]["content"]
+    assert "PROJECT-V2 edited by hand" in m2[-1]["content"]
+
+
+def test_agents_md_change_keeps_the_whole_request_prefix(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTICA_HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    ws = Workspace(tmp_path / "ws", user_id="alice")
+    ws.initialize()
+    ws.write_user_agents_md("RULE-V1\n")
+    spy = _SpyOpenAIChat(id="DeepSeek-V4.1-Flash")
+    agent = _agents_md_agent(tmp_path, ws, spy, session_id="sess-agents-cliff")
+    asyncio.run(agent.run("turn 1"))
+    ws.write_user_agents_md("RULE-V2\n")
+    asyncio.run(agent.run("turn 2"))
+
+    m1, m2 = spy.captured[0][0], spy.captured[1][0]
+    # turn 1's request is a byte-exact prefix of turn 2's: nothing re-priced
+    assert m2[: len(m1)] == m1
+    assert any("RULE-V2" in m["content"] for m in m2[len(m1):] if isinstance(m["content"], str))
+
+
+def test_the_next_window_carries_the_new_rules_in_messages0(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ws = Workspace(tmp_path / "ws", user_id="alice")
+    ws.initialize()
+    ws.write_user_agents_md("RULE-V1\n")
+    asyncio.run(ws.freeze_snapshots())
     agent = Agent(
         model=OpenAIChat(id="gpt-4o-mini", api_key="fake_key"),
         workspace=ws,
         tool_config=ToolConfig(auto_load_mcp=False),
     )
-    agent._session_log = slog
     agent.working_memory.runs.append(SimpleNamespace())
-    agent._restore_prelude_from_session_log()
-    assert agent._pinned_system_prompt is None
-    assert agent._pinned_tool_order == ["search_session"]
+    pinned = asyncio.run(agent.get_system_message()).content
+    # A hand edit leaves the frozen snapshot in place; delivering the
+    # reminder is what refreshes it for the next window.
+    ws.user_agent_md_path().write_text("RULE-V2\n", encoding="utf-8")
+    assert agent._take_agents_md_reminder() is not None
+    assert asyncio.run(agent.get_system_message()).content == pinned
+
+    agent.reset_window_pins()  # what compaction / a model switch does
+    fresh = asyncio.run(agent.get_system_message()).content
+    assert "RULE-V2" in fresh and "RULE-V1" not in fresh
+    assert agent._take_agents_md_reminder() is None
 
 
-def test_agents_md_epoch_is_per_user_on_a_shared_workspace(tmp_path):
+def test_agents_md_on_a_shared_workspace_is_per_user(tmp_path, monkeypatch):
     """The gateway switches one Workspace between accounts every turn."""
+    monkeypatch.chdir(tmp_path)
     ws = Workspace(tmp_path / "ws", user_id="alice")
     ws.initialize()
     agent = Agent(
@@ -812,19 +928,28 @@ def test_agents_md_epoch_is_per_user_on_a_shared_workspace(tmp_path):
     ws.set_user("bob")
     ws.write_user_agents_md("BOB-RULE\n")
     ws.set_user("alice")
-    assert not agent._context_epoch_moved()
     assert asyncio.run(agent.get_system_message()).content == first.content
+    assert agent._take_agents_md_reminder() is None
 
     ws.write_user_agents_md("ALICE-RULE\n")
-    assert agent._context_epoch_moved()
-    assert "ALICE-RULE" in asyncio.run(agent.get_system_message()).content
+    reminder = agent._take_agents_md_reminder()
+    assert reminder is not None and "ALICE-RULE" in reminder
+    assert "BOB-RULE" not in reminder
+    assert asyncio.run(agent.get_system_message()).content == first.content
 
 
-def test_agents_md_digest_follows_edits(tmp_path):
+def test_agents_md_digest_follows_edits_of_the_whole_chain(tmp_path, monkeypatch):
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / ".git").mkdir()
+    monkeypatch.chdir(project)
     ws = Workspace(tmp_path / "ws", user_id="alice")
     ws.initialize()
     ws.write_user_agents_md("V1\n")
-    first = ws.user_agents_md_digest()
-    assert ws.user_agents_md_digest() == first
+    first = ws.agents_md_digest()
+    assert ws.agents_md_digest() == first
     ws.user_agent_md_path().write_text("V2 longer\n", encoding="utf-8")
-    assert ws.user_agents_md_digest() != first
+    second = ws.agents_md_digest()
+    assert second != first
+    (project / "AGENTS.md").write_text("PROJECT\n", encoding="utf-8")
+    assert ws.agents_md_digest() != second
