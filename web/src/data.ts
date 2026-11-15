@@ -1,4 +1,5 @@
 import * as api from "./api";
+import { normalizeApprovalMode } from "./lib/approvalMode";
 import { applyLang, getStrings } from "./i18n";
 import { applyTheme, getState, setState, showToast, writeLastSessionId } from "./store";
 
@@ -114,8 +115,9 @@ export async function loadPrefs() {
     setState({ lang: data.lang });
   }
   if (data.approval_mode) {
-    localStorage.setItem("ag_approval", data.approval_mode);
-    setState({ selectedApprovalMode: data.approval_mode });
+    const mode = normalizeApprovalMode(data.approval_mode);
+    localStorage.setItem("ag_approval", mode);
+    setState({ selectedApprovalMode: mode });
   }
   if (data.last_session_id) writeLastSessionId(data.last_session_id, false);
   setState({ showCliSessions: !!data.show_cli_sessions });

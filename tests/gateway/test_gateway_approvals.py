@@ -395,9 +395,40 @@ class TestMidTurnApprovalModeSwitch:
         svc.set_session_approval_mode("s1", "read-only", owner="default")
         log = svc.session_log_for("s1", owner="default")
         log.path.write_text('{"type": "user", "message": {"role": "user", "content": "hi"}}\n')
-        assert log.get_approval_mode() == "read-only"
+        # The same field the terminal reads on ``--resume`` and a fork copies.
+        assert log.get_cli_prefs()["permissions"] == "read-only"
 
         fresh = AgentService(workspace_path=str(tmp_path))
         fresh.set_session_work_dir("s1", str(work), owner="default")
         assert fresh.get_session_approval_mode("s1", owner="default") == "read-only"
         assert fresh.get_session_approval_mode("never-set", owner="default") == "auto"
+        assert fresh.list_sessions(owner="default", include_cli=True)[0]["approval_mode"] == "read-only"
+
+    def test_cli_tier_and_fork_are_read_by_the_gateway(self, tmp_path):
+        from agentica_gateway.services.agent_service import AgentService
+
+        work = tmp_path / "w"
+        work.mkdir()
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc.set_session_work_dir("s1", str(work), owner="default")
+        log = svc.session_log_for("s1", owner="default")
+        log.path.parent.mkdir(parents=True, exist_ok=True)
+        log.path.write_text('{"type": "user", "uuid": "u1", "message": {"role": "user", "content": "hi"}}\n')
+        # What ``/permissions read-only`` in the terminal records.
+        log.set_cli_prefs({"permissions": "read-only"})
+        assert svc.get_session_approval_mode("s1", owner="default") == "read-only"
+
+        fork = log.fork("s2")
+        svc.set_session_work_dir("s2", str(work), owner="default")
+        assert fork.get_cli_prefs()["permissions"] == "read-only"
+        assert svc.get_session_approval_mode("s2", owner="default") == "read-only"
+
+    def test_im_turn_seeds_a_new_chat_but_keeps_a_chosen_tier(self, tmp_path):
+        from agentica_gateway.services.agent_service import AgentService
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc.seed_session_approval_mode("fresh", "allow-all", owner="default")
+        assert svc.get_session_approval_mode("fresh", owner="default") == "allow-all"
+        svc.set_session_approval_mode("picked", "read-only", owner="default")
+        svc.seed_session_approval_mode("picked", "allow-all", owner="default")
+        assert svc.get_session_approval_mode("picked", owner="default") == "read-only"

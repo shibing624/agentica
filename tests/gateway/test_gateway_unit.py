@@ -986,6 +986,22 @@ class TestWebPrefsClean:
         from agentica_gateway.routes.settings import _clean_prefs
         assert _clean_prefs({"approval_mode": "ask"})["approval_mode"] == "read-only"
 
+    def test_every_reader_maps_a_retired_tier_the_same_way(self):
+        # One function decides; a reader that compared ``== "ask"`` exactly
+        # dropped ``"ASK"`` and fell back to a looser default.
+        from agentica.cli.prefs import normalize_cli_prefs
+        from agentica.cron.jobs import CronJob
+        from agentica_gateway.models import SessionApprovalModeRequest
+        from agentica_gateway.routes.settings import _clean_prefs
+
+        for stored in ("ask", "ASK", "  ask "):
+            assert _clean_prefs({"approval_mode": stored})["approval_mode"] == "read-only"
+            assert normalize_cli_prefs({"permissions": stored}) == {"permissions": "read-only"}
+            assert SessionApprovalModeRequest(approval_mode=stored).approval_mode == "read-only"
+            job = CronJob.from_dict({"id": "j", "prompt": "p", "permission_mode": stored,
+                                     "schedule": {"kind": "every", "every_ms": 60000}})
+            assert job.permission_mode == "read-only"
+
     def test_current_tiers_pass_through_and_junk_is_dropped(self):
         from agentica_gateway.routes.settings import _clean_prefs
         for mode in ("read-only", "auto", "allow-all"):

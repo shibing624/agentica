@@ -32,6 +32,7 @@ from agentica.config.profiles import (
     delete_profile,
     load_global_config,
 )
+from agentica.agent.permissions import migrate_permission_mode
 from agentica.cli import self_manage
 from agentica.config import AGENTICA_HOME
 from agentica.utils.log import logger
@@ -263,12 +264,9 @@ def _clean_prefs(raw: dict) -> dict:
     lang = raw.get("lang")
     if lang in _PREFS_LANG:
         out["lang"] = lang
-    mode = raw.get("approval_mode")
-    if mode == "ask":
-        # Pre-rename name of the same tier. Mapping it keeps a saved Read Only
-        # session at Read Only instead of letting it fall back to the default
-        # (Workspace Write), which lets in-workspace writes run unasked.
-        mode = "read-only"
+    # A pre-rename ``ask`` stays Read Only instead of falling back to the
+    # default (Workspace Write), which lets in-workspace writes run unasked.
+    mode = migrate_permission_mode(raw.get("approval_mode"))
     if mode in _PREFS_APPROVAL:
         out["approval_mode"] = mode
     last = raw.get("last_session_id")

@@ -307,7 +307,18 @@ class TestClassifyAndGrants(unittest.TestCase):
         from agentica.agent.approvals import _approval_options
 
         wipe = _fc("execute", {"command": "rm -f -r /"}, is_destructive=True)
-        self.assertEqual(_approval_options(wipe), ("allow", "deny", "deny_prefix"))
+        self.assertEqual(_approval_options(wipe, work_dir=self.work), ("allow", "deny", "deny_prefix"))
+
+    def test_card_and_classifier_resolve_a_relative_path_against_the_same_dir(self):
+        # A relative ``config`` is sensitive only under a sensitive work_dir.
+        # ``classify`` asks every time; the card must not then offer an
+        # "allow similar" that grant could never honor.
+        from agentica.agent.approvals import _approval_options
+
+        ssh = os.path.expanduser("~/.ssh")
+        fc = _file_fc("write_file", "config")
+        self.assertEqual(classify("auto", fc, self.grants, work_dir=ssh), "ask")
+        self.assertNotIn("allow_prefix", _approval_options(fc, work_dir=ssh))
 
     def test_git_subcommand_class_does_not_cover_other_git(self):
         self.grants.add_command_prefix("git add foo.py")

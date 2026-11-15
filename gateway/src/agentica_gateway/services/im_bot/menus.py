@@ -202,7 +202,11 @@ class ImMenusMixin:
             lines.append(f"  日志：{format_file_size(log.path.stat().st_size)}")
         from ...routes import settings as settings_routes
 
-        mode = settings_routes.approval_mode_pref(uid) or "auto"
+        mode = (
+            self._agent_service.get_session_approval_mode(state.session_id, owner=uid)
+            if self._agent_service is not None
+            else settings_routes.approval_mode_pref(uid) or "auto"
+        )
         lines.append(f"  审批：{mode}" + ("（从不询问，不会出现审批卡片）" if mode == "allow-all" else ""))
         if phone_card_base_url(_pkg().settings.host, _pkg().settings.port) is None:
             # The card page posts the decision back to this gateway, so it needs

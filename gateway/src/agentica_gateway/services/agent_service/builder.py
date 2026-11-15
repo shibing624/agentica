@@ -23,6 +23,7 @@ from agentica.agent.permissions import (
     validate_permission_mode,
     validate_sandbox_mode,
 )
+from agentica.cli.prefs import normalize_cli_prefs
 from agentica.compression.manager import parse_compact_token_limit
 from agentica.config.profiles import get_setting
 from agentica.run.config import RunConfig
@@ -364,9 +365,10 @@ class AgentBuilderMixin:
         validate_permission_mode(normalized)
         key = self._sk(session_id, owner)
         if self._saved_approval_mode(session_id, owner) != normalized:
-            # Each chat keeps its own tier across reloads and gateway restarts;
-            # the sidecar is where the session list reads it back from.
-            self.session_log_for(session_id, owner).set_approval_mode(normalized)
+            # One field for every client: the CLI's ``cli.permissions`` sidecar
+            # key. ``--resume`` in the terminal and a fork read the same tier
+            # the web set, and the session list reads it back after a restart.
+            self.session_log_for(session_id, owner).set_cli_prefs({"permissions": normalized})
         self._session_approval_modes[key] = normalized
 
         cached_agent = self._cache.get(key)
@@ -387,6 +389,16 @@ class AgentBuilderMixin:
     def get_session_approval_mode(self, session_id: str, owner: Optional[str] = None) -> str:
         return self._saved_approval_mode(session_id, owner) or self._DEFAULT_APPROVAL_MODE
 
+    def seed_session_approval_mode(
+        self, session_id: str, mode: Optional[str], owner: Optional[str] = None,
+    ) -> None:
+        """Give a chat that never had a tier its starting one (an IM chat
+        takes the account default). A chat that has one keeps it: the tier
+        picked on the web for this conversation is not undone by the next
+        message arriving from WeChat."""
+        if mode and self._saved_approval_mode(session_id, owner) is None:
+            self.set_session_approval_mode(session_id, mode, owner)
+
     def _saved_approval_mode(self, session_id: str, owner: Optional[str] = None) -> Optional[str]:
         """The tier this chat was set to, or ``None`` if it never was.
 
@@ -396,8 +408,8 @@ class AgentBuilderMixin:
         key = self._sk(session_id, owner)
         mode = self._session_approval_modes.get(key)
         if mode is None:
-            saved = self.session_log_for(session_id, owner).get_approval_mode()
-            if saved not in PERMISSION_MODES:
+            saved = normalize_cli_prefs(self.session_log_for(session_id, owner).get_cli_prefs()).get("permissions")
+            if saved is None:
                 return None
             mode = self._session_approval_modes[key] = saved
         return mode

@@ -787,7 +787,7 @@ def make_approve(
         if reviewer_note:
             preview = f"{preview}\n\n{reviewer_note}"
         similar_label = _similar_label_for(fc)
-        options = _approval_options(fc)
+        options = _approval_options(fc, work_dir=work_dir)
         pending = PendingApproval(
             tool_call_id=fc.call_id or "",
             name=fc.function.name,
@@ -904,11 +904,13 @@ def _similar_label_for(fc: FunctionCall) -> str:
     return ""
 
 
-def _approval_options(fc: FunctionCall) -> Tuple[ApprovalDecision, ...]:
+def _approval_options(fc: FunctionCall, *, work_dir: Optional[str]) -> Tuple[ApprovalDecision, ...]:
     # A hard-unsafe call is asked about every time (``classify`` checks it
     # before allow grants), so an "allow similar" would be a promise nothing
     # keeps. "Deny similar" stays: refusing the class for good is still useful.
-    if _is_hard_unsafe(fc, work_dir=None):
+    # Same ``work_dir`` as ``classify``: a relative path resolves to a
+    # sensitive one only against it, and the two must agree on the card.
+    if _is_hard_unsafe(fc, work_dir=work_dir):
         if fc.function.name in EXECUTE_TOOLS and not command_allows_prefix(_call_command(fc) or ""):
             return ("allow", "deny")
         return ("allow", "deny", "deny_prefix")

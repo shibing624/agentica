@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from agentica.agent.permissions import validate_permission_mode
+from agentica.agent.permissions import migrate_permission_mode, validate_permission_mode
 from agentica.config import AGENTICA_CRON_DIR
 from agentica.ticket import new_ticket_id
 from agentica.cron.types import (
@@ -153,7 +153,9 @@ class CronJob:
             run_count=data.get("run_count", 0),
             enabled=data.get("enabled", True),
             workspace=data.get("workspace"),
-            permission_mode=data.get("permission_mode", ""),
+            # A job saved before the rename carries ``ask``; passed on as-is,
+            # every scheduled run would fail on it.
+            permission_mode=migrate_permission_mode(data.get("permission_mode", "")),
             work_dir=data.get("work_dir"),
             paused_reason=data.get("paused_reason", ""),
             timeout_seconds=data.get("timeout_seconds", 0.0),

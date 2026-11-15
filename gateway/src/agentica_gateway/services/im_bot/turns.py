@@ -416,9 +416,9 @@ class ImTurnsMixin:
 
         from ...routes import settings as settings_routes
 
-        mode = settings_routes.approval_mode_pref(uid)
-        if mode:
-            self._agent_service.set_session_approval_mode(session_id, mode, owner=uid)
+        self._agent_service.seed_session_approval_mode(
+            session_id, settings_routes.approval_mode_pref(uid), owner=uid,
+        )
 
         turn = live_turn.start(session_id, owner=uid, user_message="" if automated else text)
 

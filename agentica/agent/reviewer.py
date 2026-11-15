@@ -138,35 +138,20 @@ def _failed(error: str, *, started: float, model: str = "") -> ReviewOutcome:
     )
 
 
-def _arguments_json(value: Any, limit: int = _MAX_ARG_CHARS) -> str:
-    """Serialize arguments for the prompt.
+def _arguments_json(value: Any) -> Optional[str]:
+    """The arguments exactly as the reviewer will see them, or ``None`` when
+    they cannot be shown whole (unserializable, cyclic, or over the limit).
 
-    No clipping happens here: ``review()`` refuses a payload larger than
-    ``_MAX_ARG_CHARS`` before this is reached, because the reviewer's answer
-    authorizes the whole call and a clipped payload would hide part of it.
+    One function decides both what is shown and whether it is complete, so a
+    payload can never be judged "complete" by one check and cut by another.
+    The reviewer's answer authorizes the whole call: a large ``apply_patch``
+    must not hide the flagged path past a cut.
     """
     try:
-        return json.dumps(value, ensure_ascii=False, default=str)
-    except (TypeError, ValueError):
-        return repr(value)[:limit]
-
-
-def _arguments_clipped(value: Any, limit: int = _MAX_ARG_CHARS) -> bool:
-    """Would the prompt hide part of this payload from the reviewer?
-
-    The reviewer's answer authorizes the whole call, not the part it was shown,
-    so a payload that cannot be shown in full must not be reviewed at all. A
-    large ``apply_patch`` is the case that matters: the flagged path can sit
-    past the cut, and the static classifier would have parked the call for
-    exactly that path.
-    """
-    if isinstance(value, str):
-        return len(value) > limit
-    if isinstance(value, dict):
-        return any(_arguments_clipped(v, limit) for v in value.values())
-    if isinstance(value, (list, tuple)):
-        return any(_arguments_clipped(v, limit) for v in value)
-    return False
+        text = json.dumps(value, ensure_ascii=False, default=str)
+    except (TypeError, ValueError, RecursionError):
+        return None
+    return text if len(text) <= _MAX_ARG_CHARS else None
 
 
 class ToolCallReviewer:
@@ -218,7 +203,7 @@ class ToolCallReviewer:
                 texts.append(text[:_MAX_USER_CHARS])
         return texts[-_RECENT_USER_MESSAGES:]
 
-    def _build_prompt(self, fc: Any) -> str:
+    def _build_prompt(self, fc: Any, arguments: str) -> str:
         users = self._user_messages()
         user_block = "\n".join(f"- {text}" for text in users) if users else (
             "(none in this session's context)"
@@ -226,7 +211,7 @@ class ToolCallReviewer:
         return _REVIEW_PROMPT.format(
             work_dir=getattr(self._agent, "work_dir", None) or "(unknown)",
             tool=fc.function.name,
-            arguments=_arguments_json(fc.arguments or {}),
+            arguments=arguments,
             user_messages=user_block,
         )
 
@@ -270,7 +255,8 @@ class ToolCallReviewer:
         # Decide on the whole call or not at all. A clipped payload would let a
         # large `apply_patch` hide the very path the classifier parked it for,
         # while an allow still authorizes every path in the real arguments.
-        if _arguments_clipped(getattr(fc, "arguments", None) or {}):
+        arguments = _arguments_json(fc.arguments or {})
+        if arguments is None:
             return _failed(
                 "tool arguments are larger than the reviewer can inspect in full",
                 started=started,
@@ -280,7 +266,7 @@ class ToolCallReviewer:
         # tool call about itself) and no cost-tracker watermark.
         side = model.side_call_copy(max_output_tokens=_REVIEW_MAX_OUTPUT_TOKENS)
         try:
-            prompt = self._build_prompt(fc)
+            prompt = self._build_prompt(fc, arguments)
             call = side.response(messages=[Message(role="user", content=prompt)])
             response = await (asyncio.wait_for(call, timeout) if timeout > 0 else call)
         except asyncio.TimeoutError:

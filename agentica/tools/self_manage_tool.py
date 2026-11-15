@@ -28,9 +28,10 @@ from agentica.cli import self_manage as sm
 # ``this_session.channel`` from action='show' says which case applies.
 DEFAULT_RESTART_HINT = (
     "Restarting is required to load a new version: in the terminal CLI the "
-    "user exits and reruns `agentica`; for the web / desktop / IM gateway, "
-    "whoever manages this deployment restarts the server process — you cannot "
-    "do this yourself from the conversation."
+    "user exits and reruns `agentica`; on the web / desktop an administrator "
+    "uses the sidebar's update button, which upgrades and restarts the "
+    "gateway; for an IM chat, whoever manages this deployment restarts the "
+    "server process — you cannot do this yourself from the conversation."
 )
 
 

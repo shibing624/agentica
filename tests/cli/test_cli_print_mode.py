@@ -138,6 +138,23 @@ class TestPrintMode:
         assert cfg["auto_review_model_name"] == "glm-4.7-flash"
         assert cfg["auto_review_api_key"] == "k"
 
+    def test_startup_carries_the_cache_routing_knobs(self, capsys):
+        # /model copies default_headers and cache_keepalive; startup dropped
+        # them, so a sticky-routing header was missing until the first switch
+        # and one prefix's requests landed on different upstream accounts.
+        configs = []
+        _run_one_shot(
+            ["done"], print_mode=True, configs=configs,
+            resolved_extra={
+                "default_headers": {"X-Sticky-Routing": "acct-1"},
+                "cache_keepalive": True,
+            },
+        )
+        capsys.readouterr()
+        cfg = configs[0]
+        assert cfg["default_headers"] == {"X-Sticky-Routing": "acct-1"}
+        assert cfg["cache_keepalive"] is True
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

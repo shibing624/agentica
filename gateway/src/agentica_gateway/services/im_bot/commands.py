@@ -227,32 +227,28 @@ def _fmt_elapsed(seconds: float) -> str:
     return f"{s}s"
 
 
-# The IM command set, rendered both as the user's /help and as the agent's
-# instructions (model_factory) so the two cannot disagree.
-# (command, Chinese alias, what it does, what it does — for the agent)
-IM_COMMANDS: List[Tuple[str, str, str, str]] = [
-    ("/menu", "菜单", "打开快捷控制菜单", "numbered control menu"),
-    ("/session", "会话", "查看并切换当前项目的会话（含正在运行的终端）",
-     "list this project's sessions and live CLI terminals, attach this chat to one"),
-    ("/new", "新建", "在当前目录新建会话", "start a new session in the bound directory"),
-    ("/project", "项目", "切换本机项目工作区（多会话时继续选择会话）",
-     "bind this chat to another project directory and pick its session"),
-    ("/model", "", "切换当前会话模型", "pick the config.yaml profile this session runs on"),
-    ("/status", "状态", "查看当前目录、会话、模型、实时执行步骤与后台任务",
-     "show the bound directory, session, model, live turn progress and background jobs"),
-    ("/ps", "后台", "查看后台任务实时进度、最新日志并支持停止",
-     "list running and recent background jobs, inspect live output tail, or stop a job"),
-    ("/cancel", "取消", "中止当前正在运行的对话轮次（/stop <编号|all> 停止后台任务）",
-     "stop the running turn (/stop <id|all> stops background jobs)"),
-    ("/verbose", "详细", "汇报附带工具统计与思考摘要", "replies include tool stats and reasoning"),
-    ("/concise", "简洁", "只汇报最终结论与产物文件", "replies carry only the final answer and files"),
-    ("/help", "帮助", "显示本帮助", "this list"),
+# The IM command set, rendered as the user's /help. The agent's prompt lists
+# the same commands as static text (``PRODUCT_INSTRUCTIONS``), kept in step by
+# ``tests/gateway/test_surface_parity.py``.
+# (command, Chinese alias, what it does)
+IM_COMMANDS: List[Tuple[str, str, str]] = [
+    ("/menu", "菜单", "打开快捷控制菜单"),
+    ("/session", "会话", "查看并切换当前项目的会话（含正在运行的终端）"),
+    ("/new", "新建", "在当前目录新建会话"),
+    ("/project", "项目", "切换本机项目工作区（多会话时继续选择会话）"),
+    ("/model", "", "切换当前会话模型"),
+    ("/status", "状态", "查看当前目录、会话、模型、实时执行步骤与后台任务"),
+    ("/ps", "后台", "查看后台任务实时进度、最新日志并支持停止"),
+    ("/cancel", "取消", "中止当前正在运行的对话轮次（/stop <编号|all> 停止后台任务）"),
+    ("/verbose", "详细", "汇报附带工具统计与思考摘要"),
+    ("/concise", "简洁", "只汇报最终结论与产物文件"),
+    ("/help", "帮助", "显示本帮助"),
 ]
 
 HELP_TEXT = (
     "📱 Agentica 远控菜单命令：\n"
     + "".join(
-        f"  {cmd}{f' ({alias})' if alias else ''}  {desc}\n" for cmd, alias, desc, _ in IM_COMMANDS
+        f"  {cmd}{f' ({alias})' if alias else ''}  {desc}\n" for cmd, alias, desc in IM_COMMANDS
     )
     + "\n直接发送任何文字即为向当前绑定会话下发任务；出现编号菜单或审批时直接回复数字即可。"
     + "\n也可以直接问助手「你是什么模型」「改下配置」「装个 skill」「检查更新」，它会用 self_manage 处理。"

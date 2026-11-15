@@ -41,6 +41,18 @@ class _RecordingRunner:
         return "done"
 
 
+def test_a_job_saved_with_the_retired_ask_tier_runs_read_only():
+    # Before the rename the tier was called ``ask``; a stored job must not fail
+    # every scheduled run on it, nor loosen to a default.
+    from agentica.agent.permissions import validate_permission_mode
+    from agentica.cron.jobs import CronJob
+
+    job = CronJob.from_dict({"id": "j1", "prompt": "p", "permission_mode": "ask",
+                             "schedule": {"kind": "every", "every_ms": 60000}})
+    assert job.permission_mode == "read-only"
+    validate_permission_mode(job.permission_mode)
+
+
 # ============== Capture at create ==============
 
 class TestMandateCapture:

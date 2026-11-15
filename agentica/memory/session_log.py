@@ -1692,7 +1692,6 @@ class SessionLog:
             "pinned": cls._meta_pinned(meta),
             "profile_name": cls._meta_profile_name(meta),
             "profile_source": cls._meta_profile_source(meta),
-            "approval_mode": cls._meta_approval_mode(meta),
             "last_read_at": cls._meta_last_read_at(meta),
             "cli": cls._meta_cli(meta),
             "source": cls._meta_source(meta),
@@ -1961,21 +1960,6 @@ class SessionLog:
         if isinstance(value, str) and value.strip():
             return value.strip()
         return None
-
-    @staticmethod
-    def _meta_approval_mode(data: Dict[str, Any]) -> Optional[str]:
-        value = data.get("approval_mode")
-        return value.strip() if isinstance(value, str) and value.strip() else None
-
-    def get_approval_mode(self) -> Optional[str]:
-        """Return the approval tier this session was last set to, if recorded."""
-        return self._meta_approval_mode(self._read_meta(self.meta_path))
-
-    def set_approval_mode(self, mode: str) -> None:
-        """Record this session's approval tier; each session keeps its own."""
-        if not isinstance(mode, str) or not mode.strip():
-            raise ValueError("session approval mode must be a non-empty string")
-        self._write_meta({"approval_mode": mode.strip()})
 
     @staticmethod
     def _meta_cli(data: Dict[str, Any]) -> Dict[str, Any]:

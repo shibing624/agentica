@@ -143,6 +143,15 @@ export function switchTo(id: string) {
   if (sess) {
     sess.unread = false;
     markSessionRead(id);
+    // A chat with no tier of its own takes the default as it is now, and the
+    // gateway records it: a tier picked later in another chat must not
+    // relabel this one, here or after a reload.
+    if (!sess.approvalMode) {
+      sess.approvalMode = st.selectedApprovalMode;
+      if (sess.sizeBytes || sess.msgs.length) {
+        void api.setSessionApprovalMode(id, sess.approvalMode as "read-only" | "auto" | "allow-all");
+      }
+    }
   }
   writeLastSessionId(id);
   bump();
@@ -167,7 +176,8 @@ export function chatApprovalMode(id: string | null): string {
 }
 
 /** Pick a tier for the open chat only; it also becomes the tier the next new
- *  chat starts on. Other chats, running or not, keep theirs. */
+ *  chat starts on. Other chats keep theirs: each took its own when opened
+ *  (see {@link switchTo}). */
 export function setChatApprovalMode(mode: "read-only" | "auto" | "allow-all") {
   const st = getState();
   const id = st.curSess;

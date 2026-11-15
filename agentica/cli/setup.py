@@ -1666,4 +1666,5 @@ def resolve_model_config(args, console=None) -> Dict:
         "enable_cache_control": profile_params.get("enable_cache_control"),
         "cache_control_messages": profile_params.get("cache_control_messages"),
         "cache_control_session_header": profile_params.get("cache_control_session_header"),
+        "cache_keepalive": profile_params.get("cache_keepalive"),
     }

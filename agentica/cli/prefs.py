@@ -33,7 +33,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, Optional
 
-from agentica.agent.permissions import PERMISSION_MODES
+from agentica.agent.permissions import PERMISSION_MODES, migrate_permission_mode
 from agentica.utils.log import logger
 
 # Read/written as a group: the CLI settings that are not model config. Adding a
@@ -88,7 +88,7 @@ def normalize_cli_prefs(raw: Any) -> Dict[str, Any]:
             # "read-only" (writes and mutating commands need approval). Map it
             # rather than dropping it: dropping falls through to the CLI default
             # and silently upgrades a saved restrictive choice to allow-all.
-            mapped = "read-only" if value == "ask" else value
+            mapped = migrate_permission_mode(value)
             if mapped in PERMISSION_MODES:
                 out[key] = mapped
                 if mapped != value:

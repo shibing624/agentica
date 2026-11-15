@@ -212,7 +212,7 @@ def test_escalation_card_is_allow_or_deny_and_says_outside():
     question, preview = describe_approval(fc)
     assert "OUTSIDE the sandbox" in question
     assert preview == "git push"
-    assert _approval_options(fc) == ("allow", "deny")
+    assert _approval_options(fc, work_dir=None) == ("allow", "deny")
 
 
 # --- execute tool ---------------------------------------------------------

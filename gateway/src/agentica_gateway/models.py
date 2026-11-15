@@ -7,6 +7,7 @@ Pydantic request/response models shared across routes.
 from typing import List, Optional, Literal
 from pydantic import BaseModel, Field, field_validator
 
+from agentica.agent.permissions import migrate_permission_mode
 from agentica.utils.string import replace_invalid_utf8
 
 
@@ -25,9 +26,7 @@ def _approval_mode(v: Optional[str]) -> Optional[str]:
     and a user who chose the strictest tier loses it either way. Anything else
     is left to the ``Literal`` check, which answers 422.
     """
-    if isinstance(v, str) and v.strip().lower() == "ask":
-        return "read-only"
-    return v
+    return migrate_permission_mode(v)
 
 
 class ChatImage(BaseModel):

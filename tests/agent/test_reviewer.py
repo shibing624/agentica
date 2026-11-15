@@ -204,6 +204,25 @@ async def test_a_payload_too_large_to_show_in_full_fails_closed():
     assert side.closed is False
 
 
+async def test_many_short_values_adding_up_past_the_limit_fail_closed():
+    # No single value is long; the payload as shown is. The check measures the
+    # text the reviewer would get, not each value on its own.
+    side = _FakeSide('{"risk":"low","decision":"allow"}')
+    arguments = {f"k{i}": "a" * 300 for i in range(40)}
+    outcome = await ToolCallReviewer(_agent(side=side)).review(_fc(arguments=arguments))
+    assert outcome.failed is True
+    assert side.messages is None
+
+
+async def test_unserializable_arguments_fail_closed():
+    side = _FakeSide('{"risk":"low","decision":"allow"}')
+    cyclic: dict = {"file_path": "/tmp/x"}
+    cyclic["self"] = cyclic
+    outcome = await ToolCallReviewer(_agent(side=side)).review(_fc(arguments=cyclic))
+    assert outcome.failed is True
+    assert side.messages is None
+
+
 async def test_a_payload_within_the_limit_is_shown_whole():
     side = _FakeSide('{"risk":"medium","decision":"deny"}')
     content = "a" * 3000

@@ -24,12 +24,16 @@ from agentica_gateway.services.agent_service import AgentService
 
 def _stable_prefix(agent) -> str:
     message = asyncio.run(agent.get_system_message())
+    # Without the marker ``split`` returns the whole prompt and the comparison
+    # still passes, while the cache boundary is gone.
+    assert VOLATILE_SYSTEM_MARKER in message.content
     return message.content.split(VOLATILE_SYSTEM_MARKER)[0]
 
 
 def _tool_schemas(agent) -> str:
+    # Key order and list order as sent: the provider caches serialized bytes.
     agent.update_model()
-    return json.dumps(agent.model.tools, sort_keys=True, default=str)
+    return json.dumps(agent.model.tools, default=str)
 
 
 @pytest.fixture
@@ -77,3 +81,14 @@ def test_cli_and_gateway_send_the_same_tool_schemas(pair):
     names = [t["function"]["name"] for t in json.loads(_tool_schemas(cli))]
     assert {"ask_user_question", "wait", "self_manage", "cronjob", "worktree"} <= set(names)
     assert _tool_schemas(cli) == _tool_schemas(gateway)
+
+
+def test_im_command_list_in_the_prompt_matches_the_im_help():
+    """The prompt's IM list is static text (a generated one would change the
+    cached prefix); this keeps it from drifting from what /help offers."""
+    from agentica.tools.product import PRODUCT_INSTRUCTIONS
+    from agentica_gateway.services.im_bot import IM_COMMANDS
+
+    im_line = PRODUCT_INSTRUCTIONS.split("- IM channels:")[1].split("\n\n")[0]
+    listed = {cmd.strip("`,. \n") for cmd in im_line.split() if cmd.startswith("`/")}
+    assert listed == {cmd for cmd, *_ in IM_COMMANDS}

@@ -876,11 +876,11 @@ async def _process_channel_batch(messages: list, session_id: str) -> None:
 
         if not parts and not media:
             return
-        # IM has no approval card, so it follows the tier the account picked
-        # in the web selector; without a pick it stays on the gateway default.
-        mode = settings_routes.approval_mode_pref(user_id)
-        if mode:
-            deps.agent_service.set_session_approval_mode(session_id, mode, owner=user_id)
+        # A chat with no tier yet starts on the one the account picked in the
+        # web selector; one that has its own keeps it.
+        deps.agent_service.seed_session_approval_mode(
+            session_id, settings_routes.approval_mode_pref(user_id), owner=user_id,
+        )
         text = "\n\n".join(parts)
         if not text:
             kind = media[0].kind

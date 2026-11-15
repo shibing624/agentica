@@ -150,6 +150,13 @@ class FakeAgentService:
     def set_session_approval_mode(self, session_id: str, mode: str, owner=None) -> None:
         self.approval_modes[session_id] = mode
 
+    def seed_session_approval_mode(self, session_id: str, mode, owner=None) -> None:
+        if mode and session_id not in self.approval_modes:
+            self.approval_modes[session_id] = mode
+
+    def get_session_approval_mode(self, session_id: str, owner=None) -> str:
+        return self.approval_modes.get(session_id, "auto")
+
     def is_session_active(self, session_id: str, owner=None) -> bool:
         return session_id in self.active_sessions
 

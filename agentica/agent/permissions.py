@@ -47,6 +47,24 @@ instead of silently falling through to the most permissive behavior.
 # "a job may only be stricter than the session that created it" check.
 PERMISSION_MODES = ("read-only", "auto", "allow-all")
 
+# Retired names and the tier each became. ``ask`` was renamed to ``read-only``
+# (the same tier); a stored value is mapped forward rather than dropped, since
+# dropping falls back to a looser default.
+RENAMED_PERMISSION_MODES = {"ask": "read-only"}
+
+
+def migrate_permission_mode(value: object) -> object:
+    """A stored tier under its current name; anything else is returned as is.
+
+    The one place a retired name is mapped, so every reader (CLI prefs, the
+    gateway's request models and account prefs, cron jobs) agrees on what a
+    saved ``ask`` means. Validation stays with the caller.
+    """
+    if not isinstance(value, str):
+        return value
+    cleaned = value.strip().lower()
+    return RENAMED_PERMISSION_MODES.get(cleaned, cleaned)
+
 # Where ``execute`` commands run, independent of the permission tier:
 #   "off"             : on the host, as the OS user (default for SDK and CLI).
 #   "workspace-write" : inside the OS sandbox (``agentica.tools.os_sandbox``) —

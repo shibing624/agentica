@@ -16,6 +16,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from agentica.cli.prefs import normalize_cli_prefs
 from agentica.memory.session_log import SessionLog, is_session_unread, iso_timestamp
 from agentica.run.context import RunSource
 from agentica.tools.background_processes import (
@@ -199,7 +200,7 @@ class AgentSessionsMixin:
                 "source": source,
                 "origin": origin,
                 "approval_mode": self._session_approval_modes.get(self._sk(sid, uid))
-                or entry.get("approval_mode"),
+                or normalize_cli_prefs(entry.get("cli")).get("permissions"),
             })
         seen = {row["session_id"] for row in out}
         for turn in pkg.live_turn.iter_owner(uid):

@@ -133,12 +133,17 @@ def main():
         # a standard OpenAI param (e.g. Hunyuan's taiji gateway).
         "extra_body": resolved.get("extra_body"),
         "extra_headers": resolved.get("extra_headers"),
+        # Client-level static headers (e.g. a sticky-routing header): without
+        # them on the first launch, requests for one prefix spread across
+        # upstream accounts and the cache is written but never read.
+        "default_headers": resolved.get("default_headers"),
         # Prompt caching (OpenAI-compatible proxies fronting Claude).
         # CLI flag wins; otherwise the active profile's value; else None (auto:
         # on for known proxy base_urls, off otherwise).
         "enable_cache_control": args.enable_cache_control if args.enable_cache_control is not None else resolved.get("enable_cache_control"),
         "cache_control_messages": args.cache_control_messages if args.cache_control_messages is not None else resolved.get("cache_control_messages"),
         "cache_control_session_header": args.cache_control_session_header or resolved.get("cache_control_session_header"),
+        "cache_keepalive": resolved.get("cache_keepalive"),
         # Auxiliary model (None means reuse main model). CLI flags win (applied
         # inside resolve_model_config); otherwise the active profile's optional
         # ``auxiliary_model`` block is used; else None. The auxiliary model drives all
