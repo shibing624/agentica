@@ -118,12 +118,16 @@ class CompressMixin:
         enable_evict = agent.tool_config.enable_evict
         enable_auto_compact = agent.tool_config.enable_auto_compact
 
-        # Layer 1: evict (free). Gated on real context pressure: below the
-        # threshold there is nothing to buy by dropping a result the window had
-        # room for, and the model pays for it by re-running the tool.
-        # compact_token_limit is a working cap on the same layers, not a lie
-        # about model.context_window — Layer 0's batch budget reads the same
-        # working window, so all three layers measure pressure against one number.
+        # Layer 1: evict. Gated on real context pressure: below the threshold
+        # there is nothing to buy by dropping a result the window had room for,
+        # and the model pays for it by re-running the tool.
+        # Eviction rewrites history in place, and with a provider cache that is
+        # not free: every message after the first placeholder is written again
+        # (one such turn re-cached 343k tokens to free 35k). So it measures
+        # against the provider window — the limit a request can actually break —
+        # and never against compact_token_limit. A cap is a budget Layer 2
+        # enforces at the cap itself; with one set, compaction always fires
+        # first and the transcript grows as a strict prefix up to it.
         _window = model.context_window if isinstance(model.context_window, int) else 0
         _cap = None
         if cm is not None:
@@ -141,7 +145,7 @@ class CompressMixin:
             # Eviction measures what each placeholder saves with the local
             # tokenizer, so it works in raw units against a window shrunk by
             # the same ratio.
-            evict_window = int(_working / calibration.ratio)
+            evict_window = int(_window / calibration.ratio)
             # A placeholder may only point at the session log when the model
             # can both have one written and read it back.
             recoverable = (

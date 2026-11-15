@@ -30,8 +30,8 @@ class ContextBreakdown:
 
     sections: List[tuple] = field(default_factory=list)  # (label, tokens)
     # The budget occupancy is judged against: ``min(compact_token_limit,
-    # provider window)``. This is the same working window the runner evicts
-    # and compacts against, so "how full am I" means one thing everywhere.
+    # provider window)``. This is the same working window the runner compacts
+    # against, so "how full am I" means one thing everywhere.
     window: int = 0
     # The provider's hard limit, kept so a size limit error still points at the
     # number the provider will quote. Equal to ``window`` when no cap is set.
@@ -165,14 +165,15 @@ async def measure_context(agent) -> ContextBreakdown:
     breakdown.history_messages = len(history)
 
     # What the next request will ACTUALLY carry. Under pressure (>= 0.8 of the
-    # window) the runner evicts old tool results before every request, so the
-    # raw history overstates the request. Run the same eviction on a copy so
-    # the idle bar shows the shipped size, not the pre-compression one — a
-    # session can read 144% here while its next request fits at ~75%.
+    # provider window) the runner evicts old tool results before every
+    # request, so the raw history overstates the request. Run the same
+    # eviction on a copy so the idle bar shows the shipped size, not the
+    # pre-compression one.
     conv_tokens = count_tokens(plain_msgs, None, model_id)
-    # Both the pressure line and the eviction target are relative to the
-    # working window: the runner calls evict_context with exactly this value.
-    window = working
+    # The pressure line and the eviction target are relative to the provider
+    # window, exactly as the runner calls evict_context. The bar still divides
+    # by the working cap; a cap is enforced by compaction, not eviction.
+    window = provider_window
     if window > 0 and plain_msgs:
         pre_total = sum(
             [base_tokens, workspace_tokens, skills_tokens, tool_guide_tokens,

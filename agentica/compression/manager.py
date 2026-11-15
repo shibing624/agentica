@@ -47,7 +47,11 @@ def working_context_window(
     context_window: int,
     compact_token_limit: Optional[int] = None,
 ) -> int:
-    """Window Layer 1 treats as full. The provider window is the hard cap."""
+    """The budget Layer 2 and the occupancy bar treat as full.
+
+    ``min(compact_token_limit, provider window)``. Layer 1 does not use it: it
+    measures against the provider window, so a cap never triggers eviction.
+    """
     if context_window <= 0:
         return 0
     cap = parse_compact_token_limit(compact_token_limit)

@@ -194,18 +194,23 @@ class TestWorkingCapIsTheCompressionReference(unittest.TestCase):
         agent.model.context_window = 128_000
         self.assertEqual(_measure(agent).window, 128_000)
 
-    def test_eviction_is_reflected_at_the_cap_threshold(self):
-        """The whole point: the reported figure drops to what will ship.
-
-        With the cap in play the pressure line is 0.8 x cap, so a transcript
-        far above it must be reported already-evicted, not raw.
-        """
+    def test_a_cap_alone_does_not_report_an_eviction(self):
+        """Over the cap but far below the provider window: the runner does not
+        evict (compaction owns the cap), so the bar must show the raw history,
+        not a shrunken figure no request will ever carry."""
         agent, msgs = self._capped_agent(cap=8_000)
         raw = count_tokens(msgs, None, "gpt-4o-mini")
         b = _measure(agent)
-        self.assertGreater(raw, 8_000 * 0.8, "fixture must be under real pressure")
+        self.assertGreater(raw, 8_000, "fixture must be over the cap")
+        self.assertGreaterEqual(b.total, raw, "nothing is evicted below the provider limit")
+
+    def test_eviction_is_reflected_at_the_provider_threshold(self):
+        """Near the provider limit the reported figure drops to what will ship."""
+        agent, msgs = self._capped_agent(cap=8_000, window=20_000)
+        raw = count_tokens(msgs, None, "gpt-4o-mini")
+        b = _measure(agent)
+        self.assertGreater(raw, 20_000 * 0.8, "fixture must be under provider pressure")
         self.assertLess(b.total, raw, "reported total must be the post-evict size")
-        self.assertLess(b.percent_full, 100.0, "an evicted request is not over budget")
 
 
 class TestReportedHistoryWindow(unittest.TestCase):

@@ -130,7 +130,9 @@ class TestCompressionSwitches(unittest.TestCase):
         self.assertEqual(agent.tool_config.compact_token_limit, 300_000)
         self.assertEqual(agent.tool_config.compression_manager.compact_token_limit, 300_000)
 
-    def test_compact_token_limit_is_layer1_working_window(self):
+    def test_layer1_measures_the_provider_window_not_the_compact_cap(self):
+        # The cap is a budget for Layer 2; Layer 1 rewrites history and so
+        # only fires near the limit the provider actually enforces.
         from agentica.agent.config import ToolConfig
         from agentica.compression import EvictionResult
 
@@ -144,7 +146,7 @@ class TestCompressionSwitches(unittest.TestCase):
                 )
             )
         evict.assert_called_once()
-        self.assertEqual(evict.call_args.kwargs["context_window"], 8_000)
+        self.assertEqual(evict.call_args.kwargs["context_window"], 32_768)
 
     def test_layer1_off_skips_evict(self):
         from agentica.agent.config import ToolConfig

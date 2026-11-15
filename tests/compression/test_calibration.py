@@ -211,3 +211,83 @@ class TestRemainingReminderSkipsARollover(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEvictionIgnoresTheCompactCap(unittest.TestCase):
+    """``compact_token_limit`` is a budget for compaction, not a hard limit.
+
+    Layer 1 rewrites old tool results in place, which reprices every cached
+    token after the first rewrite. Under a cap far below the provider window,
+    that rewrite buys nothing: compaction at the cap already bounds the
+    request. So eviction measures against the provider window and stays out of
+    the way until the request actually nears it.
+    """
+
+    def _setup(self, cap_fill: float):
+        from agentica.agent import Agent
+        from agentica.compression.manager import CompressionManager
+        from agentica.model.openai import OpenAIChat
+        from agentica.utils.tokens import count_tokens
+
+        messages = [Message(role="user", content="question")]
+        for i in range(30):
+            messages.append(Message(role="assistant", content="", tool_calls=[{
+                "id": f"call_{i}", "type": "function",
+                "function": {"name": "read_file", "arguments": "{}"},
+            }]))
+            messages.append(Message(
+                role="tool", tool_call_id=f"call_{i}",
+                content=" ".join(f"line{i}_{j}" for j in range(300)),
+            ))
+        messages.append(Message(role="user", content="next"))
+        local = count_tokens(messages, None, "gpt-4o")
+
+        model = OpenAIChat(id="gpt-4o", api_key="fake_openai_key")
+        model.context_window = local * 10  # provider window: far away
+        agent = Agent(model=model)
+        cm = CompressionManager()
+        cm.fallback_claimed = True
+        agent.tool_config.compression_manager = cm
+        cm.compact_token_limit = int(local / cap_fill)
+        return messages, agent, model, cm
+
+    @staticmethod
+    def _tool_results(messages):
+        # Only history eviction may touch: the trailing user turn also carries
+        # the remaining-budget reminder, which is a separate mechanism.
+        return [m.content for m in messages if m.role in ("tool", "assistant")]
+
+    def _run(self, messages, agent, model, cm):
+        from agentica.runner import Runner
+
+        with patch.object(cm, "auto_compact", new_callable=AsyncMock, return_value=False) as cut:
+            asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
+        return cut
+
+    def test_history_is_byte_identical_between_80_percent_and_the_cap(self):
+        messages, agent, model, cm = self._setup(cap_fill=0.9)
+        before = self._tool_results(messages)
+
+        cut = self._run(messages, agent, model, cm)
+
+        self.assertEqual(self._tool_results(messages), before, "no tool result may be rewritten")
+        self.assertFalse(cut.await_count, "90% of the cap is below the 95% cut too")
+
+    def test_compaction_not_eviction_owns_the_cap(self):
+        messages, agent, model, cm = self._setup(cap_fill=1.2)
+        before = self._tool_results(messages)
+
+        cut = self._run(messages, agent, model, cm)
+
+        self.assertEqual(self._tool_results(messages), before)
+        self.assertEqual(cut.await_count, 1, "past the cap, compaction is what fires")
+
+    def test_eviction_still_guards_the_provider_window(self):
+        messages, agent, model, cm = self._setup(cap_fill=1.2)
+        from agentica.utils.tokens import count_tokens
+        model.context_window = int(count_tokens(messages, None, "gpt-4o") / 0.9)
+
+        self._run(messages, agent, model, cm)
+
+        evicted = [m for m in messages if m.role == "tool" and str(m.content).startswith("[Tool result evicted")]
+        self.assertTrue(evicted, "near the provider limit Layer 1 still runs")
