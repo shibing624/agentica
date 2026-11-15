@@ -23,3 +23,28 @@ export function normalizeApprovalMode(stored: unknown): ApprovalMode {
   if (migrated) return migrated;
   return (APPROVAL_MODES as readonly string[]).includes(value) ? (value as ApprovalMode) : "auto";
 }
+
+/**
+ * The tier one chat runs with.
+ *
+ * A chat that stored its own tier keeps it. A conversation that existed before
+ * tiers were per-chat has no recorded value to restore, so it uses the gateway
+ * default (`auto` — what the server applies when nothing overrides it); it must
+ * NOT inherit the account's current pick, which answers "what should a new chat
+ * start on" and is not a decision about that conversation.
+ *
+ * A brand-new chat (`hasLog === false`, or no session id yet) starts on the
+ * pick. `hasLog` is the server-side log size, not the in-memory message list:
+ * the first send pushes the user bubble before this is resolved, so the message
+ * list cannot tell a new chat from an old one.
+ */
+export function resolveChatTier(
+  sessionId: string | null,
+  stored: unknown,
+  currentPick: ApprovalMode,
+  hasLog: boolean,
+): ApprovalMode {
+  if (stored) return normalizeApprovalMode(stored);
+  if (!sessionId || !hasLog) return currentPick;
+  return "auto";
+}

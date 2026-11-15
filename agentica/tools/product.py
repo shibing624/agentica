@@ -59,8 +59,8 @@ Model/profile edits take effect on the next agent rebuild, not mid-conversation.
 
 These are handled by the client before the message reaches you; you never
 see them. When the user asks how to do one of these things, point them to
-the command for the client they are on (the `agentica` skill has the full
-lists).
+the command for the client they are on (the `agentica` skill tells you where
+the authoritative list lives; do not type one from memory).
 
 - Terminal CLI: `/help` lists everything, including `/model`, `/permissions`,
   `/compact`, `/resume`, `/queue`, `/cron`, `/config`, `/upgrade`.

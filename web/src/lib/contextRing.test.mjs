@@ -30,3 +30,12 @@ test("a new chat, or one whose request failed, shows the local figure", () => {
   assert.equal(ringPercent({ hasLog: false, settled: false, localTokens: 10_000, fallbackWindow: 100_000 }), 10);
   assert.equal(ringPercent({ hasLog: true, settled: true, localTokens: 10_000, fallbackWindow: 100_000 }), 10);
 });
+
+test("an unknown usage window falls back to the server window, not 128k", () => {
+  // `usage.window === 0` means "unknown". The popover divides by the server's
+  // window; the ring must do the same or the same session shows two figures.
+  const usage = { window: 0, context_tokens: 50_000 };
+  assert.equal(ringPercent({ usage, hasLog: true, settled: true, localTokens: 0, fallbackWindow: 100_000 }), 50);
+  // Nothing at all known: the last-resort estimate is the only denominator.
+  assert.equal(ringPercent({ hasLog: false, settled: false, localTokens: 64_000, fallbackWindow: 0 }), 50);
+});

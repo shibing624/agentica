@@ -432,3 +432,19 @@ class TestMidTurnApprovalModeSwitch:
         svc.set_session_approval_mode("picked", "read-only", owner="default")
         svc.seed_session_approval_mode("picked", "allow-all", owner="default")
         assert svc.get_session_approval_mode("picked", owner="default") == "read-only"
+
+
+class TestApprovalModePersistenceFailure:
+    def test_a_failed_sidecar_write_still_applies_the_live_tier(self, tmp_path):
+        """A read-only home or a full disk must not turn a mode switch into a
+        500 on a live control path: the turn runs with the new tier, and the
+        next switch retries the write."""
+        from unittest.mock import patch
+
+        from agentica_gateway.services.agent_service import AgentService
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        log = svc.session_log_for("s1", owner="default")
+        with patch.object(log, "set_cli_prefs", side_effect=OSError("read-only home")):
+            svc.set_session_approval_mode("s1", "read-only", owner="default")
+        assert svc.get_session_approval_mode("s1", owner="default") == "read-only"

@@ -14,7 +14,12 @@ export type RingInput = {
  *  first answer: drawing the previous chat's window or a stale local counter
  *  there is what made the figure change right after a switch. */
 export function ringPercent({ usage, hasLog, settled, localTokens, fallbackWindow }: RingInput): number | null {
-  if (usage) return Math.min(100, Math.round((usage.context_tokens / (usage.window || 128000)) * 100));
-  if (hasLog && !settled) return null;
-  return Math.min(100, Math.round((localTokens / (fallbackWindow || 128000)) * 100));
+  if (!usage && hasLog && !settled) return null;
+  // One denominator for the ring and the popover: the chat's own window, else
+  // the server's, else the last-resort estimate. `usage.window === 0` means
+  // "unknown", not "divide by zero" — the popover already resolves it that
+  // way, and two different denominators showed the same session twice.
+  const window = usage?.window || fallbackWindow || 128000;
+  const tokens = usage ? usage.context_tokens : localTokens;
+  return Math.min(100, Math.round((tokens / window) * 100));
 }

@@ -292,3 +292,37 @@ async def test_agent_caches_one_reviewer_per_agent(monkeypatch):
     assert calls == ["c1", "c1"]
     assert agent._auto_reviewer is not None
     assert agent.clone()._auto_reviewer is None
+
+
+async def test_the_runner_hands_the_reviewer_this_turns_messages():
+    """The reviewer reads ``_run_messages``; the Runner is its only writer.
+
+    Working memory receives the turn's user message only when the turn ends, so
+    a missing assignment would leave the reviewer judging the call with no
+    instruction in view — silently, and only on the first turn of a session.
+    """
+    from unittest.mock import patch
+
+    from agentica.agent import Agent
+    from agentica.model.openai import OpenAIChat
+    from agentica.model.response import ModelResponse
+
+    agent = Agent(
+        name="review-wiring",
+        model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
+    )
+    seen = {}
+
+    async def _response(*args, **kwargs):
+        seen["messages"] = agent._run_messages
+        return ModelResponse(content="done")
+
+    with patch.object(OpenAIChat, "response", new=_response):
+        await agent.run("fix the parser in src/parser.py")
+
+    assert seen["messages"] is not None, "_run_messages was not set for the turn"
+    assert any(
+        m.role == "user" and "fix the parser" in str(m.content)
+        for m in seen["messages"]
+    )
+    assert agent._run_messages is None, "the per-run list must not outlive the turn"

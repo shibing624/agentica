@@ -38,7 +38,7 @@ def _tool_schemas(agent) -> str:
 
 @pytest.fixture(scope="module")
 def pair(tmp_path_factory):
-    """Build both agents once for this module's two byte-comparison tests.
+    """Build both agents once for this module's byte-comparison tests.
 
     Function scope rebuilt two full agents per test (1.6s each); the env is only
     read while building, so a module-scoped patch is enough.
@@ -53,8 +53,18 @@ def pair(tmp_path_factory):
     svc = AgentService(workspace_path=str(tmp_path / "ws"))
     svc.set_session_work_dir("s1", str(work))
     gateway = svc._build_agent("s1")
+    cli = _build_cli(svc, gateway, work)
+    try:
+        yield cli, gateway, svc, work
+    finally:
+        mp.undo()
+
+
+def _build_cli(svc, gateway, work):
+    """The CLI agent for this project, built exactly the way `create_agent`
+    builds the interactive one (same model/profile, same tool options)."""
     model = gateway.model
-    cli = create_agent(
+    return create_agent(
         {
             "model_provider": model.provider.lower(),
             "model_name": model.id,
@@ -72,14 +82,10 @@ def pair(tmp_path_factory):
         ask_user_question_callback=lambda *a, **k: "",
         background_process_registry=BackgroundProcessRegistry(),
     )
-    try:
-        yield cli, gateway
-    finally:
-        mp.undo()
 
 
 def test_cli_and_gateway_send_the_same_system_prompt(pair):
-    cli, gateway = pair
+    cli, gateway, _svc, _work = pair
     cli_prompt, gateway_prompt = _stable_prefix(cli), _stable_prefix(gateway)
     # Guard against comparing two empty strings.
     assert "Self-Awareness" in cli_prompt
@@ -87,10 +93,22 @@ def test_cli_and_gateway_send_the_same_system_prompt(pair):
 
 
 def test_cli_and_gateway_send_the_same_tool_schemas(pair):
-    cli, gateway = pair
+    cli, gateway, _svc, _work = pair
     names = [t["function"]["name"] for t in json.loads(_tool_schemas(cli))]
     assert {"ask_user_question", "wait", "self_manage", "cronjob", "worktree"} <= set(names)
     assert _tool_schemas(cli) == _tool_schemas(gateway)
+
+
+def test_rebuilding_an_agent_keeps_the_cached_prefix(pair):
+    """A rebuilt agent (``/model``, a gateway restart) must not change the
+    cached prefix: that turn would be a cold cache start for no reason."""
+    cli, gateway, svc, work = pair
+    cli2 = _build_cli(svc, gateway, work)
+    gw2 = svc._build_agent("s1")
+    assert _stable_prefix(cli2) == _stable_prefix(cli)
+    assert _stable_prefix(gw2) == _stable_prefix(gateway)
+    assert _tool_schemas(cli2) == _tool_schemas(cli)
+    assert _tool_schemas(gw2) == _tool_schemas(gateway)
 
 
 def test_im_command_list_in_the_prompt_matches_the_im_help():

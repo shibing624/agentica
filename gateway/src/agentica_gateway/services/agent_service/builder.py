@@ -19,7 +19,6 @@ from agentica.agent.approvals import (
 )
 from agentica.agent.config import ExperienceConfig, ToolConfig, WorkspaceMemoryConfig
 from agentica.agent.permissions import (
-    PERMISSION_MODES,
     validate_permission_mode,
     validate_sandbox_mode,
 )
@@ -367,7 +366,17 @@ class AgentBuilderMixin:
             # One field for every client: the CLI's ``cli.permissions`` sidecar
             # key. ``--resume`` in the terminal and a fork read the same tier
             # the web set, and the session list reads it back after a restart.
-            self.session_log_for(session_id, owner).set_cli_prefs({"permissions": normalized})
+            #
+            # The live tier is what this turn runs with. A sidecar that cannot
+            # be written (read-only home, full disk) must not turn a mode switch
+            # into a 500 on a live control path — the in-memory value below is
+            # still applied, and the next successful switch persists it.
+            try:
+                self.session_log_for(session_id, owner).set_cli_prefs({"permissions": normalized})
+            except Exception as exc:  # noqa: BLE001 - persistence must not break the switch
+                logger.warning(
+                    "could not persist approval mode %r for %s: %s", normalized, session_id, exc,
+                )
         self._session_approval_modes[key] = normalized
 
         cached_agent = self._cache.get(key)

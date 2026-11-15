@@ -10,6 +10,7 @@ import { emptyChatIds } from "./lib/sessionDrafts";
 import { messageFileCandidates } from "./lib/messageFiles";
 import { cachedExisting, statWorkspaceFilesBatched } from "./lib/workspaceStat";
 import { searchEventsConversation, searchMsgsConversation, type SessionContentHit } from "./lib/sessionRows";
+import { normalizeApprovalMode, resolveChatTier } from "./lib/approvalMode";
 import {
   askConfirm, bump, getState, isStreamResuming, projectIdForDir, pushPrefs, readLastSessionId, readSessionCache,
   saveSessions, sessionViews, setState, showToast, writeLastSessionId,
@@ -143,15 +144,6 @@ export function switchTo(id: string) {
   if (sess) {
     sess.unread = false;
     markSessionRead(id);
-    // A chat with no tier of its own takes the default as it is now, and the
-    // gateway records it: a tier picked later in another chat must not
-    // relabel this one, here or after a reload.
-    if (!sess.approvalMode) {
-      sess.approvalMode = st.selectedApprovalMode;
-      if (sess.sizeBytes || sess.msgs.length) {
-        void api.setSessionApprovalMode(id, sess.approvalMode as "read-only" | "auto" | "allow-all");
-      }
-    }
   }
   writeLastSessionId(id);
   bump();
@@ -169,10 +161,28 @@ export function switchTo(id: string) {
   })();
 }
 
-/** The tier the composer shows and the next run is sent with. */
+/** The tier the composer shows and the next run is sent with. A chat that
+ *  stored none is a conversation from before per-chat tiers; it uses the
+ *  gateway default (`auto`), never the account's current pick — that pick is
+ *  only where a brand-new chat starts (see ``resolveChatTier``). */
 export function chatApprovalMode(id: string | null): string {
   const st = getState();
-  return (id && st.sessions[id]?.approvalMode) || st.selectedApprovalMode;
+  const sess = id ? st.sessions[id] : undefined;
+  // Server-side log size, not the message list: the first send pushes the user
+  // bubble before this runs, so `msgs.length` cannot tell new from old. Until
+  // the catalog loads, `sizeBytes` is unknown for a restored chat — its cached
+  // request count is what distinguishes it from a locally created draft.
+  const hasLog = !!sess && (
+    sess.sizeBytes !== undefined
+      ? sess.sizeBytes > 0
+      : (sess.requests || 0) > 0 || !!sess.running
+  );
+  return resolveChatTier(
+    id,
+    sess?.approvalMode,
+    normalizeApprovalMode(st.selectedApprovalMode),
+    hasLog,
+  );
 }
 
 /** Pick a tier for the open chat only; it also becomes the tier the next new
