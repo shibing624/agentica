@@ -143,7 +143,6 @@ def main():
         "enable_cache_control": args.enable_cache_control if args.enable_cache_control is not None else resolved.get("enable_cache_control"),
         "cache_control_messages": args.cache_control_messages if args.cache_control_messages is not None else resolved.get("cache_control_messages"),
         "cache_control_session_header": args.cache_control_session_header or resolved.get("cache_control_session_header"),
-        "cache_keepalive": resolved.get("cache_keepalive"),
         # Auxiliary model (None means reuse main model). CLI flags win (applied
         # inside resolve_model_config); otherwise the active profile's optional
         # ``auxiliary_model`` block is used; else None. The auxiliary model drives all

@@ -185,7 +185,7 @@ _EDITABLE_PROFILE_FIELDS = {
     "model_provider", "model_name", "base_url", "api_key",
     "wire_api", "max_tokens", "temperature", "reasoning", "reasoning_effort", "top_p", "context_window",
     "compact_token_limit",
-    "enable_cache_control", "cache_control_messages", "cache_control_session_header", "cache_keepalive",
+    "enable_cache_control", "cache_control_messages", "cache_control_session_header",
     "max_api_retry",
     "extra_body", "extra_headers", "default_headers",
 }
@@ -193,7 +193,7 @@ _EDITABLE_PROFILE_FIELDS = {
 # Values that are numeric on the model side; coerced from string input.
 _NUMERIC_FIELDS = {
     "max_tokens", "context_window", "compact_token_limit",
-    "cache_control_messages", "cache_keepalive", "max_api_retry",
+    "cache_control_messages", "max_api_retry",
 }
 _FLOAT_FIELDS = {"temperature", "top_p"}
 _BOOL_FIELDS = {"enable_cache_control"}

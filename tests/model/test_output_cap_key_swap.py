@@ -202,7 +202,7 @@ class TestOutputCapKeySwap(unittest.TestCase):
             })
 
         model = OpenAIChat(id="future-model-2030", api_key="fake", base_url="http://test/v1",
-                           max_tokens=16384, cache_keepalive=False, max_retries=0)
+                           max_tokens=16384, max_retries=0)
         model.client = openai.AsyncOpenAI(
             api_key="fake", base_url="http://test/v1", max_retries=0,
             http_client=httpx.AsyncClient(transport=httpx.MockTransport(transport)),

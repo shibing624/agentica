@@ -130,7 +130,7 @@ def create_profile_model_bundle(
     and ``compact_token_limit`` from a ``config.yaml`` profile using the same
     factory rules as the CLI (including ``enable_cache_control``,
     ``cache_control_messages``, ``cache_control_session_header``,
-    ``cache_keepalive``, ``extra_body``, ``extra_headers``, ``default_headers``).
+    ``extra_body``, ``extra_headers``, ``default_headers``).
     """
     from agentica.cli.runtime import (
         _build_fallback_models,
@@ -164,7 +164,6 @@ def create_profile_model_bundle(
         enable_cache_control=cfg.get("enable_cache_control"),
         cache_control_messages=cfg.get("cache_control_messages"),
         cache_control_session_header=cfg.get("cache_control_session_header"),
-        cache_keepalive=cfg.get("cache_keepalive"),
         extra_body=cfg.get("extra_body"),
         extra_headers=cfg.get("extra_headers"),
         default_headers=cfg.get("default_headers"),

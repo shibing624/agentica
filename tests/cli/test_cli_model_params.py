@@ -274,7 +274,7 @@ class TestCLIModelParams(unittest.TestCase):
         self.assertEqual(model.cache_control_session_header, "X-Session-Id")
 
     def test_get_model_still_gates_openai_only_cache_knobs(self):
-        """cache_control_messages / cache_keepalive remain OpenAI-only."""
+        """cache_control_messages remains an OpenAI-protocol-only knob."""
         from agentica.cli.runtime import get_model
 
         model = get_model(
@@ -282,10 +282,8 @@ class TestCLIModelParams(unittest.TestCase):
             "claude-opus-5",
             api_key="k",
             cache_control_messages=5,
-            cache_keepalive=False,
         )
         self.assertFalse(hasattr(model, "cache_control_messages"))
-        self.assertFalse(hasattr(model, "cache_keepalive"))
 
     def test_reasoning_effort_accepts_low_medium(self):
         import sys

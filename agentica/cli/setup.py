@@ -282,7 +282,7 @@ _TUNING_KEYS = (
     "wire_api", "reasoning", "reasoning_effort", "max_tokens",
     "context_window", "compact_token_limit", "temperature", "top_p",
 )
-_CACHE_KEYS = ("enable_cache_control", "cache_control_messages", "cache_control_session_header", "cache_keepalive")
+_CACHE_KEYS = ("enable_cache_control", "cache_control_messages", "cache_control_session_header")
 # extra_body / extra_headers are raw passthrough dicts for endpoints whose
 # tuning knobs don't map to a standard OpenAI param (e.g. Hunyuan's taiji
 # gateway wants reasoning_effort inside extra_body.chat_template_kwargs, not
@@ -1287,7 +1287,6 @@ _PROFILE_CONFIG_KEYS = (
     "enable_cache_control",
     "cache_control_messages",
     "cache_control_session_header",
-    "cache_keepalive",
     "auxiliary_model_provider",
     "auxiliary_model_name",
     "auxiliary_base_url",
@@ -1357,7 +1356,6 @@ def resolve_named_profile_config(name: str, source: str = "session") -> Dict[str
         "enable_cache_control": profile.get("enable_cache_control"),
         "cache_control_messages": profile.get("cache_control_messages"),
         "cache_control_session_header": profile.get("cache_control_session_header"),
-        "cache_keepalive": profile.get("cache_keepalive"),
         "auxiliary_extra_body": auxiliary_block.get("extra_body"),
         "auxiliary_extra_headers": auxiliary_block.get("extra_headers"),
         "auto_review_extra_body": review_block.get("extra_body"),
@@ -1666,5 +1664,4 @@ def resolve_model_config(args, console=None) -> Dict:
         "enable_cache_control": profile_params.get("enable_cache_control"),
         "cache_control_messages": profile_params.get("cache_control_messages"),
         "cache_control_session_header": profile_params.get("cache_control_session_header"),
-        "cache_keepalive": profile_params.get("cache_keepalive"),
     }
