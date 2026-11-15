@@ -19,6 +19,14 @@ from agentica_gateway.services import agent_service as svc_mod
 from agentica_gateway.services.agent_service import AgentService
 
 
+@pytest.fixture(autouse=True)
+def _fast_background_poll(monkeypatch):
+    """Shorten the idle-poll interval the deferred-report worker sleeps in."""
+    from agentica_gateway.services.agent_service import sessions as sessions_mod
+
+    monkeypatch.setattr(sessions_mod, "BACKGROUND_IDLE_POLL_SECONDS", 0.02)
+
+
 def _svc(tmp_path, handler):
     svc = AgentService(workspace_path=str(tmp_path / "ws"))
     svc.background_report_handler = handler
@@ -66,7 +74,7 @@ def test_a_command_the_user_stopped_is_not_reported(tmp_path):
         registry = svc._background_registry("s1", None)
         item = registry.start(f"{sys.executable} -c 'import time; time.sleep(60)'", cwd=str(tmp_path))
         await asyncio.to_thread(registry.stop, item.id)
-        await asyncio.sleep(2.0)
+        await asyncio.sleep(0.2)
 
     _run(scenario())
     assert got == []
@@ -90,7 +98,7 @@ def test_the_report_waits_until_the_session_is_idle(tmp_path):
         await lock.acquire()
         registry = svc._background_registry("s1", None)
         registry.start(f"{sys.executable} -c 'pass'", cwd=str(tmp_path))
-        await asyncio.sleep(2.5)
+        await asyncio.sleep(0.3)
         assert not done.is_set()
         times["released"] = asyncio.get_running_loop().time()
         lock.release()
@@ -120,9 +128,9 @@ def test_deleting_the_chat_while_its_report_waits_voids_the_report(tmp_path):
         await lock.acquire()
         registry = svc._background_registry("s1", None)
         registry.start(f"{sys.executable} -c 'pass'", cwd=str(tmp_path))
-        await asyncio.sleep(2.0)
+        await asyncio.sleep(0.2)
         svc.delete_session("s1")
-        await asyncio.sleep(2.5)
+        await asyncio.sleep(0.3)
 
     _run(scenario())
     assert got == []
@@ -151,7 +159,7 @@ def test_a_failing_handler_is_retried_and_later_reports_still_arrive(tmp_path):
         await svc._ensure_initialized()
         registry = svc._background_registry("s1", None)
         registry.start(f"{sys.executable} -c 'print(1)'", cwd=str(tmp_path))
-        await asyncio.sleep(2.0)
+        await asyncio.sleep(0.3)
         registry.start(f"{sys.executable} -c 'print(2)'", cwd=str(tmp_path))
         await asyncio.wait_for(second.wait(), timeout=15)
 

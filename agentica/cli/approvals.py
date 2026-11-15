@@ -32,6 +32,9 @@ from agentica.utils.log import logger
 # answer, short enough that stepping away does not leave a turn idle for hours.
 DEFAULT_HUMAN_WAIT_TIMEOUT = 300
 
+#: How often the parked approval re-checks that its wait still exists.
+_APPROVAL_IDLE_TICK_SECONDS = 1.0
+
 
 def human_wait_timeout() -> float:
     """``settings.human_wait_timeout``; 0 means wait forever."""
@@ -382,7 +385,7 @@ def _check_approval_idle(state: Any, req: Any, loop: Any, ui_holder: dict) -> No
         app = ui_holder.get("app")
         if app is not None:
             app.invalidate()
-    loop.call_later(1.0, _check_approval_idle, state, req, loop, ui_holder)
+    loop.call_later(_APPROVAL_IDLE_TICK_SECONDS, _check_approval_idle, state, req, loop, ui_holder)
 
 
 def _expire_approval(state: Any, req: Any, timeout_s: float, ui_holder: dict) -> None:
@@ -505,7 +508,9 @@ def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
         if timeout_s > 0:
             req.idle_timeout = timeout_s
             req.touch()
-            loop.call_later(1.0, _check_approval_idle, state, req, loop, ui_holder)
+            loop.call_later(
+                _APPROVAL_IDLE_TICK_SECONDS, _check_approval_idle, state, req, loop, ui_holder
+            )
 
     async def _review(fc):
         agent = _agent()

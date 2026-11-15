@@ -56,6 +56,9 @@ from agentica.notify.transport import (
 from agentica.notify.wire import clip_text as _clip_text
 from agentica.utils.log import logger
 
+#: Worker wake-up marker for ``stop()``; never delivered as an event.
+_STOP = object()
+
 SOURCE = "agentica"
 ENVELOPE_VERSION = 1
 
@@ -163,6 +166,8 @@ class NotifySink:
                 envelope = self._queue.get(timeout=0.5)
             except queue.Empty:
                 continue
+            if envelope is _STOP:
+                break
             try:
                 # raise_transport=True: the worker has to be able to tell a
                 # delivery that happened from one that did not, or a dead
@@ -240,6 +245,16 @@ class NotifySink:
         """Stop the worker. For teardown and tests."""
         self._stop.set()
         if self._worker is not None:
+            # Wake the worker out of its idle queue wait. Joining without the
+            # sentinel would sit out the 0.5s poll timeout on every teardown.
+            try:
+                self._queue.put_nowait(_STOP)
+            except queue.Full:
+                try:
+                    self._queue.get_nowait()
+                    self._queue.put_nowait(_STOP)
+                except (queue.Empty, queue.Full):
+                    pass
             self._worker.join(timeout=timeout)
             self._worker = None
 

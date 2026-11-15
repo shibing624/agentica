@@ -188,7 +188,7 @@ def test_the_terminal_answering_first_kills_the_loser(tmp_path, loop):
             _script(
                 tmp_path,
                 "import time,pathlib;"
-                "time.sleep(2);"
+                "time.sleep(0.4);"
                 f"pathlib.Path({str(marker)!r}).write_text('answered');"
                 "print(json.dumps({'request_id':request_id,'decision':'deny'}))",
             )
@@ -203,7 +203,7 @@ def test_the_terminal_answering_first_kills_the_loser(tmp_path, loop):
     assert _decide_on_loop(loop, registry, "call_1", "allow") is True
     assert future.result(timeout=5) == "allow"
 
-    time.sleep(3.0)
+    time.sleep(1.0)
     assert not marker.exists(), "the hook was not killed after the terminal answered"
 
 

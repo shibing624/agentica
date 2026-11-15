@@ -108,6 +108,9 @@ def _server(tmp_path, **kw):
         injected.append(text)
         return disposition
 
+    # The settle window is a production grace period; tests that need one pass
+    # it explicitly. Everything else would otherwise pay up to a second.
+    kw.setdefault("settle", 0.05)
     server = AttachServer(
         kw.pop("peer_id", "abcd1234"),
         inject=inject,

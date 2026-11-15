@@ -379,6 +379,7 @@ class TestApprovalTimeout:
         from agentica.agent.approvals import DENIED_TOOL_RESULT
 
         monkeypatch.setattr(cli_approvals, "human_wait_timeout", lambda: 0.05)
+        monkeypatch.setattr(cli_approvals, "_APPROVAL_IDLE_TICK_SECONDS", 0.02)
         printed = []
         monkeypatch.setattr(cli_approvals, "_print_approval_record",
                             lambda pending, decision, expired_after=None: printed.append(
@@ -408,6 +409,7 @@ class TestApprovalTimeout:
         from agentica.cli.approvals import complete_approval
 
         monkeypatch.setattr(cli_approvals, "human_wait_timeout", lambda: 0.5)
+        monkeypatch.setattr(cli_approvals, "_APPROVAL_IDLE_TICK_SECONDS", 0.02)
         state = SessionState()
         state.current_agent = _agent()
         approve = build_interactive_approve(state, {})
@@ -416,7 +418,7 @@ class TestApprovalTimeout:
         req = await self._wait_for_prompt(state)
         assert complete_approval(state, "allow")
         assert await asyncio.wait_for(task, 2.0) == "allow"
-        await asyncio.sleep(1.2)
+        await asyncio.sleep(0.15)
         assert state.approval_registry.pop_expired("t2") is None
         assert fc.denied_result is None
 
@@ -517,6 +519,7 @@ async def test_idle_check_stops_when_the_wait_is_cancelled_without_resolving_the
 
     monkeypatch.setattr(cli_approvals, "_check_approval_idle", counting)
     monkeypatch.setattr(cli_approvals, "human_wait_timeout", lambda: 300)
+    monkeypatch.setattr(cli_approvals, "_APPROVAL_IDLE_TICK_SECONDS", 0.02)
     state = SessionState()
     state.current_agent = _agent()
     approve = build_interactive_approve(state, {})
@@ -530,6 +533,6 @@ async def test_idle_check_stops_when_the_wait_is_cancelled_without_resolving_the
     with pytest.raises(asyncio.CancelledError):
         await task
     assert req.resolved is False  # the case under test: nobody resolved the card
-    await asyncio.sleep(2.3)
+    await asyncio.sleep(0.15)
     # First tick runs, sees the future is no longer parked, and does not reschedule.
     assert len(calls) == 1

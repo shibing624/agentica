@@ -216,7 +216,7 @@ class TestTheReplyComesBack:
         body = (
             "import time;"
             "print('warming up');sys.stdout.flush();"
-            "time.sleep(1.2);"
+            "time.sleep(0.6);"
             "print(json.dumps({'request_id':request_id,'decision':'allow'}));"
             "sys.stdout.flush()"
         )
@@ -224,7 +224,7 @@ class TestTheReplyComesBack:
         req = start_hook_request("needs.approval", _payload_for(_Pending()))
         assert req is not None
         try:
-            assert req.wait_for_reply(timeout=0.4) is None
+            assert req.wait_for_reply(timeout=0.2) is None
             assert req.still_waiting is True
             assert req.wait_for_reply(timeout=10) == {"decision": "allow"}
         finally:
@@ -233,7 +233,7 @@ class TestTheReplyComesBack:
     def test_the_first_valid_consumer_reply_wins(self, tmp_path):
         slow = _script(
             tmp_path,
-            "import time;time.sleep(3);"
+            "import time;time.sleep(0.6);"
             "print(json.dumps({'request_id':request_id,'decision':'allow'}))",
             name="slow.py",
         )
@@ -290,11 +290,11 @@ class TestNoEgress:
 
 class TestNoCapOfOurs:
     def test_a_slow_reply_still_lands(self, tmp_path):
-        """The harness imposes no deadline. A consumer that takes 3 seconds is
+        """The harness imposes no deadline. A consumer that takes a while is
         still waiting for the same user the terminal is waiting for."""
         cmd = _script(
             tmp_path,
-            "import time;time.sleep(3);"
+            "import time;time.sleep(0.6);"
             "print(json.dumps({'request_id':request_id,'decision':'deny'}))",
         )
         install_hook_egress(_config(cmd))

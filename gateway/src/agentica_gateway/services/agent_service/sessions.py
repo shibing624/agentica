@@ -58,6 +58,11 @@ def _pkg():
     return sys.modules["agentica_gateway.services.agent_service"]
 
 
+#: How often a deferred background report re-checks whether its session went
+#: idle. Named so tests can shorten it instead of sleeping through real seconds.
+BACKGROUND_IDLE_POLL_SECONDS = 1.0
+
+
 class AgentSessionsMixin:
     """Session discovery, fork/feedback/rename/archive/delete, and background processes."""
 
@@ -457,7 +462,7 @@ class AgentSessionsMixin:
         while self._background_registry_is_current(session_id, owner, registry) and (
             self.is_session_active(session_id, owner) or _pkg().live_turn.active(session_id, self._owner(owner))
         ):
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(BACKGROUND_IDLE_POLL_SECONDS)
         handler = self.background_report_handler
         if handler is None or not self._background_registry_is_current(session_id, owner, registry):
             return
@@ -479,7 +484,7 @@ class AgentSessionsMixin:
         while self._background_registry_is_current(session_id, owner, registry) and (
             self.is_session_active(session_id, owner) or _pkg().live_turn.active(session_id, self._owner(owner))
         ):
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(BACKGROUND_IDLE_POLL_SECONDS)
         handler = self.background_report_handler
         if handler is None or not self._background_registry_is_current(session_id, owner, registry):
             return

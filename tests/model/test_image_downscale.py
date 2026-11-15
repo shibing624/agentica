@@ -87,9 +87,9 @@ def test_downscaled_output_is_smaller_than_input():
 
 def test_png_is_preferred_for_screenshots():
     """A text-like image must stay lossless PNG, not silently become JPEG."""
-    img = Image.new("RGB", (4000, 200), (255, 255, 255))
-    for x in range(0, 4000, 3):  # thin strokes => JPEG would smear them
-        for y in range(0, 200, 7):
+    img = Image.new("RGB", (2200, 200), (255, 255, 255))
+    for x in range(0, img.width, 3):  # thin strokes => JPEG would smear them
+        for y in range(0, img.height, 7):
             img.putpixel((x, y), (0, 0, 0))
     buf = io.BytesIO()
     img.save(buf, format="PNG")
@@ -128,7 +128,7 @@ def test_alpha_is_preserved_when_downscaling():
 
 def test_palette_transparency_survives_downscale():
     """A P-mode PNG with a transparency key must not be flattened to RGB."""
-    img = Image.new("P", (3000, 100))
+    img = Image.new("P", (2200, 100))
     img.putpalette([0, 0, 0, 255, 255, 255] + [0] * 762)
     img.info["transparency"] = 0
     buf = io.BytesIO()
@@ -200,9 +200,9 @@ def test_screenshot_png_stays_png_even_though_jpeg_is_smaller():
     A downscaled screenshot gets smaller as JPEG, but silently lossy text is
     the wrong trade — the MIME must stay image/png.
     """
-    img = Image.new("RGB", (3000, 2000), (255, 255, 255))
-    for x in range(0, 3000, 5):
-        for y in range(0, 2000, 9):
+    img = Image.new("RGB", (2200, 1500), (255, 255, 255))
+    for x in range(0, img.width, 5):
+        for y in range(0, img.height, 9):
             img.putpixel((x, y), (0, 0, 0))
     buf = io.BytesIO()
     img.save(buf, format="PNG")
@@ -389,7 +389,7 @@ def test_oversized_pil_image_is_resized_before_encode():
     from agentica.model.openai import OpenAIChat
 
     model = OpenAIChat(id="gpt-4o", api_key="fake_openai_key")
-    img = Image.new("RGB", (4000, 800), (10, 20, 30))
+    img = Image.new("RGB", (2200, 800), (10, 20, 30))
     block = model.process_image(img)
     payload, mime = _decode(block["image_url"]["url"])
     assert mime == "image/png"

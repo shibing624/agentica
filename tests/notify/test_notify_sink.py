@@ -411,7 +411,7 @@ class TestNonBlockingEvents:
                 started = time.monotonic()
                 sink.emit_event("run.started", payload={"i": i})
                 worst = max(worst, time.monotonic() - started)
-            sink.stop()
+            sink.stop(timeout=0.1)
             # Delivery timeout is 2s; if emit ever waited on it this would blow
             # past this bound.
             assert worst < 0.5, f"emit_event blocked for {worst:.3f}s"

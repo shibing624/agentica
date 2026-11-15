@@ -7,7 +7,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
@@ -88,7 +88,11 @@ class TestCompactPersistsForForkResume(unittest.TestCase):
             tui_state={"context_tokens": 50_000, "context_window": 128_000},
         )
 
-        _cmd_compact(ctx)
+        # Notes authoring is a model call; with a fake key it would retry
+        # against the network for seconds. A failed notes call is the case this
+        # test asserts anyway (no .notes.md, span fallback).
+        with patch("agentica.compression.manager.author_session_notes", AsyncMock(return_value=None)):
+            _cmd_compact(ctx)
 
         pre_compact.assert_called_once()
         lines = Path(slog.path).read_text(encoding="utf-8").splitlines()
@@ -116,7 +120,8 @@ class TestCompactPersistsForForkResume(unittest.TestCase):
             current_agent=agent,
             tui_state={"context_tokens": 50_000, "context_window": 128_000},
         )
-        _cmd_compact(ctx)
+        with patch("agentica.compression.manager.author_session_notes", AsyncMock(return_value=None)):
+            _cmd_compact(ctx)
 
         forked = slog.fork("forked-after-compact")
         resumed = forked.load()
