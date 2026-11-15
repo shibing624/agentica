@@ -2018,11 +2018,16 @@ mark.chat-hit-mark.active{background:rgba(245,158,11,.52);color:inherit;box-shad
 .bg-section{display:flex;align-items:center;justify-content:space-between;margin:2px 4px 1px;padding:4px 2px 3px;font-size:11.5px;color:var(--fg3)}
 .bg-section.settled-head{margin-top:4px;padding-top:6px;border-top:var(--hair) solid var(--border2)}
 .bg-section:first-child{margin-top:0;border-top:none}
-.bg-section-toggle,.bg-clear{display:inline-flex;align-items:center;gap:4px;border:none;border-radius:5px;background:transparent;padding:2px 5px;color:inherit;font:inherit;font-size:11.5px;cursor:pointer}
-.bg-section-toggle:hover,.bg-clear:hover{background:var(--hover);color:var(--fg)}
-.bg-section-toggle svg,.bg-chev-box svg{width:12px;height:12px;display:block;transition:transform .14s ease}
-.bg-section-toggle:not(.open) svg{transform:rotate(-90deg)}
-.bg-item{display:flex;flex-direction:column}
+.bg-section-label{padding:2px 2px}
+.bg-clear{display:inline-flex;align-items:center;gap:4px;border:none;border-radius:5px;background:transparent;padding:2px 5px;color:inherit;font:inherit;font-size:11.5px;cursor:pointer}
+.bg-clear:hover{background:var(--hover);color:var(--fg)}
+.bg-chev-box svg{width:12px;height:12px;display:block;transition:transform .14s ease}
+/* Each row owns its chevron, and an open row and its output share one card:
+   the panel hangs off the row it belongs to, not off the list. */
+.bg-item{display:flex;flex-direction:column;border-radius:9px}
+.bg-item.open{background:var(--bg2);box-shadow:inset 0 0 0 var(--hair) var(--border)}
+.bg-item.open .bg-line.live{background:transparent}
+.bg-item.open .bg-row.settled:hover{background:transparent}
 .bg-line{display:flex;align-items:stretch;gap:6px}
 .bg-line.live{padding:4px 8px 4px 4px;border-radius:9px;background:var(--bg2)}
 .bg-line.live:hover{background:var(--hover)}
@@ -2051,6 +2056,7 @@ mark.chat-hit-mark.active{background:rgba(245,158,11,.52);color:inherit;box-shad
 .bg-dur{flex-shrink:0;margin-left:auto;color:var(--fg3);font-family:var(--mono);font-size:11px;font-variant-numeric:tabular-nums}
 .bg-chev-box{display:inline-flex;flex-shrink:0;align-items:center;align-self:center;justify-content:center;width:20px;height:20px;border:var(--hair) solid var(--border);border-radius:5px;background:var(--bg);color:var(--fg3)}
 .bg-row.settled .bg-chev-box{border-color:transparent;background:transparent}
+.bg-row.settled:hover .bg-chev-box,.bg-item.open .bg-row.settled .bg-chev-box{border-color:var(--border);background:var(--bg)}
 .bg-chev-box.open svg{transform:rotate(180deg)}
 .bg-stop{flex-shrink:0;display:inline-flex;align-items:center;align-self:center;justify-content:center;gap:4px;height:22px;min-width:22px;padding:0 5px;border:var(--hair) solid var(--border);border-radius:5px;background:var(--bg);color:var(--fg2);font:inherit;font-size:11px;cursor:pointer}
 .bg-stop svg{width:10px;height:10px;display:block}
@@ -2058,7 +2064,6 @@ mark.chat-hit-mark.active{background:rgba(245,158,11,.52);color:inherit;box-shad
 .bg-stop.armed,.bg-stop.armed:hover{width:auto;padding:0 8px;border-color:rgba(220,38,38,.45);background:rgba(220,38,38,.12);color:#dc2626}
 .bg-stop-label{white-space:nowrap;line-height:18px;font-weight:500}
 .bg-stop:disabled{opacity:.5;cursor:default}
-.bg-output{margin:2px 8px 8px 30px;padding:8px 10px;max-height:240px;overflow:auto;border-radius:8px;background:var(--bg2);font:11.5px/1.55 var(--mono);color:var(--fg2);white-space:pre-wrap;overflow-wrap:anywhere}
 
 /* ===== AUTOMATIONS (after deepseek-harness's task manager) =====
    A centred 960px list column; the selected task's detail as a right pane
@@ -2244,7 +2249,7 @@ html[data-desktop="mac"] .auto-detail-bar{-webkit-app-region:drag}
 .s-auto-mark{display:inline-flex;flex:none;color:var(--fg3)}
 .s-auto-mark svg{width:12px;height:12px}
 .side-nav-item.active{background:var(--hover)}
-.bg-panel{margin:4px 4px 6px;border:var(--hair) solid var(--border);border-radius:9px;background:var(--bg2);overflow:hidden}
+.bg-panel{margin:0 8px 8px 30px;border:var(--hair) solid var(--border);border-radius:8px;background:var(--bg);overflow:hidden}
 .bg-panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 10px;border-bottom:var(--hair) solid var(--border2);font-family:var(--mono);font-size:11px;color:var(--fg3)}
 .bg-panel-cmd{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bg-panel-acts{display:inline-flex;align-items:center;gap:6px;flex-shrink:0}

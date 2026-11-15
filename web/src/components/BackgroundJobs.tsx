@@ -67,7 +67,6 @@ export function BackgroundJobs({
   const [expanded, setExpanded] = useState<string | null>(null);
   const [output, setOutput] = useState("");
   const [copied, setCopied] = useState(false);
-  const [settledOpen, setSettledOpen] = useState<boolean | null>(null);
   const [cleared, setCleared] = useState<ReadonlySet<string>>(new Set());
   const [armed, setArmed] = useState<string | null>(null);
   const [stopping, setStopping] = useState<string | null>(null);
@@ -144,9 +143,18 @@ export function BackgroundJobs({
     return () => window.clearInterval(timer);
   }, [hasLive, open]);
 
-  // Auto-expand the sole running job when opening the popover for quick inspection.
+  // Auto-expand the sole running job once per opening, for quick inspection.
+  // Keyed on the opening, not on ``expanded === null``: that also holds right
+  // after the user collapses the row, which re-expanded it at once and made a
+  // running job's chevron unable to close its own panel.
+  const autoExpandedRef = useRef(false);
   useEffect(() => {
-    if (open && expanded === null && live.length === 1) {
+    if (!open) {
+      autoExpandedRef.current = false;
+      return;
+    }
+    if (!autoExpandedRef.current && expanded === null && live.length === 1) {
+      autoExpandedRef.current = true;
       followRef.current = true;
       setExpanded(live[0].id);
     }
@@ -265,7 +273,6 @@ export function BackgroundJobs({
 
   if (!visibleCount) return null;
   const badgeCount = visibleJobBadgeCount(live.length, settled.length);
-  const showSettled = settledOpen ?? !hasLive;
   const cwd = sess?.dir || appState.serverDir || "";
 
   const renderItem = (job: BackgroundJob) => {
@@ -283,12 +290,13 @@ export function BackgroundJobs({
       : null;
 
     return (
-      <li key={job.id} className={"bg-item" + (liveRow ? " live" : " settled")}>
+      <li key={job.id} className={"bg-item" + (liveRow ? " live" : " settled") + (isOpen ? " open" : "")}>
         <div className={"bg-line" + (liveRow ? " live" : "")}>
           <button
             type="button"
             className={"bg-row" + (liveRow ? " live" : " settled")}
             aria-expanded={isOpen}
+            title={isOpen ? S.chat.bgCollapseRow : S.chat.bgExpandRow}
             onClick={() => {
               setMenuMode("pinned");
               if (!isOpen) setOutput("");
@@ -423,17 +431,12 @@ export function BackgroundJobs({
           <ul className="bg-list" aria-label={S.chat.bgCount(badgeCount)}>
             {hasLive && <li className="bg-section">{S.chat.bgLive}</li>}
             {live.map(renderItem)}
+            {/* A plain label, not a fold toggle: a chevron on the section line
+                read as belonging to the first row under it. Each row's own
+                chevron is the only expand control. */}
             {settled.length > 0 && (
               <li className="bg-section settled-head">
-                <button
-                  type="button"
-                  className={"bg-section-toggle" + (showSettled ? " open" : "")}
-                  aria-expanded={showSettled}
-                  onClick={() => { setMenuMode("pinned"); setSettledOpen(!showSettled); }}
-                >
-                  <IconChevronDown />
-                  <span>{S.chat.bgSettled(settled.length)}</span>
-                </button>
+                <span className="bg-section-label">{S.chat.bgSettled(settled.length)}</span>
                 <button
                   type="button"
                   className="bg-clear"
@@ -448,7 +451,7 @@ export function BackgroundJobs({
                 </button>
               </li>
             )}
-            {showSettled && settled.map(renderItem)}
+            {settled.map(renderItem)}
           </ul>
         </div>,
         document.body,
