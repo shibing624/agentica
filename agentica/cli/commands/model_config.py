@@ -16,7 +16,6 @@ from agentica.cli.runtime import (
     BUILTIN_TOOLS,
     create_agent,
     get_model,
-    _build_environment_context,
     _build_fallback_models,
     _build_sibling_model,
     _resolve_compact_token_limit,
@@ -355,7 +354,6 @@ def _rebuild_live_model(ctx: CommandContext):
     }
     ctx.current_agent.model = get_model(**model_kwargs)
     _rebind_live_model(ctx)
-    ctx.current_agent.environment_context = _build_environment_context(ctx.current_agent, ctx.agent_config)
 
 
 def _rebind_live_model(ctx: CommandContext) -> None:
@@ -624,9 +622,6 @@ def _apply_profile(
         # create_agent's default).
         _update_task_tool_auxiliary_model(ctx.current_agent, new_auxiliary_model)
         _rebind_live_model(ctx)
-        # Refresh the self-description block so the agent reports its new
-        # model/auxiliary model on the next turn.
-        ctx.current_agent.environment_context = _build_environment_context(ctx.current_agent, ctx.agent_config)
         auxiliary_provider = ctx.agent_config.get("auxiliary_model_provider")
         auxiliary_model_name = ctx.agent_config.get("auxiliary_model_name")
         auxiliary_str = (

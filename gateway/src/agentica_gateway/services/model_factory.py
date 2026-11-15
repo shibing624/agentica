@@ -2,14 +2,14 @@
 """
 @author:XuMing(xuming624@qq.com)
 @description: 
-Model factory: instantiates configured LLM models and loads cron tools.
+Model factory: instantiates configured LLM models.
 
 Extracted from AgentService to keep model creation logic independently testable
 and to reduce AgentService's responsibility count.
 """
 import asyncio
 import dataclasses
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 from agentica.utils.log import logger
 
@@ -188,108 +188,3 @@ def _gateway_cron_job_runner(job: Any) -> dict:
         return deps.scheduler.run_now(job)
 
     return asyncio.run_coroutine_threadsafe(_start(), deps.main_loop).result(timeout=10)
-
-
-def get_cron_tools(owner: Optional[str] = None) -> List[Any]:
-    """Load the cron tool, wired for real immediate runs.
-
-    Returns a ``CronTool`` (not the bare ``cronjob`` function) with a
-    ``job_runner`` so ``cronjob(action="run", ...)`` starts the job now in
-    its conversation, instead of just marking it due for the next tick.
-
-    ``owner`` is the signed-in account: create/list/edit stay inside that
-    account's jobs. The CLI omits it (one user on the machine).
-    """
-    try:
-        from agentica.tools.cron_tool import CronTool
-        logger.debug("Loaded cron tool")
-        return [CronTool(job_runner=_gateway_cron_job_runner, owner=owner)]
-    except Exception as e:
-        logger.warning(f"Failed to load cron tools: {e}")
-        return []
-
-
-def get_cron_instructions() -> str:
-    """Return the system prompt instructions for cron job management."""
-    return """
-# Scheduled tasks
-
-You can create and manage the user's scheduled tasks with the `cronjob` tool
-(create / list / runs / update / pause / resume / remove / run). Each run is
-delivered as an automatic message into a conversation and answered there,
-where the user can read and follow up. When the user wants the result here,
-use target='session'; for an independent recurring job, the default
-target='new_once' keeps every run in one dedicated conversation.
-
-Schedule formats: cron expression ("30 7 * * *"), interval ("30m", "every 2h"), or ISO datetime.
-The user also manages these on the Automations page (left sidebar).
-"""
-
-
-def get_self_manage_tools() -> List[Any]:
-    """Load the self-management tool (same one the CLI gives its agent).
-
-    Lets the web agent inspect its own config.yaml/.env, know its own
-    version, and adjust its own model/tuning — the "self-awareness"
-    capability the CLI has always had. Gated by the same permission_mode
-    tiers as write_file/apply_patch (parked in "read-only", available in
-    "auto"/"allow-all") since it's registered as destructive.
-    """
-    try:
-        from agentica.tools.self_manage_tool import SelfManageTool
-        logger.debug("Loaded self_manage tool")
-        return [SelfManageTool()]
-    except Exception as e:
-        logger.warning(f"Failed to load self_manage tool: {e}")
-        return []
-
-
-def get_self_manage_instructions() -> str:
-    """Return the system prompt instructions describing the agent's own identity."""
-    from .im_bot import IM_COMMANDS
-
-    im_commands = "\n".join(f"  - `{cmd}` — {what}" for cmd, _, _, what in IM_COMMANDS)
-    return f"""
-# Self-Awareness
-
-You are Agentica, running inside the Agentica Gateway on the user's own
-machine. One session can be reached from several clients: the web page, the
-desktop app, an IM channel (WeChat/Feishu/WeCom/Telegram/Discord/DingTalk/QQ),
-and a terminal running `agentica --resume <session_id>`. They share this
-session's transcript, so the user may switch between them mid-conversation.
-
-## Who and where you are: `self_manage(action="show")`
-
-Its `this_session` block is the authoritative answer to "which model / profile
-are you", "what is this session's id", "where is the transcript / log / work
-dir", and "which client is the user on" (`channel`: `wechat`, `feishu` … for
-an IM chat, null for web / desktop / CLI). Call it rather than inferring from
-the prompt or from config.yaml's active profile (a session can run on a
-different profile than the default). When the user is on an IM channel and
-asks what you can do or how to control you, answer with the IM commands below.
-
-- `self_manage(action="show")` — this session + config.yaml profiles, settings
-  (including whether the cron scheduler daemon is enabled) and .env (masked)
-- `self_manage(action="set_config", key="...", value="...")` — edit a config.yaml profile field
-- `self_manage(action="set_env", key="...", value="...")` — set/delete a .env variable
-- `self_manage(action="check_upgrade")` — check for a newer Agentica release on PyPI
-- `self_manage(action="install_skill", value="<git url or path>")` — install a skill
-
-Model/profile edits take effect on the next agent rebuild, not mid-conversation.
-
-## Commands the user can type
-
-These are handled by the client before the message reaches you; you never
-see them. When the user asks how to do one of these things, point them to
-the command for the client they are on.
-
-- IM channels:
-{im_commands}
-- Web / desktop chat box: `/goal`, `/queue`, `/compact`, `/permission`,
-  `/model`, `/export`, plus `/<skill>` for user-invocable skills.
-
-Terminal-only commands (`/cron daemon on`, `/upgrade`, `/config`, …) exist
-only in the `agentica` CLI. Do not hand them to a user on the web or in IM.
-If something needs deployment-level access you don't have (enabling the cron
-daemon, restarting the gateway after an upgrade), say so plainly.
-"""

@@ -23,7 +23,7 @@ from agentica.model.usage import Usage
 from agentica.run.response import RunResponse
 
 
-def _run_one_shot(chunks, *, print_mode, query="say hi", stream=None, captured=None):
+def _run_one_shot(chunks, *, print_mode, query="say hi", stream=None, captured=None, resolved_extra=None, configs=None):
     argv = [
         "agentica",
         "--query",
@@ -52,10 +52,13 @@ def _run_one_shot(chunks, *, print_mode, query="say hi", stream=None, captured=N
         _session_log=SimpleNamespace(exists=lambda: True),
     )
     resolved = {"model_provider": "openai", "model_name": "gpt-4o-mini", "base_url": None}
+    resolved.update(resolved_extra or {})
 
     def fake_create_agent(*args, **kwargs):
         if captured is not None:
             captured.update(kwargs)
+        if configs is not None:
+            configs.append(args[0])
         return agent
 
     with (
@@ -115,6 +118,25 @@ class TestPrintMode:
         capsys.readouterr()
 
         assert captured["include_ask_user_question"] is False
+
+    def test_startup_carries_the_auto_review_model_block(self, capsys):
+        # The /model path copies these through resolve_named_profile_config;
+        # startup dropped them, so the profile's reviewer model was ignored
+        # until the first switch.
+        configs = []
+        _run_one_shot(
+            ["done"], print_mode=True, configs=configs,
+            resolved_extra={
+                "auto_review_model_provider": "zhipuai",
+                "auto_review_model_name": "glm-4.7-flash",
+                "auto_review_api_key": "k",
+            },
+        )
+        capsys.readouterr()
+        cfg = configs[0]
+        assert cfg["auto_review_model_provider"] == "zhipuai"
+        assert cfg["auto_review_model_name"] == "glm-4.7-flash"
+        assert cfg["auto_review_api_key"] == "k"
 
 
 if __name__ == "__main__":

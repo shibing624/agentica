@@ -259,16 +259,16 @@ class TestSelfManageTool(unittest.TestCase):
         self.assertEqual(out["config"]["settings"]["cron.enabled"], True)
         self.assertEqual(out["config"]["settings"]["cron.interval"], 30)
 
-    def test_default_restart_hint_defers_to_deployment_owner(self):
-        """The gateway default must not tell a chat user to restart a CLI they don't have."""
+    def test_default_restart_hint_covers_both_surfaces(self):
+        """One wording for terminal and gateway: neither user is told the wrong thing."""
         from agentica.tools.self_manage_tool import DEFAULT_RESTART_HINT
         self.assertIn("deployment", DEFAULT_RESTART_HINT)
-        self.assertNotIn("CLI", DEFAULT_RESTART_HINT)
+        self.assertIn("reruns `agentica`", DEFAULT_RESTART_HINT)
 
     def test_self_manage_tool_uses_custom_restart_hint(self):
-        from agentica.tools.self_manage_tool import CLI_RESTART_HINT
-        tool = self.SelfManageTool(restart_hint=CLI_RESTART_HINT)
-        self.assertIn(CLI_RESTART_HINT, tool.description)
+        hint = "Restart MyApp to load the new version."
+        tool = self.SelfManageTool(restart_hint=hint)
+        self.assertIn(hint, tool.description)
 
 
 class TestTheAgentCannotChangeItsOwnModel(unittest.TestCase):

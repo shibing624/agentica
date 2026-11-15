@@ -14,6 +14,22 @@ def _utf8_text(v: str) -> str:
     return replace_invalid_utf8(v)
 
 
+ApprovalMode = Literal["read-only", "auto", "allow-all"]
+
+
+def _approval_mode(v: Optional[str]) -> Optional[str]:
+    """Accept the pre-rename ``ask`` as the tier it became (Read Only).
+
+    An older client still sends it; without the mapping the request either
+    500s (``validate_permission_mode`` raising inside the route) or is refused,
+    and a user who chose the strictest tier loses it either way. Anything else
+    is left to the ``Literal`` check, which answers 422.
+    """
+    if isinstance(v, str) and v.strip().lower() == "ask":
+        return "read-only"
+    return v
+
+
 class ChatImage(BaseModel):
     """One pasted/attached image, already read by the browser as base64."""
     mime: str = "image/png"
@@ -34,13 +50,15 @@ class ChatRequest(BaseModel):
     goal: str = ""
     skill: str = ""
     tool: str = ""
-    approval_mode: str = "auto"
+    approval_mode: ApprovalMode = "auto"
     images: List[ChatImage] = []
 
     @field_validator("message", "goal", "skill")
     @classmethod
     def _sanitize_utf8(cls, v: str) -> str:
         return _utf8_text(v)
+
+    _map_approval_mode = field_validator("approval_mode", mode="before")(_approval_mode)
 
 
 class SteerRequest(BaseModel):
@@ -78,7 +96,9 @@ class ApprovalDecisionRequest(BaseModel):
 
 class SessionApprovalModeRequest(BaseModel):
     """Live per-session approval mode switch (read-only / auto / allow-all)."""
-    approval_mode: Literal["read-only", "auto", "allow-all"]
+    approval_mode: ApprovalMode
+
+    _map_approval_mode = field_validator("approval_mode", mode="before")(_approval_mode)
 
 
 class CompactRequest(BaseModel):
@@ -145,7 +165,9 @@ class GoalRequest(BaseModel):
     # ``-1`` = unlimited (web default). A positive int is a hard cap.
     # Turns and wall-clock are not web knobs — CLI ``/goal --turns/--wall`` still has them.
     token_budget: int = -1
-    approval_mode: Optional[str] = None
+    approval_mode: Optional[ApprovalMode] = None
+
+    _map_approval_mode = field_validator("approval_mode", mode="before")(_approval_mode)
 
     @field_validator("objective")
     @classmethod

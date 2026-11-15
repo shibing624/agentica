@@ -276,6 +276,10 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
     # Per-run: this turn's message came from software, not a person. Set by
     # Runner from RunConfig.automated_input; stamped on the user message.
     _run_automated_input: bool = field(default=False, init=False, repr=False)
+    # Per-run: the live message list the Runner sends to the model, so the auto
+    # reviewer sees this turn's user message and its steering — working memory
+    # only gets them when the turn ends. None outside a run.
+    _run_messages: Optional[List[Any]] = field(default=None, init=False, repr=False)
     # Per-run: the client this turn came through (RunConfig.channel), written
     # to the session sidecar as its latest entry point.
     _run_channel: Optional[str] = field(default=None, init=False, repr=False)
@@ -665,6 +669,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self._run_fallback_models = []
         self._run_fallback_on_break = False
         self._run_automated_input = False
+        self._run_messages = None
         self._run_channel = None
         self._run_input_meta = None
         self._run_ticket_id = None

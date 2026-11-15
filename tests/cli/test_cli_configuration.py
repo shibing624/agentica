@@ -722,7 +722,9 @@ class TestCLIConfiguration(unittest.TestCase):
                 include_ask_user_question=True,
             )
 
-        self.assertIsNone(agent.instructions)
+        # The skills catalog lives in session guidance, not in the shared
+        # product instructions every surface sends.
+        self.assertFalse(any("learn-from-experience" in i for i in agent.instructions))
         self.assertEqual(len(agent.session_guidance), 1)
         self.assertIn("learn-from-experience", agent.session_guidance[0])
         self.assertIn("Available skills", agent.session_guidance[0])

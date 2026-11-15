@@ -464,3 +464,21 @@ def test_probe_verdict_is_cached_per_process(monkeypatch):
         assert calls == ["true", "true"]
     finally:
         os_sandbox.reset_availability_probe()
+
+
+def test_temp_roots_ignore_a_tmpdir_that_covers_home(monkeypatch, tmp_path):
+    # TMPDIR is user environment, not policy: pointed at / or at (a parent of)
+    # home it would make ~/.ssh count as a scratch area.
+    from agentica.tools import os_sandbox
+
+    home = tmp_path / "home" / "me"
+    home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    for bad in (str(home), str(home.parent), os.sep):
+        monkeypatch.setattr(os_sandbox.tempfile, "gettempdir", lambda bad=bad: bad)
+        roots = os_sandbox.writable_temp_roots()
+        assert os.path.realpath(bad) not in roots, bad
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(os_sandbox.tempfile, "gettempdir", lambda: str(scratch))
+    assert os.path.realpath(scratch) in os_sandbox.writable_temp_roots()

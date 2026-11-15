@@ -129,8 +129,14 @@ def writable_temp_roots() -> Tuple[str, ...]:
     write it through the shell.
     """
     roots: List[str] = []
+    home = _real("~")
     for candidate in (tempfile.gettempdir(), "/tmp"):
         path = _real(candidate)
+        # ``TMPDIR`` is the user's environment, not a policy. Set to ``/`` or
+        # to the home directory (or anything above it), it would make every
+        # write there count as scratch — including ``~/.ssh``.
+        if path == os.sep or home == path or home.startswith(path.rstrip(os.sep) + os.sep):
+            continue
         if os.path.isdir(path) and path not in roots:
             roots.append(path)
     return tuple(roots)

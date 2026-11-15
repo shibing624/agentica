@@ -152,6 +152,23 @@ def main():
         "auxiliary_extra_headers": resolved.get("auxiliary_extra_headers"),
         "auxiliary_reasoning": resolved.get("auxiliary_reasoning"),
         "auxiliary_reasoning_effort": resolved.get("auxiliary_reasoning_effort"),
+        # Auto-tier reviewer model (profile ``auto_review_model`` block). The
+        # /model path copies these through ``resolve_named_profile_config``;
+        # startup must too, or the block is silently ignored until a switch.
+        **{
+            key: resolved.get(key)
+            for key in (
+                "auto_review_model_provider",
+                "auto_review_model_name",
+                "auto_review_base_url",
+                "auto_review_api_key",
+                "auto_review_wire_api",
+                "auto_review_extra_body",
+                "auto_review_extra_headers",
+                "auto_review_reasoning",
+                "auto_review_reasoning_effort",
+            )
+        },
         # Cross-provider fallback chain (resilience) + per-model API attempts.
         # Both are hand-edited in config.yaml (no CLI flags / wizard prompt).
         # Default max_api_retry=2 so the main model retries once before the

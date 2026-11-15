@@ -28,12 +28,12 @@ from agentica.config.profiles import get_setting
 from agentica.run.config import RunConfig
 from agentica.run.context import RunSource
 from agentica.skills import load_system_skills
-from agentica.tools.ask_user_question_tool import AskUserQuestionTimeout, AskUserQuestionTool
+from agentica.tools.ask_user_question_tool import AskUserQuestionTimeout
 from agentica.utils.log import logger
 from agentica.workspace import Workspace
 
 from ...config import settings
-from .types import _AGENT_BUILD_TIMEOUT_S, _APPROVAL_MODE_INSTRUCTION
+from .types import _AGENT_BUILD_TIMEOUT_S
 
 
 def _pkg():
@@ -116,7 +116,7 @@ class AgentBuilderMixin:
         max_api_retry = int(cfg.get("max_api_retry") or 2)
         work_dir = self.get_session_work_dir(session_id, owner)
 
-        from agentica.tools.product import build_product_tools
+        from agentica.tools.product import PRODUCT_DESCRIPTION, PRODUCT_INSTRUCTIONS, build_product_tools
         from ..model_factory import _gateway_cron_job_runner
 
         extra = build_product_tools(
@@ -129,20 +129,9 @@ class AgentBuilderMixin:
             extra_tools=list(self.extra_tools),
         )
 
-        extra.append(AskUserQuestionTool(input_callback=self._make_ask_callback(session_id, owner)))
-
-        instructions = list(self.extra_instructions) if self.extra_instructions else None
-        if any(tool.name == "cronjob" for tool in extra):
-            if instructions is None:
-                instructions = []
-            instructions.append(pkg.get_cron_instructions())
-        if any(tool.name == "self_manage" for tool in extra):
-            if instructions is None:
-                instructions = []
-            instructions.append(pkg.get_self_manage_instructions())
-        if instructions is None:
-            instructions = []
-        instructions.append(_APPROVAL_MODE_INSTRUCTION)
+        # Same identity and instructions as the CLI (agentica.tools.product):
+        # a session that moves between terminal, web and IM keeps its prefix.
+        instructions = [PRODUCT_INSTRUCTIONS, *(self.extra_instructions or [])]
 
         permission_mode = self.get_session_approval_mode(session_id, owner)
         sandbox_mode, sandbox_network_access = self._sandbox_settings()
@@ -165,11 +154,7 @@ class AgentBuilderMixin:
             session_profile=cfg.get("profile") or None,
             fallback_models=fallback_models,
             max_api_retry=max_api_retry,
-            description=(
-                "You are DeepAgent, an AI coding agent served over the Agentica "
-                "gateway (web UI and chat channels). You help users with software "
-                "engineering and general tasks through a conversational interface."
-            ),
+            description=PRODUCT_DESCRIPTION,
             tools=extra if extra else None,
             workspace=self._workspace,
             work_dir=work_dir,
@@ -178,10 +163,11 @@ class AgentBuilderMixin:
             instructions=instructions,
             debug=settings.debug,
             # memory, skills, experience capture, workspace memory all on by
-            # DeepAgent default — no explicit overrides needed. The builtin
-            # ask_user_question stays off: it would read stdin. The gateway
-            # mounts its own (above), answered through the session's live turn.
-            include_ask_user_question=False,
+            # DeepAgent default. ask_user_question is the builtin one, mounted
+            # where the CLI mounts it (same tool order); its callback answers
+            # through the session's live turn instead of stdin.
+            include_ask_user_question=True,
+            ask_user_question_callback=self._make_ask_callback(session_id, owner),
             background_process_registry=self._background_registry(session_id, owner),
             permission_mode=permission_mode,
             sandbox=sandbox_mode,

@@ -17,13 +17,7 @@ from agentica.skills import get_skill_registry
 from ...config import settings
 from .. import chat_images, live_turn
 from ..media_understanding import media_understanding
-from ..model_factory import (
-    create_model,
-    get_cron_instructions,
-    get_cron_tools,
-    get_self_manage_instructions,
-    get_self_manage_tools,
-)
+from ..model_factory import create_model
 from ..response_formatter import extract_metrics, format_tool_call_args, format_tool_result
 from ..session_usage import turn_usage_payload, usage_payload
 from .core import AgentService
@@ -34,7 +28,6 @@ from .types import (
     ChatResult,
     LRUAgentCache,
     _AGENT_BUILD_TIMEOUT_S,
-    _APPROVAL_MODE_INSTRUCTION,
     _COMPACT_NOTES_LIMIT,
     _OWNER_SEP,
     _TITLE_PROMPT,
@@ -57,7 +50,6 @@ __all__ = [
     "LRUAgentCache",
     "QUESTION_WAIT_S",
     "_AGENT_BUILD_TIMEOUT_S",
-    "_APPROVAL_MODE_INSTRUCTION",
     "_COMPACT_NOTES_LIMIT",
     "_OWNER_SEP",
     "_TITLE_PROMPT",
@@ -73,13 +65,9 @@ __all__ = [
     "format_tool_call_args",
     "format_tool_result",
     "get_active_profile_name",
-    "get_cron_instructions",
-    "get_cron_tools",
     "get_profile",
     "get_profiles",
     "get_project_profile",
-    "get_self_manage_instructions",
-    "get_self_manage_tools",
     "get_skill_registry",
     "goal_event_payload",
     "is_system_temp_path",

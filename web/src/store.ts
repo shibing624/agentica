@@ -4,6 +4,7 @@ import type { Automation, WorktreeState } from "./api";
 import { sessionStatsCache, type SessionStats } from "./lib/sessionCache";
 import { createViewStore } from "./lib/sessionView";
 import { readBusyEnter, type BusyEnterBehavior } from "./lib/composerSubmission";
+import { normalizeApprovalMode } from "./lib/approvalMode";
 
 /** Ordered stream of one assistant turn (text interleaves with tool groups). */
 export type MsgPart =
@@ -367,10 +368,21 @@ function readSidebarWidth() {
 
 const listeners = new Set<() => void>();
 
-/** Stored tier validated against the current names; a pre-rename "ask" is dropped. */
+/** Stored tier validated against the current names. A pre-rename `ask` is the
+ *  same tier as `read-only`, so it migrates instead of loosening to `auto`. */
 function readApprovalMode(): string {
   const stored = localStorage.getItem("ag_approval");
-  return stored === "read-only" || stored === "auto" || stored === "allow-all" ? stored : "auto";
+  const mode = normalizeApprovalMode(stored);
+  if (stored !== null && stored !== mode) {
+    // Migrate in place so later reads (and other tabs) see the tier the user
+    // actually chose, not the retired name.
+    try {
+      localStorage.setItem("ag_approval", mode);
+    } catch {
+      // Storage disabled/full: the in-memory value is still correct.
+    }
+  }
+  return mode;
 }
 
 const state: AppState = {

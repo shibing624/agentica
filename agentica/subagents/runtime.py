@@ -642,8 +642,6 @@ class SubagentRegistry:
         auxiliary_model_override: Optional["Model"] = None,
         timeout_override: Optional[int] = None,
         max_turns_override: Optional[int] = None,
-        tool_call_limit_override: Optional[int] = None,
-        system_prompt_override: Optional[str] = None,
         resume_from_run_id: Optional[str] = None,
         model_tier_override: Optional[Literal["auxiliary", "main"]] = None,
     ) -> Dict[str, Any]:
@@ -718,13 +716,11 @@ class SubagentRegistry:
             }
 
         # Apply per-call overrides so the parent Agent's ReAct loop can retry
-        # a failed / truncated task with a larger budget or a tweaked prompt
-        # without having to register a whole new subagent type. No process-level
-        # hard ceilings: long-running investigations may raise budgets freely.
-        if any(v is not None for v in (
-            timeout_override, max_turns_override,
-            tool_call_limit_override, system_prompt_override, model_tier_override,
-        )):
+        # a failed / truncated task with a larger budget without registering a
+        # whole new subagent type. The type's system prompt is not overridable:
+        # it is the same bytes for every call of that type, which is what lets
+        # the provider's prefix cache serve repeated delegations.
+        if any(v is not None for v in (timeout_override, max_turns_override, model_tier_override)):
             tier_val: Literal["auxiliary", "main"] = (
                 model_tier_override
                 if model_tier_override in ("auxiliary", "main")
@@ -736,14 +732,6 @@ class SubagentRegistry:
                 max_turns=(
                     max_turns_override if max_turns_override is not None
                     else config.max_turns
-                ),
-                tool_call_limit=(
-                    tool_call_limit_override if tool_call_limit_override is not None
-                    else config.tool_call_limit
-                ),
-                system_prompt=(
-                    system_prompt_override if system_prompt_override is not None
-                    else config.system_prompt
                 ),
                 model_tier=tier_val,
             )

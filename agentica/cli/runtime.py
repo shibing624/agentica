@@ -827,59 +827,6 @@ def _build_cli_memory_config(agent_config: dict) -> WorkspaceMemoryConfig:
 
 
 
-def _build_environment_context(agent: Any, agent_config: dict) -> Optional[str]:
-    """Build a stable self-description block for the agent's system prompt.
-
-    Only includes information that rarely changes during a session so the
-    prompt prefix stays cache-friendly: framework, model endpoint, auxiliary model,
-    active tools/skills, builtin subagent types, slash commands, and extension
-    hints. Intentionally excludes work_dir (already injected by prompts.py) and
-    cost/context usage (owned by /status). Reused by _apply_profile to refresh
-    the block after a model/profile switch — call with the live agent and the
-    post-switch agent_config.
-    """
-    provider = agent_config.get("model_provider")
-    model_name = agent_config.get("model_name")
-    base_url = agent_config.get("base_url")
-
-    lines: List[str] = ["You are an Agentica agent running in CLI mode."]
-    lines.append("- Framework: Agentica")
-    if provider and model_name:
-        endpoint = f"  (endpoint: {base_url})" if base_url else ""
-        lines.append(f"- Model: {provider}/{model_name}{endpoint}")
-
-    auxiliary_provider = agent_config.get("auxiliary_model_provider")
-    auxiliary_model_name = agent_config.get("auxiliary_model_name")
-    if auxiliary_provider and auxiliary_model_name:
-        lines.append(
-            f"- Auxiliary model: {auxiliary_provider}/{auxiliary_model_name}  (background calls + task subagent)"
-        )
-
-    fallback_models = agent_config.get("fallback_models") or []
-    if fallback_models:
-        fb_ids = ", ".join(
-            f"{fb.get('model_provider', '?')}/{fb.get('model_name', '?')}"
-            for fb in fallback_models if isinstance(fb, dict)
-        )
-        if fb_ids:
-            lines.append(f"- Fallback models: {fb_ids}")
-
-    tool_names = active_tool_names(agent)
-    lines.append(f"- Active tools: {', '.join(tool_names) if tool_names else 'none'}")
-
-    # Skills are not listed here: the frozen "Session Guidance" catalog already
-    # names them, and this block is rebuilt on /model switches, so a second,
-    # unfrozen list was both a duplicate and a cache-prefix change.
-    from agentica.subagents import get_subagent_configs
-
-    subagent_types = sorted(get_subagent_configs())
-    lines.append(f"- Subagent types: {', '.join(subagent_types)}")
-    lines.append("- Slash commands: /rename /resume /status /trace /export /model /tools /skills /agents /config /usage /permissions /help /exit")
-    lines.append("- To extend: /skills install <name>, /agents create <name>")
-
-    return "\n".join(lines)
-
-
 def _resolve_compression_flags(agent_config: dict) -> tuple[bool, bool]:
     """CLI flag (via agent_config) wins; else config.yaml settings; else on."""
     evict = agent_config.get("enable_evict")
@@ -1097,7 +1044,7 @@ def create_agent(
     # Product surfaces share one tool set; the CLI passes only its local
     # session config and callbacks. ``worktree_binder`` is the CLI-owned
     # instance so /worktree, --worktree and the model tool see the same state.
-    from agentica.tools.product import build_product_tools
+    from agentica.tools.product import PRODUCT_DESCRIPTION, PRODUCT_INSTRUCTIONS, build_product_tools
 
     cli_tools = build_product_tools(
         surface="cli",
@@ -1119,12 +1066,10 @@ def create_agent(
         session_profile=agent_config.get("profile_name") or None,
         fallback_models=fallback_models,
         max_api_retry=max_api_retry,
-        description=(
-            "You are DeepAgent, an interactive CLI coding agent running in the "
-            "user's terminal. You help with software engineering tasks: reading "
-            "and editing files, running commands, and iterating until the task "
-            "is done."
-        ),
+        # Same identity and instructions as the gateway: a session resumed on
+        # the web or in IM keeps its prefix cache (agentica.tools.product).
+        description=PRODUCT_DESCRIPTION,
+        instructions=[PRODUCT_INSTRUCTIONS],
         tools=cli_tools,  # self-management + user-specified extra tools
         work_dir=work_dir,
         workspace=workspace,
@@ -1161,11 +1106,6 @@ def create_agent(
             if skills_summary:
                 new_agent.add_session_guidance(skills_summary)
 
-    # Inject a stable self-description (framework / model / tools / skills) so
-    # the agent can answer "what model am I / what tools do I have". Built from
-    # the live agent + agent_config so _apply_profile can refresh it after a
-    # model/profile switch by calling _build_environment_context again.
-    new_agent.environment_context = _build_environment_context(new_agent, agent_config)
     if (
         agent_config.get("profile_name")
         and not agent_config.get("_skip_session_profile_persist")

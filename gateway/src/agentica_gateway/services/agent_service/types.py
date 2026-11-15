@@ -255,28 +255,6 @@ def goal_event_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-# Web sessions default to "auto" approval mode. Baked in once as a standing
-# agent instruction (not per-message) so it stays in the cache-friendly
-# static prompt zone. Tools are always in schema; the mode only decides
-# whether execute waits for a human.
-_APPROVAL_MODE_INSTRUCTION = (
-    "This session's approval mode can pause a tool call until the user "
-    "confirms it. In \"read-only\" mode, file reads (including outside the "
-    "work directory), read-only shell commands (including wrappers such as "
-    "cd && git diff | head), web_search/fetch_url, memory, task, "
-    "skills, and other builtins run immediately; write_file / apply_patch "
-    "and mutating execute wait for approval. In \"auto\" mode, reads "
-    "(including outside the work directory), in-workspace writes (the "
-    "platform temp directories count as inside), every execute, network "
-    "tools, and every builtin/skill/third-party tool run; only file writes "
-    "outside the work directory or to sensitive paths are reviewed first, "
-    "and the review may run the call without asking. "
-    "\"allow-all\" never asks. If a tool result is "
-    "\"Tool call denied by user.\", do not retry the same call — tell the "
-    "user what you needed and wait for guidance or a mode change."
-)
-
-
 def _log_report_failure(future) -> None:
     """A background report that failed is logged, not lost in the loop."""
     if future.cancelled():

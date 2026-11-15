@@ -462,14 +462,18 @@ def classify(
     # it unconfined. Checked before ``covers`` and before the read-only fast path.
     if is_sandbox_escalation(fc):
         return "ask"
+    # Hard-unsafe is checked before any grant: an "allow similar" on
+    # ``rm -f a.txt`` stores the class ``rm -f``, and argv-prefix matching
+    # would otherwise let it cover ``rm -f -r /``. No grant, session or
+    # durable, is a decision about a call this dangerous.
+    if _is_hard_unsafe(fc, work_dir=work_dir):
+        return "ask"
     if grants.covers(fc, work_dir=work_dir):
         return "allow"
 
     name = fc.function.name
     if name in BENIGN_ALWAYS_ALLOW:
         return "allow"
-    if _is_hard_unsafe(fc, work_dir=work_dir):
-        return "ask"
 
     if mode == "auto":
         if name not in WRITE_FILE_TOOLS:
@@ -707,7 +711,15 @@ def make_approve(
             return "deny"
         reviewer_trace: Optional[Dict[str, Any]] = None
         reviewer_note = ""
-        if mode == "auto" and review is not None and not is_sandbox_escalation(fc):
+        # Neither a sandbox escape nor a hard-unsafe call goes to the reviewer:
+        # its allow runs the call unasked, and these are the two decisions
+        # reserved for a person.
+        if (
+            mode == "auto"
+            and review is not None
+            and not is_sandbox_escalation(fc)
+            and not _is_hard_unsafe(fc, work_dir=work_dir)
+        ):
             outcome = None
             try:
                 outcome = await review(fc)
@@ -717,21 +729,55 @@ def make_approve(
                 reviewer_trace = outcome.trace()
                 reviewer_note = outcome.note()
                 if outcome.decision == "allow":
-                    if fc.function.name in FILE_TOOLS:
-                        for path in call_paths(fc, work_dir=work_dir):
-                            apply_path_grant(path, False)
-                    fc.approval_waited = False
-                    fc.approval_trace = {
-                        "tool": fc.function.name,
-                        "arguments": _clip_trace_args(fc.arguments or {}),
-                        "mode": mode,
-                        "decision": "allow",
-                        "reason": "reviewer_allow",
-                        "wait_s": 0,
-                        "grant": None,
-                        "reviewer": reviewer_trace,
-                    }
-                    return "allow"
+                    # The review spends up to ``auto_review_timeout`` seconds,
+                    # and the session can change under it: the user switches the
+                    # tier, or another card records a deny-similar grant. Only a
+                    # change can overturn the verdict — re-running the static
+                    # classifier under an unchanged tier would return the very
+                    # ``ask`` this reviewer exists to answer.
+                    mode_now = get_mode()
+                    if grants.denies(fc, work_dir=work_dir):
+                        # Deny wins over a verdict made before it existed.
+                        route_now = "deny"
+                    elif mode_now != mode:
+                        # The verdict was made about a tier that no longer
+                        # applies; decide again under the current one.
+                        route_now = classify(mode_now, fc, grants, work_dir=work_dir)
+                    else:
+                        route_now = "allow"
+                    mode = mode_now
+                    if route_now == "allow":
+                        if fc.function.name in FILE_TOOLS:
+                            for path in call_paths(fc, work_dir=work_dir):
+                                apply_path_grant(path, False)
+                        fc.approval_waited = False
+                        fc.approval_trace = {
+                            "tool": fc.function.name,
+                            "arguments": _clip_trace_args(fc.arguments or {}),
+                            "mode": mode,
+                            "decision": "allow",
+                            "reason": "reviewer_allow",
+                            "wait_s": 0,
+                            "grant": None,
+                            "reviewer": reviewer_trace,
+                        }
+                        return "allow"
+                    # No longer allowed: the verdict belongs to the old state, so
+                    # it is dropped rather than shown on the card or written to
+                    # the trace as the reason this call was stopped.
+                    reviewer_trace = None
+                    reviewer_note = ""
+                    if route_now == "deny":
+                        fc.approval_trace = {
+                            "tool": fc.function.name,
+                            "arguments": _clip_trace_args(fc.arguments or {}),
+                            "mode": mode,
+                            "decision": "deny",
+                            "reason": "deny_grant",
+                            "wait_s": 0,
+                            "grant": None,
+                        }
+                        return "deny"
         registry = get_registry()
         if registry is None:
             if reviewer_trace is not None:
@@ -859,6 +905,13 @@ def _similar_label_for(fc: FunctionCall) -> str:
 
 
 def _approval_options(fc: FunctionCall) -> Tuple[ApprovalDecision, ...]:
+    # A hard-unsafe call is asked about every time (``classify`` checks it
+    # before allow grants), so an "allow similar" would be a promise nothing
+    # keeps. "Deny similar" stays: refusing the class for good is still useful.
+    if _is_hard_unsafe(fc, work_dir=None):
+        if fc.function.name in EXECUTE_TOOLS and not command_allows_prefix(_call_command(fc) or ""):
+            return ("allow", "deny")
+        return ("allow", "deny", "deny_prefix")
     if fc.function.name in EXECUTE_TOOLS:
         if is_sandbox_escalation(fc):
             return ("allow", "deny")

@@ -286,6 +286,29 @@ class TestClassifyAndGrants(unittest.TestCase):
         self.assertEqual(classify("read-only", evil, self.grants, work_dir=self.work), "ask")
         self.assertEqual(classify("read-only", same, self.grants, work_dir=self.work), "ask")
 
+    def test_no_grant_covers_a_hard_unsafe_call(self):
+        # ``rm -f a.txt`` stores the class ``("rm", "-f")``; argv-prefix
+        # matching alone would let it cover ``rm -f -r /``.
+        self.grants.add_command_prefix("rm -f a.txt")
+        self.assertEqual(self.grants.command_prefixes, [("rm", "-f")])
+        wipe = _fc("execute", {"command": "rm -f -r /"}, is_destructive=True)
+        self.assertTrue(self.grants.covers(wipe, work_dir=self.work))
+        for mode in ("read-only", "auto"):
+            self.assertEqual(classify(mode, wipe, self.grants, work_dir=self.work), "ask", mode)
+        # Same for a tool-name grant and a path grant on a sensitive file.
+        self.grants.add_tool_name("write_file")
+        ssh = _file_fc("write_file", os.path.expanduser("~/.ssh/authorized_keys"))
+        self.assertEqual(classify("auto", ssh, self.grants, work_dir=self.work), "ask")
+        # The ordinary call the grant was given for still runs unasked.
+        same = _fc("execute", {"command": "rm -f b.txt"}, is_destructive=True)
+        self.assertEqual(classify("read-only", same, self.grants, work_dir=self.work), "allow")
+
+    def test_hard_unsafe_card_offers_no_allow_similar(self):
+        from agentica.agent.approvals import _approval_options
+
+        wipe = _fc("execute", {"command": "rm -f -r /"}, is_destructive=True)
+        self.assertEqual(_approval_options(wipe), ("allow", "deny", "deny_prefix"))
+
     def test_git_subcommand_class_does_not_cover_other_git(self):
         self.grants.add_command_prefix("git add foo.py")
         self.assertEqual(command_class_tokens("git add foo.py"), ("git", "add"))
@@ -551,6 +574,26 @@ class TestMakeApproveReviewer(unittest.TestCase):
 
         asyncio.run(_run())
 
+    def test_reviewer_never_runs_for_a_hard_unsafe_call(self):
+        async def _run():
+            calls, published = [], []
+
+            async def review(fc):
+                calls.append(fc.function.name)
+                from agentica.agent.reviewer import ReviewOutcome
+                return ReviewOutcome(decision="allow", risk="low", reason="looks fine")
+
+            approve, registry, _ = self._approve(review=review, published=published)
+            fc = _fc("execute", {"command": "rm -rf /"}, is_destructive=True)
+            task = asyncio.create_task(approve(fc))
+            await asyncio.sleep(0)
+            self.assertEqual(calls, [])
+            self.assertEqual(len(published), 1)
+            registry.decide(fc.call_id, "deny")
+            self.assertEqual(await task, "deny")
+
+        asyncio.run(_run())
+
     def test_reviewer_never_runs_for_a_call_the_classifier_allows(self):
         async def _run():
             calls = []
@@ -600,6 +643,73 @@ class TestMakeApproveReviewer(unittest.TestCase):
             self.assertEqual(len(registry.list()), 1)
             registry.decide(fc.call_id, "deny")
             self.assertEqual(await task, "deny")
+
+        asyncio.run(_run())
+
+    def test_a_tier_switch_during_the_review_reclaims_the_allow(self):
+        """The review spends up to `auto_review_timeout` seconds, so the tier
+        can change under it. A stale allow must not run the call unasked after
+        the user has switched the session to read-only."""
+        from agentica.agent.reviewer import ReviewOutcome
+
+        async def _run():
+            published = []
+            current = {"mode": "auto"}
+
+            async def review(fc):
+                # The user picks Read Only while the side call is in flight.
+                current["mode"] = "read-only"
+                return ReviewOutcome(decision="allow", risk="low")
+
+            grants = SessionGrants()
+            registry = ApprovalRegistry()
+            approve = make_approve(
+                get_mode=lambda: current["mode"],
+                get_grants=lambda: grants,
+                get_registry=lambda: registry,
+                get_work_dir=lambda: "/tmp/agentica-review-work",
+                publish=published.append,
+                apply_path_grant=lambda path, prefix: None,
+                review=review,
+            )
+            fc = self._outside_fc()
+            task = asyncio.create_task(approve(fc))
+            await asyncio.sleep(0)
+            # Parked for a human under the new tier, not allowed by the stale one.
+            self.assertEqual(len(published), 1)
+            self.assertNotIn("LLM reviewer", published[0].preview)
+            registry.decide(fc.call_id, "deny")
+            self.assertEqual(await task, "deny")
+            self.assertEqual(fc.approval_trace["mode"], "read-only")
+            self.assertNotEqual(fc.approval_trace["reason"], "reviewer_allow")
+
+        asyncio.run(_run())
+
+    def test_a_deny_grant_added_during_the_review_beats_a_stale_allow(self):
+        from agentica.agent.reviewer import ReviewOutcome
+
+        async def _run():
+            grants = SessionGrants()
+            registry = ApprovalRegistry()
+
+            async def review(fc):
+                # A card decided elsewhere records deny-similar meanwhile.
+                grants.deny_path_prefixes.add(str(Path.home()))
+                return ReviewOutcome(decision="allow", risk="low")
+
+            approve = make_approve(
+                get_mode=lambda: "auto",
+                get_grants=lambda: grants,
+                get_registry=lambda: registry,
+                get_work_dir=lambda: "/tmp/agentica-review-work",
+                publish=lambda p: None,
+                apply_path_grant=lambda path, prefix: None,
+                review=review,
+            )
+            fc = self._outside_fc()
+            self.assertEqual(await approve(fc), "deny")
+            self.assertEqual(fc.approval_trace["reason"], "deny_grant")
+            self.assertIsNone(fc.approval_trace.get("reviewer"))
 
         asyncio.run(_run())
 

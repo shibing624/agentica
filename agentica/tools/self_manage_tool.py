@@ -21,21 +21,17 @@ from agentica.tools.helpers import tool_result, tool_error
 from agentica.cli import self_manage as sm
 
 
-# Whether the agent can literally restart itself to load a new version
-# depends on the product surface. The terminal CLI is a foreground process
-# the user is driving, so exiting and rerunning it is something *they* can
-# do themselves. The gateway (web chat + Feishu/WeCom/WeChat/Telegram/
-# Discord/DingTalk/QQ bot channels) is a long-running server process — the
-# chat user has no way to restart it, only whoever manages the deployment
-# does. Default to the surface-agnostic phrasing; the CLI opts into the more
-# specific one via `SelfManageTool(restart_hint=CLI_RESTART_HINT)`.
+# One wording for every surface: the tool description is part of the cached
+# prefix, and a session moves between the terminal and the gateway. It covers
+# both cases — a terminal user can exit and rerun `agentica` themselves; the
+# gateway (web / desktop / IM) is a server process only its operator restarts.
+# ``this_session.channel`` from action='show' says which case applies.
 DEFAULT_RESTART_HINT = (
-    "Restarting is required to load a new version. This must be done by "
-    "whoever manages this deployment (restarting the server process) — you "
-    "cannot do this yourself from the conversation, and neither can the user "
-    "if they're just chatting with you."
+    "Restarting is required to load a new version: in the terminal CLI the "
+    "user exits and reruns `agentica`; for the web / desktop / IM gateway, "
+    "whoever manages this deployment restarts the server process — you cannot "
+    "do this yourself from the conversation."
 )
-CLI_RESTART_HINT = "Restart the CLI to load the new version (exit and rerun `agentica`)."
 
 
 def _build_description(restart_hint: str) -> str:
@@ -263,8 +259,8 @@ class SelfManageTool(Tool):
         restart_hint: surface-specific phrasing for how a new version is
             loaded after ``action='upgrade'``, baked into both the tool
             description and the upgrade result's ``note``. Defaults to
-            ``DEFAULT_RESTART_HINT`` (safe for any non-CLI surface); the CLI
-            passes ``CLI_RESTART_HINT`` since the user can restart it themselves.
+            ``DEFAULT_RESTART_HINT``, which every product surface uses so the
+            schema is byte-identical across them; an SDK app may pass its own.
     """
 
     def __init__(self, restart_hint: Optional[str] = None):

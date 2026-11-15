@@ -84,11 +84,21 @@ def normalize_cli_prefs(raw: Any) -> Dict[str, Any]:
         if key in _BOOL_PREF_KEYS and isinstance(value, bool):
             out[key] = value
         elif key == "permissions" and isinstance(value, str):
-            if value in PERMISSION_MODES:
-                out[key] = value
+            # "ask" is the pre-rename name of exactly the same tier as
+            # "read-only" (writes and mutating commands need approval). Map it
+            # rather than dropping it: dropping falls through to the CLI default
+            # and silently upgrades a saved restrictive choice to allow-all.
+            mapped = "read-only" if value == "ask" else value
+            if mapped in PERMISSION_MODES:
+                out[key] = mapped
+                if mapped != value:
+                    logger.info(
+                        "Saved permission mode %r was renamed to %r; using %r "
+                        "(the same tier).", value, mapped, mapped,
+                    )
             else:
-                # A saved tier from before the rename ("ask") is not silently
-                # reinterpreted: say so once, then start from the default.
+                # A value no tier ever had (a hand-edit, a typo) is still
+                # dropped: interpreting it would be a guess about intent.
                 logger.warning(
                     "Saved permission mode %r is no longer valid; using the default "
                     "instead (valid: %s).", value, ", ".join(PERMISSION_MODES),

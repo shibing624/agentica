@@ -277,6 +277,27 @@ class TestStartupMerge(unittest.TestCase):
 
         self.assertNotIn("permissions", agent_config)
 
+    def test_a_saved_pre_rename_ask_tier_becomes_read_only_not_allow_all(self):
+        """`ask` was renamed to `read-only` — same tier, so the saved choice
+        must survive the upgrade.
+
+        Dropping it would leave ``agent_config["permissions"]`` unset, and the
+        CLI default is ``allow-all``: the most restrictive saved tier would
+        silently become the most permissive one.
+        """
+        base = Path(project_base_dir(self.work.path))
+        base.mkdir(parents=True, exist_ok=True)
+        (base / "project.json").write_text(
+            json.dumps({"work_dir": self.work.path, "cli": {"permissions": "ask"}}),
+            encoding="utf-8",
+        )
+
+        agent_config = {}
+        cli_prefs.apply_cli_prefs(agent_config, cli_prefs.read_project_prefs(self.work.path))
+
+        self.assertEqual(agent_config["permissions"], "read-only")
+        self.assertEqual(cli_prefs.normalize_cli_prefs({"permissions": "ask"}), {"permissions": "read-only"})
+
 
 class TestMainWiring(unittest.TestCase):
     """`main()` is what reads the saved preferences before the first agent."""

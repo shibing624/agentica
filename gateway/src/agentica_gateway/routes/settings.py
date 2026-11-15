@@ -265,6 +265,11 @@ def _clean_prefs(raw: dict) -> dict:
     if lang in _PREFS_LANG:
         out["lang"] = lang
     mode = raw.get("approval_mode")
+    if mode == "ask":
+        # Pre-rename name of the same tier. Mapping it keeps a saved Read Only
+        # session at Read Only instead of letting it fall back to the default
+        # (Workspace Write), which lets in-workspace writes run unasked.
+        mode = "read-only"
     if mode in _PREFS_APPROVAL:
         out["approval_mode"] = mode
     last = raw.get("last_session_id")

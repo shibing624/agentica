@@ -24,6 +24,21 @@ example entering a CLI worktree, or binding a gateway session's `work_dir`) are
 passed into the shared binder; they are not a reason to register a different
 tool set.
 
+## One system prompt
+
+The identity line and the product instructions (self-awareness, the commands
+each client offers, scheduled tasks, approval modes) are
+`PRODUCT_DESCRIPTION` / `PRODUCT_INSTRUCTIONS` in `agentica.tools.product`.
+The CLI and the gateway both pass them unchanged, mount the builtin
+`ask_user_question` (only its callback differs), and give `self_manage` the
+same restart wording. Anything that varies per client — which client this turn
+came from, which model the session runs on — is answered at run time by
+`self_manage(action="show")` or sits below the volatile marker (the per-turn
+IM channel note), never in the cached prefix.
+
+`tests/gateway/test_surface_parity.py` builds both agents for one project and
+compares the stable system prompt and the tool schemas byte for byte.
+
 ## Worktree
 
 `agentica.git.binding.WorktreeBinder` is core-layer code. The old
@@ -81,6 +96,8 @@ sessions; the SDK host is the process that should call these APIs.
 
 - Do not load a different bundled skill set by surface.
 - Do not teach a skill a tool that only one surface registers.
+- Do not add surface-specific text to the description, instructions or a tool
+  description.
 - Do not add an import from `agentica.cli` into core/gateway tool construction.
 - Do not solve a missing product tool with an `execute` Python heredoc; SDK
   callers compose the core API or tools in their own Python process.

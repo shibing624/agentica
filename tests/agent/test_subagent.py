@@ -1328,3 +1328,19 @@ def test_task_max_turns_can_raise_the_budget_but_not_cut_it():
         assert captured["max_turns_override"] is None
         asyncio.run(tool.task("a", "b", subagent_type="explore", max_turns=default * 2))
         assert captured["max_turns_override"] == default * 2
+
+
+def test_task_timeout_can_raise_the_wall_clock_but_not_cut_it():
+    """`timeout` had the same hole `max_turns` was fixed for: a guessed 30 cut
+    an 1800 s exploration to a timeout stub with no report."""
+    from agentica.subagents import get_subagent_config
+    from agentica.tools.builtin_task_tool import BuiltinTaskTool
+
+    default = get_subagent_config("explore").timeout
+    tool = BuiltinTaskTool()
+    captured, fake_spawn = _spawn_capture(tool)
+    with patch("agentica.subagents.runtime.SubagentRegistry.spawn", new=fake_spawn):
+        asyncio.run(tool.task("a", "b", subagent_type="explore", timeout=30))
+        assert captured["timeout_override"] is None
+        asyncio.run(tool.task("a", "b", subagent_type="explore", timeout=default + 60))
+        assert captured["timeout_override"] == default + 60

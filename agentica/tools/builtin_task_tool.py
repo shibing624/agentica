@@ -205,7 +205,7 @@ class BuiltinTaskTool(Tool):
             description: Short (3-5 word) label for this task, shown to the user.
             prompt: Complete, self-contained task for the subagent. It does not share this conversation's context, so include the goal, background, starting paths, and ask for findings as path:line.
             subagent_type: Subagent type id from the "task Tool" table (default "explore").
-            timeout: Wall-clock limit in seconds for this call; defaults to the type's configured timeout. Raise up front for broad multi-module investigations.
+            timeout: Wall-clock limit in seconds for this call; defaults to the type's configured timeout. Pass only to raise it; a lower value is ignored.
             max_turns: ReAct turn budget; defaults to the type's own (100-200). Pass only to raise it, e.g. when resuming.
             resume_from_run_id: run_id of a prior partial subagent run to resume at most once.
             model_tier: Model tier override: "auxiliary" (fast/cheap default for fact-gathering) or "main" (parent's main model for complex analysis).
@@ -223,12 +223,15 @@ class BuiltinTaskTool(Tool):
             if isinstance(model_tier, str) and model_tier.strip().lower() in ("auxiliary", "main")
             else None
         )
-        # The turn budget can only be raised from here. A model that guesses a
-        # "small" number (12) cuts a 200-turn explore down to a few reads and
-        # gets a max_turns stop instead of a report.
+        # The budget can only be raised from here. A model that guesses a
+        # "small" number (12 turns, or 30 seconds) cuts a 200-turn / 1800s
+        # investigation down to a stub and returns a timeout or max_turns stop
+        # instead of a report. A raise is a real request and is honoured.
         config = get_subagent_config(subagent_type)
         if max_turns is not None and config is not None and max_turns < config.max_turns:
             max_turns = None
+        if timeout is not None and config is not None and timeout < config.timeout:
+            timeout = None
         async with self._free_slot():
             result = await SubagentRegistry().spawn(
                 parent_agent=self._parent_agent,

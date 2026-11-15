@@ -1000,6 +1000,7 @@ class LoopMixin:
                     for _user_message in user_messages:
                         _user_message.automated = True
                 num_input_messages = len(messages_for_model)
+                agent._run_messages = messages_for_model
                 loop_state.input_message_ids = {id(m) for m in messages_for_model}
                 # Open the turn for incremental writes: everything this turn puts
                 # on disk mid-flight is recorded so the end-of-turn write becomes
@@ -1939,6 +1940,7 @@ class LoopMixin:
                 # and is never dropped. After this, steer() returns False and
                 # the CLI falls back to queuing a fresh turn.
                 agent._end_steer_window()
+                agent._run_messages = None
                 if _restore_guidance_after_run:
                     agent._tool_policy_prompts = _saved_tool_policy_prompts
                     agent._session_guidance_prompts = _saved_session_guidance_prompts

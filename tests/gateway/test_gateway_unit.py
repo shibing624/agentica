@@ -977,6 +977,22 @@ class TestSettings:
         assert ext_set == {".py", ".js", ".ts"}
 
 
+class TestWebPrefsClean:
+    """A stored tier the selector wrote before the rename keeps its meaning."""
+
+    def test_a_saved_ask_tier_maps_to_read_only(self):
+        # Dropping it would let ``approval_mode_pref`` fall back to the
+        # gateway default (auto/Workspace Write), one tier looser than chosen.
+        from agentica_gateway.routes.settings import _clean_prefs
+        assert _clean_prefs({"approval_mode": "ask"})["approval_mode"] == "read-only"
+
+    def test_current_tiers_pass_through_and_junk_is_dropped(self):
+        from agentica_gateway.routes.settings import _clean_prefs
+        for mode in ("read-only", "auto", "allow-all"):
+            assert _clean_prefs({"approval_mode": mode})["approval_mode"] == mode
+        assert "approval_mode" not in _clean_prefs({"approval_mode": "strict"})
+
+
 # ============== TestUploadFile ==============
 
 class TestUploadFile:
@@ -1597,27 +1613,6 @@ class TestModelFactory:
             "openai", "openai/Kimi-k3", api_key="sk-x", reasoning_effort="extra-high",
         )
         assert model.reasoning_effort == "extra-high"
-
-    def test_cron_tools_returns_list(self):
-        from agentica_gateway.services.model_factory import get_cron_tools
-        tools = get_cron_tools()
-        assert isinstance(tools, list)
-
-    def test_cron_instructions_non_empty(self):
-        from agentica_gateway.services.model_factory import get_cron_instructions
-        instructions = get_cron_instructions()
-        assert "cronjob" in instructions
-
-    def test_self_manage_tools_returns_list(self):
-        from agentica_gateway.services.model_factory import get_self_manage_tools
-        tools = get_self_manage_tools()
-        assert isinstance(tools, list)
-        assert len(tools) == 1
-
-    def test_self_manage_instructions_non_empty(self):
-        from agentica_gateway.services.model_factory import get_self_manage_instructions
-        instructions = get_self_manage_instructions()
-        assert "self_manage" in instructions
 
 
 # ============== TestChannelBase ==============
