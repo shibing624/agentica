@@ -12,8 +12,8 @@ commit guidelines below.
 
 ```sh
 pip install -e ".[dev]" -e "./gateway[all]"
-python -m pytest tests -q                       # serial: ~1.5 min
-python -m pytest tests -q -n 8 --dist loadfile  # parallel (pytest-xdist): ~27 s
+python -m pytest tests -q                       # serial: ~85 s
+python -m pytest tests -q -n 8 --dist loadfile  # parallel (pytest-xdist): ~26 s
 ```
 
 `-n` is a local convenience. Bare CI installs the package without `[dev]`,
