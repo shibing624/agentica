@@ -52,4 +52,5 @@ def test_worktree_skill_describes_all_surfaces_without_python_scripts():
     text = Path("agentica/skills/bundled/worktree/SKILL.md").read_text()
 
     assert "CLI, Web, Desktop, IM" in text
-    assert "python3" not in text
+    assert "Python SDK callers may use `agentica.git.worktree.ensure`" in text
+    assert "python3 - <<" not in text

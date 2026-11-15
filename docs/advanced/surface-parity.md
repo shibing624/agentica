@@ -15,7 +15,7 @@ runners call it with their surface-specific context:
 | Surface | Outlet | Shared construction |
 |---|---|---|
 | Interactive CLI | `/worktree`, `--worktree`, model `worktree` tool | `build_product_tools(surface="cli", ...)` |
-| Web / Desktop | `/worktree` panel, model `worktree` tool | `build_product_tools(surface="web", ...)` via gateway |
+| Web / Desktop | `/worktree` panel, model `worktree` tool | `build_product_tools(surface="gateway", ...)` via gateway |
 | IM | gateway-bound session and model `worktree` tool | `build_product_tools(surface="gateway", ...)` via gateway |
 | Headless / cron | model `worktree` tool; no human slash outlet | `build_product_tools(surface="headless"/"cron", ...)` |
 
@@ -38,13 +38,49 @@ tool calls. Gateway surfaces additionally expose `/worktree` and
 session's `work_dir` and invalidates that session's cached agent. CLI has its
 own human slash command and `agentica --worktree <task>` startup flag.
 
-The bundled `worktree` skill is shared by all surfaces. It says what every
-surface has, names the differences only as outlets, and forbids writing Python
-to call `agentica.git.worktree.ensure` by hand.
+The bundled `worktree` skill is shared by all product surfaces. It says what
+every surface has, names the differences only as outlets, and forbids writing
+Python inside a product session to call `agentica.git.worktree.ensure` by hand.
+
+## Python SDK
+
+`Agent()` / `DeepAgent()` are also a supported way to build agents. They are
+not product outlets: SDK callers own the process, conversation store, working
+directory and tool list. Bundled product skills and `build_product_tools()` are
+not injected automatically, so concepts such as `/worktree`, `session_id`,
+`owner` and cached-agent invalidation do not apply.
+
+For an SDK escape hatch, use the core worktree API directly:
+
+```python
+from agentica.git import worktree
+
+wt = worktree.ensure("/path/to/repo", "gateway-peers", base="main")
+work_dir = wt.path
+```
+
+Or explicitly mount the same model tool on an SDK agent:
+
+```python
+from agentica import Agent
+from agentica.git.binding import WorktreeBinder
+from agentica.tools.worktree_tool import WorktreeTool
+
+agent = Agent(
+    model=...,
+    work_dir="/path/to/repo",
+    tools=[WorktreeTool(WorktreeBinder(agent_config={"work_dir": "/path/to/repo"}))],
+)
+```
+
+This is explicit composition, not a hidden `surface="sdk"` in
+`build_product_tools()`. Do not use `execute` Python heredocs inside product
+sessions; the SDK host is the process that should call these APIs.
 
 ## What not to do
 
 - Do not load a different bundled skill set by surface.
 - Do not teach a skill a tool that only one surface registers.
 - Do not add an import from `agentica.cli` into core/gateway tool construction.
-- Do not solve a missing product tool with an `execute` Python heredoc.
+- Do not solve a missing product tool with an `execute` Python heredoc; SDK
+  callers compose the core API or tools in their own Python process.

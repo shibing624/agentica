@@ -95,7 +95,7 @@ metadata:
 
 同名 Skill，项目级覆盖用户级；用户级覆盖包内内置（`agentica` / `browser` / `cron` / `long-running-jobs` / `worktree`）。内置 skill 直接从包内目录原位加载，不往 `$AGENTICA_HOME` 拷贝任何文件（升级即随包更新）。覆盖方式是在 `~/.agentica/skills/<name>/` 写同名 skill。
 
-`Agent()` / `DeepAgent()` 作为 SDK 使用时不会自动出现这些内置 skill。
+`Agent()` / `DeepAgent()` 作为 SDK 使用时不会自动出现这些内置 skill。SDK 是显式组合：模型、工具、记忆、工作目录由宿主进程自己传；CLI / gateway 专属概念（`/worktree` 面板、`session_id` / `owner`、缓存 agent 失效、`self_manage`、`cronjob` 等）不会隐式注入。需要 worktree 时，可直接调用 `agentica.git.worktree.ensure()`，或把 `WorktreeTool(WorktreeBinder(...))` 显式放进 `tools=[...]`；详见 [多端能力对齐](surface-parity.md#python-sdk)。
 
 ## 加载与使用
 
