@@ -6,7 +6,7 @@ description: >-
   another live session is dirty in the same directory, when two agents would
   fight over index.lock, or when starting a parallel task checkout.
 metadata:
-  version: "2.2"
+  version: "2.3"
 ---
 
 # Isolate work in a worktree
@@ -29,10 +29,17 @@ session's working directory and rebuilds that session's agent. In the CLI,
 process that should start inside a tree is `agentica --worktree <task>`.
 
 Do not `cd` and expect later tool calls to follow — each call is independent.
-Do not call `git worktree add` through `execute`, and do not write Python to
-import `agentica.git.worktree.ensure`: that only makes a directory, bypasses
-session binding and leaves later calls in the wrong place. Use `worktree` or
-the matching `/worktree` outlet.
+Do not call `git worktree add` through `execute`.
+Do not write Python inside a product session to import
+`agentica.git.worktree.ensure`: that only makes a
+directory, bypasses session binding and leaves later calls in the wrong place.
+Use `worktree` or the matching `/worktree` outlet.
+
+Python SDK callers may use `agentica.git.worktree.ensure` directly when their
+host process owns the working directory, or mount `WorktreeTool` explicitly on
+`Agent` / `DeepAgent`. Bundled product skills are not loaded by SDK callers;
+this paragraph is a documented escape hatch, not an instruction for an agent
+running in CLI / Web / Desktop / IM / headless / cron.
 
 ## When
 

@@ -11,8 +11,10 @@ def test_worktree_skill_describes_every_surface_and_forbids_python_fallback():
     for surface in ("CLI", "Web", "Desktop", "IM", "headless"):
         assert surface in text
     assert "all have the `worktree` tool" in text
-    assert "do not write Python" in text
+    assert "Do not call `git worktree add` through `execute`" in text
+    assert "Do not write Python inside a product session" in text
     assert "agentica.git.worktree.ensure" in text
+    assert "Python SDK callers may use `agentica.git.worktree.ensure`" in text
     assert "multi-agent" not in text
 
 

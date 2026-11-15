@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### added
 
 - **多端 worktree 对齐**：`worktree` 工具从 CLI 专属改为统一产品工具面，CLI / Web / Desktop / IM / headless / cron 共用同一套内置能力；Web/Desktop 的 `/worktree` 面板可对当前 session 执行 `status` / `bind` / `new` / `merge` / `remove`，不再需要手写 Python 调用 `agentica.git.worktree.ensure()`。内置 skill catalog 仍是一份，不按端裁剪。
+- **Python SDK 逃生通道说明**：明确 bundled product skills 不自动注入 `Agent()` / `DeepAgent()`；SDK 宿主可直接使用 `agentica.git.worktree.ensure()` 或显式装配 `WorktreeTool(WorktreeBinder(...))`。禁止的只是产品 session 内用 `execute` 写 Python heredoc 绕过 `worktree` 工具。修正文档里 `surface="web"` 的笔误为 `surface="gateway"`。
 
 #### breaking
 
