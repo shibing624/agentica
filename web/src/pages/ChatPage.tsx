@@ -19,8 +19,8 @@ import {
   uid, UNLIMITED_TOKEN_BUDGET, updateQueuedMessageText,
 } from "../lib/format";
 import { primeSettings } from "../panels/SettingsModal";
-import { applyPendingModel, loadSessionModel, pickSessionModel } from "../sessionModel";
-import { createSession, forkAt, hydrateSession, loadOlderMessages, markSessionRead, pushPendingName, rateMessage, renameSession, sessionHydrating, syncSessionRoundStats } from "../sessions";
+import { applyPendingModel, cachedSessionModel, loadSessionModel, pickSessionModel, sessionModelKnown } from "../sessionModel";
+import { chatApprovalMode, createSession, forkAt, hydrateSession, loadOlderMessages, markSessionRead, pushPendingName, rateMessage, renameSession, sessionHydrating, setChatApprovalMode as setApprovalMode, syncSessionRoundStats } from "../sessions";
 import { loadCronJobs, loadPlugins } from "../data";
 import {
   Logo, IconPlus, IconClose, IconChat, IconBook, IconAsk, IconAuto, IconSidebarRight,
@@ -30,11 +30,11 @@ import {
 } from "../icons";
 import {
   bump, dequeueApproval, dequeueQuestion, enqueueApproval, enqueueQuestion, getState,
-  isStreamResuming, markStreamResuming, pushPrefs, saveSessions,
+  isStreamResuming, markStreamResuming, saveSessions,
   sessionViews, setState,
   showToast, useAppState, type ApprovalDecision, type ApprovalRequest, type ChatMsg, type QueuedMessage,
 } from "../store";
-import { applySessionUsage, ContextUsageTip, prefetchSessionUsage, syncSessionUsage } from "../components/ContextUsageTip";
+import { applySessionUsage, ContextUsageTip, prefetchSessionUsage, sessionRingPercent, syncSessionUsage } from "../components/ContextUsageTip";
 import {
   forgetClientSteer, reconcileLiveTurnMsgs, rememberSteersFromMsgs, removeUndeliveredSteers,
 } from "../lib/hydrateMessages";
@@ -442,9 +442,7 @@ export function ChatPage() {
     return () => observer.disconnect();
   }, []);
 
-  const windowSize = s.serverContextWindow || 128000;
-  const occupancy = cur?.contextTokens || cur?.lastInputTokens || 0;
-  const ctxPct = Math.min(100, Math.round((occupancy / windowSize) * 100));
+  const ctxPct = sessionRingPercent(s.curSess, cur);
   const workspace = cur?.dir || s.pendingNewChatDir || s.serverDir || "";
   const files = useFilesPanel(s.curSess, workspace);
   useEffect(() => { setCtxOpen(false); setTitleEditing(false); }, [s.curSess]);
@@ -458,7 +456,11 @@ export function ChatPage() {
   // Each chat runs on its own model; a new-chat screen shows the project's
   // default (or the one picked there) until the chat exists.
   useEffect(() => { void loadSessionModel(s.curSess); }, [s.curSess]);
-  const chatModel = s.curSess && s.sessionModel?.id === s.curSess ? s.sessionModel : null;
+  // A chat opened before shows its own model at once; one never asked about
+  // keeps the slot empty until it is known rather than flashing the default.
+  const chatModel = s.curSess && s.sessionModel?.id === s.curSess ? s.sessionModel : cachedSessionModel(s.curSess);
+  const modelPending = !chatModel && !sessionModelKnown(s.curSess);
+  const approvalMode = chatApprovalMode(s.curSess);
   const pendingProfile = !s.curSess && s.pendingModel
     ? (s.profilesData.profiles || []).find((p: any) => p.name === s.pendingModel)
     : null;
@@ -859,23 +861,23 @@ export function ChatPage() {
                 </div>
                 <ComposerDir />
                 <div className="approval-wrap" ref={approvalWrapRef}>
-                  <button className="foot-btn approval-btn" title={S.chat.permHint(s.selectedApprovalMode)}
+                  <button className="foot-btn approval-btn" title={S.chat.permHint(approvalMode)}
                           onClick={() => {
                             setState({ approvalMenuOpen: !s.approvalMenuOpen, modelDDOpen: false, composerPicker: null });
                           }}>
-                    <span className="quick-icon">{permIcon(s.selectedApprovalMode)}</span>
-                    <span className="approval-label">{S.chat.permLabel(s.selectedApprovalMode)}</span>
+                    <span className="quick-icon">{permIcon(approvalMode)}</span>
+                    <span className="approval-label">{S.chat.permLabel(approvalMode)}</span>
                     <span className="arr"><IconChevronDown /></span>
                   </button>
                   {s.approvalMenuOpen && (
                     <div className="approval-dd open">
                       {(["read-only", "auto", "allow-all"] as const).map((mode) => (
-                        <button key={mode} className={"quick-item" + (s.selectedApprovalMode === mode ? " active" : "")}
+                        <button key={mode} className={"quick-item" + (approvalMode === mode ? " active" : "")}
                                 title={S.chat.permHint(mode)}
                                 onClick={() => setApprovalMode(mode)}>
                           <span className="quick-icon">{permIcon(mode)}</span>
                           <span className="approval-label">{S.chat.permLabel(mode)}</span>
-                          {s.selectedApprovalMode === mode && <span className="quick-check">✓</span>}
+                          {approvalMode === mode && <span className="quick-check">✓</span>}
                         </button>
                       ))}
                     </div>
@@ -885,19 +887,21 @@ export function ChatPage() {
               <div className="input-foot-r">
                 <div className="ctx-wrap" ref={ctxWrapRef}>
                   <button type="button" className={"foot-btn input-ctx" + (ctxOpen ? " on" : "")}
+                          style={ctxPct === null ? { visibility: "hidden" } : undefined}
                           title={ctxOpen ? undefined : S.chat.ctxUsage} aria-haspopup="dialog" aria-expanded={ctxOpen}
                           onPointerEnter={() => prefetchSessionUsage(s.curSess)}
                           onFocus={() => prefetchSessionUsage(s.curSess)}
                           onClick={() => setCtxOpen((v) => !v)}>
-                    <span className="ctx-ring" style={{ ["--pct" as any]: ctxPct + "%" }} />
-                    {ctxPct}%
+                    <span className="ctx-ring" style={{ ["--pct" as any]: (ctxPct ?? 0) + "%" }} />
+                    {ctxPct ?? 0}%
                   </button>
                   {ctxOpen && (
                     <ContextUsageTip sessionId={s.curSess} fallback={cur} />
                   )}
                 </div>
                 <div className="input-model-wrap" ref={modelWrapRef}>
-                  <button className="foot-btn model-sel" onClick={() => {
+                  <button className="foot-btn model-sel" style={modelPending ? { visibility: "hidden" } : undefined}
+                          onClick={() => {
                     setState({ modelDDOpen: !s.modelDDOpen, approvalMenuOpen: false, composerPicker: null });
                   }}>
                     {shownModel}
@@ -2398,11 +2402,14 @@ async function sendMessage(sessId: string, text: string, files: File[]) {
     // A model picked on the new-chat screen must be on the chat before its
     // first run builds the agent.
     await applyPendingModel(sessId);
+    // The run records this tier on the chat; keep it there so another chat's
+    // pick (which moves the new-chat default) does not relabel this one.
+    sess.approvalMode = chatApprovalMode(sessId);
     const created = await api.createChatRunApi({
       message,
       session_id: sessId,
       work_dir: sess.dir || st.serverDir || "",
-      approval_mode: st.selectedApprovalMode,
+      approval_mode: chatApprovalMode(sessId),
       images,
     });
     if (!created.ok || !created.data?.run_id) {
@@ -2509,14 +2516,6 @@ function runCommand(it: MenuItem, taRef: { current: HTMLTextAreaElement | null }
   }
 }
 
-function setApprovalMode(mode: "read-only" | "auto" | "allow-all") {
-  localStorage.setItem("ag_approval", mode);
-  const sessId = getState().curSess;
-  setState({ selectedApprovalMode: mode, approvalMenuOpen: false });
-  if (sessId) void api.setSessionApprovalMode(sessId, mode);
-  pushPrefs();
-}
-
 /** Model picker rows: profiles grouped by provider, model name first. */
 function modelPickerGroups(): PickerGroup[] {
   const st = getState();
@@ -2535,7 +2534,7 @@ function modelPickerGroups(): PickerGroup[] {
 
 function permissionPickerGroups(): PickerGroup[] {
   const S = getStrings();
-  const cur = getState().selectedApprovalMode;
+  const cur = chatApprovalMode(getState().curSess);
   return [{
     title: S.chat.pickerPermTitle,
     options: (["read-only", "auto", "allow-all"] as const).map((mode) => ({
@@ -2700,11 +2699,12 @@ async function runGoalCmd(sessId: string, objective: string, tokenBudget = UNLIM
   let disconnected = false;
   try {
     await applyPendingModel(sessId);
+    sess.approvalMode = chatApprovalMode(sessId);
     const resp = await api.streamGoal({
       objective,
       session_id: sessId,
       token_budget: tokenBudget,
-      approval_mode: getState().selectedApprovalMode,
+      approval_mode: chatApprovalMode(sessId),
     }, abortCtrl.signal);
     if (!resp.ok || !resp.body) {
       let detail = `HTTP ${resp.status}`;

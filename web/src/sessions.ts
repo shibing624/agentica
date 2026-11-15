@@ -11,7 +11,7 @@ import { messageFileCandidates } from "./lib/messageFiles";
 import { cachedExisting, statWorkspaceFilesBatched } from "./lib/workspaceStat";
 import { searchEventsConversation, searchMsgsConversation, type SessionContentHit } from "./lib/sessionRows";
 import {
-  askConfirm, bump, getState, isStreamResuming, projectIdForDir, readLastSessionId, readSessionCache,
+  askConfirm, bump, getState, isStreamResuming, projectIdForDir, pushPrefs, readLastSessionId, readSessionCache,
   saveSessions, sessionViews, setState, showToast, writeLastSessionId,
   type ChatMsg, type Session,
 } from "./store";
@@ -36,6 +36,9 @@ let lastCatalogLoadAt = 0;
  *  a deleted chat back or undo an archive. Entries expire once a catalog
  *  that started after the change has landed. */
 const localEdits = new Map<string, { at: number; deleted?: boolean; archived?: boolean }>();
+/** Tiers picked here that the server has not confirmed yet, so a catalog
+ *  already in flight does not put the old one back. */
+const pendingApprovalModes: Record<string, string> = {};
 
 function noteLocalEdit(id: string, edit: { deleted?: boolean; archived?: boolean }) {
   localEdits.set(id, { at: Date.now(), ...edit });
@@ -96,6 +99,7 @@ export function loadSessions(scope: "recent" | "all" = getState().sessionScope):
         preview: sv.preview || "",
         userCount: sv.user_count || 0,
         sizeBytes: Number(sv.size_bytes) || 0,
+        approvalMode: pendingApprovalModes[id] || sv.approval_mode || mem?.approvalMode,
         hydratedSize: mem?.hydratedSize,
         hasOlder: mem?.hasOlder,
         olderCursor: mem?.olderCursor,
@@ -154,6 +158,30 @@ export function switchTo(id: string) {
       setState({ pendingResume: id });
     }
   })();
+}
+
+/** The tier the composer shows and the next run is sent with. */
+export function chatApprovalMode(id: string | null): string {
+  const st = getState();
+  return (id && st.sessions[id]?.approvalMode) || st.selectedApprovalMode;
+}
+
+/** Pick a tier for the open chat only; it also becomes the tier the next new
+ *  chat starts on. Other chats, running or not, keep theirs. */
+export function setChatApprovalMode(mode: "read-only" | "auto" | "allow-all") {
+  const st = getState();
+  const id = st.curSess;
+  const sess = id ? st.sessions[id] : undefined;
+  if (sess) sess.approvalMode = mode;
+  setState({ selectedApprovalMode: mode, approvalMenuOpen: false });
+  try { localStorage.setItem("ag_approval", mode); } catch { /* the in-memory value still applies */ }
+  pushPrefs();
+  // A draft has no log yet: its first run carries the tier.
+  if (!id || !sess || !(sess.sizeBytes || sess.msgs.length || sess.running)) return;
+  pendingApprovalModes[id] = mode;
+  void api.setSessionApprovalMode(id, mode).finally(() => {
+    if (pendingApprovalModes[id] === mode) delete pendingApprovalModes[id];
+  });
 }
 
 /** The page this session was last left on: its trace, or the chat. */

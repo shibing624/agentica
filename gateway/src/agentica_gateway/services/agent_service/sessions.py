@@ -198,6 +198,8 @@ class AgentSessionsMixin:
                 "background_jobs": bg_running,
                 "source": source,
                 "origin": origin,
+                "approval_mode": self._session_approval_modes.get(self._sk(sid, uid))
+                or entry.get("approval_mode"),
             })
         seen = {row["session_id"] for row in out}
         for turn in pkg.live_turn.iter_owner(uid):
@@ -229,6 +231,7 @@ class AgentSessionsMixin:
                 "work_dir": self.get_session_work_dir(turn.session_id, owner=uid),
                 "running": not turn.done,
                 "source": live_source,
+                "approval_mode": self._saved_approval_mode(turn.session_id, owner=uid),
             })
         out.sort(key=lambda row: str(row.get("first_timestamp") or ""), reverse=True)
         return out

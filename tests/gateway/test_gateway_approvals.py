@@ -337,7 +337,9 @@ class TestMidTurnApprovalModeSwitch:
 
         asyncio.run(_run())
 
-    def test_route_and_prefs_update_live_non_cron_turn_only(self, tmp_path, monkeypatch):
+    def test_route_updates_its_chat_and_prefs_reach_no_other_chat(self, tmp_path, monkeypatch):
+        """Each chat keeps its own tier: the account default (``/api/prefs``)
+        only seeds new chats, it must not relabel or release chats in flight."""
         from agentica_gateway import deps
         from agentica_gateway.models import SessionApprovalModeRequest
         from agentica_gateway.routes import chat as chat_routes
@@ -352,10 +354,9 @@ class TestMidTurnApprovalModeSwitch:
             deps.agent_service = svc
             try:
                 svc.set_session_approval_mode("chat1", "read-only", owner="default")
-                svc.set_session_approval_mode("cron1", "read-only", owner="default")
-                t_chat = live_turn.start("chat1", owner="default")
-                t_cron = live_turn.start("cron1", owner="default")
-                t_cron.cron_job = {"id": "j1", "name": "nightly"}
+                svc.set_session_approval_mode("chat2", "read-only", owner="default")
+                t_chat1 = live_turn.start("chat1", owner="default")
+                t_chat2 = live_turn.start("chat2", owner="default")
 
                 resp = await chat_routes.set_session_approval_mode(
                     "chat1",
@@ -364,22 +365,39 @@ class TestMidTurnApprovalModeSwitch:
                     svc=svc,
                 )
                 assert resp == {"session_id": "chat1", "approval_mode": "auto"}
+                assert svc.get_session_approval_mode("chat2", owner="default") == "read-only"
 
-                w_chat = t_chat.approvals.wait(_pending("tc_chat"))
-                w_cron = t_cron.approvals.wait(_pending("tc_cron"))
-
+                w_chat2 = t_chat2.approvals.wait(_pending("tc_chat2"))
                 req = SimpleNamespace(
                     state=SimpleNamespace(principal=SimpleNamespace(user_id="default")),
                     json=lambda: asyncio.sleep(0, result={"approval_mode": "allow-all"}),
                 )
                 await settings_routes.put_prefs(req)
 
-                assert svc.get_session_approval_mode("chat1", owner="default") == "allow-all"
-                assert await w_chat == "allow"
-                # Cron mandate stays untouched.
-                assert svc.get_session_approval_mode("cron1", owner="default") == "read-only"
-                assert not w_cron.done()
+                assert svc.get_session_approval_mode("chat1", owner="default") == "auto"
+                assert svc.get_session_approval_mode("chat2", owner="default") == "read-only"
+                assert not w_chat2.done()
+                t_chat2.resolve_approval("tc_chat2", "deny", by="Web")
+                assert await w_chat2 == "deny"
+                t_chat1.finish("done")
             finally:
                 deps.agent_service = original
 
         asyncio.run(_run())
+
+    def test_session_tier_survives_a_gateway_restart(self, tmp_path, monkeypatch):
+        from agentica_gateway.services.agent_service import AgentService
+
+        work = tmp_path / "w"
+        work.mkdir()
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc.set_session_work_dir("s1", str(work), owner="default")
+        svc.set_session_approval_mode("s1", "read-only", owner="default")
+        log = svc.session_log_for("s1", owner="default")
+        log.path.write_text('{"type": "user", "message": {"role": "user", "content": "hi"}}\n')
+        assert log.get_approval_mode() == "read-only"
+
+        fresh = AgentService(workspace_path=str(tmp_path))
+        fresh.set_session_work_dir("s1", str(work), owner="default")
+        assert fresh.get_session_approval_mode("s1", owner="default") == "read-only"
+        assert fresh.get_session_approval_mode("never-set", owner="default") == "auto"

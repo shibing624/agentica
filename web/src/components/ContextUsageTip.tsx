@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import * as api from "../api";
 import { useStrings } from "../i18n";
 import { fmtCost, fmtN, fmtSpan } from "../lib/format";
+import { ringPercent } from "../lib/contextRing";
 import { bump, getState, saveSessions, useAppState, type Session } from "../store";
 
 export type UsageSection = {
@@ -48,9 +49,22 @@ export type SessionUsage = {
  *  of waiting for a request that scans the whole session log. */
 const usageCache = new Map<string, SessionUsage>();
 const inflight = new Map<string, Promise<SessionUsage | null>>();
+/** Sessions whose usage was asked for and answered (or failed). */
+const settled = new Set<string>();
 
 export function cachedSessionUsage(sessionId: string | null): SessionUsage | undefined {
   return sessionId ? usageCache.get(sessionId) : undefined;
+}
+
+/** The composer ring for one session: its own occupancy over its own window. */
+export function sessionRingPercent(sessionId: string | null, sess: Session | null): number | null {
+  return ringPercent({
+    usage: cachedSessionUsage(sessionId),
+    hasLog: !!sessionId && !!sess && (!!sess.sizeBytes || sess.msgs.length > 0),
+    settled: !!sessionId && settled.has(sessionId),
+    localTokens: sess?.contextTokens || sess?.lastInputTokens || 0,
+    fallbackWindow: getState().serverContextWindow,
+  });
 }
 
 export function applySessionUsage(sessionId: string, usage: SessionUsage) {
@@ -82,7 +96,13 @@ function fetchUsage(sessionId: string): Promise<SessionUsage | null> {
     if (!ok || !data) return null;
     applySessionUsage(sessionId, data as SessionUsage);
     return data as SessionUsage;
-  }).finally(() => inflight.delete(sessionId));
+  }).finally(() => {
+    inflight.delete(sessionId);
+    if (!settled.has(sessionId)) {
+      settled.add(sessionId);
+      bump();
+    }
+  });
   inflight.set(sessionId, p);
   return p;
 }

@@ -363,6 +363,10 @@ class AgentBuilderMixin:
         normalized = (mode or self._DEFAULT_APPROVAL_MODE).strip().lower()
         validate_permission_mode(normalized)
         key = self._sk(session_id, owner)
+        if self._saved_approval_mode(session_id, owner) != normalized:
+            # Each chat keeps its own tier across reloads and gateway restarts;
+            # the sidecar is where the session list reads it back from.
+            self.session_log_for(session_id, owner).set_approval_mode(normalized)
         self._session_approval_modes[key] = normalized
 
         cached_agent = self._cache.get(key)
@@ -381,9 +385,22 @@ class AgentBuilderMixin:
                     turn.resolve_approval(pending.tool_call_id, route, by="mode")
 
     def get_session_approval_mode(self, session_id: str, owner: Optional[str] = None) -> str:
-        return self._session_approval_modes.get(
-            self._sk(session_id, owner), self._DEFAULT_APPROVAL_MODE,
-        )
+        return self._saved_approval_mode(session_id, owner) or self._DEFAULT_APPROVAL_MODE
+
+    def _saved_approval_mode(self, session_id: str, owner: Optional[str] = None) -> Optional[str]:
+        """The tier this chat was set to, or ``None`` if it never was.
+
+        The default is not stored: a chat that never had a tier reports none,
+        so the Web shows the tier its next run will actually be sent with.
+        """
+        key = self._sk(session_id, owner)
+        mode = self._session_approval_modes.get(key)
+        if mode is None:
+            saved = self.session_log_for(session_id, owner).get_approval_mode()
+            if saved not in PERMISSION_MODES:
+                return None
+            mode = self._session_approval_modes[key] = saved
+        return mode
 
     def _grants_for(self, session_id: str, owner: Optional[str] = None) -> SessionGrants:
         key = self._sk(session_id, owner)

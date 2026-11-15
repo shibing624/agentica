@@ -130,6 +130,9 @@ export type Session = {
   userCount?: number;
   sizeBytes?: number;
   hydratedSize?: number;
+  /** This chat's own approval tier (sidecar `approval_mode`). Unset until the
+   *  chat has one; the composer then shows the account default. */
+  approvalMode?: string;
   /** True when earlier turns exist before `msgs` (not loaded yet). */
   hasOlder?: boolean;
   /** Entry cursor passed as `before` when loading the next older page. */
