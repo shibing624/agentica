@@ -104,7 +104,7 @@ OpenAI 与 Anthropic 对工具结果的协议形状完全不同：
 
 Layer 1 绝不淘汰模型还没看过的尾部工具结果，也绝不收缩正在执行的调用参数。`live_tool_round_start` 在定位尾部边界时会先跳过带 `_injected=True` 标记的中途插话消息（`_inject_steering` / `_inject_peer_messages`），防止插话把边界抬高而误伤刚返回的工具结果。
 
-此外，被收缩的超长工具参数叶节点会被替换为 JSON 对象 `{"$evicted": N}`，而不是字符串标记（防止模型把字符串占位符当成正文内容抄进下一次 `write_file` 或 `apply_patch`）。
+Layer 1 不改写任何工具调用参数，只淘汰工具结果。历史参数里的任何占位符（截断前缀、字符串标记或 `{"$evicted": N}`）都会被模型当作写法照抄进下一次 `write_file` / `apply_patch` / `execute`；旧会话日志里残留的 `$evicted` 标记仍由 `get_function_call` 拒绝执行。
 
 ### 3. 水位校准 (`ContextCalibration`)
 

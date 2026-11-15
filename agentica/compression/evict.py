@@ -25,18 +25,23 @@ original output. Re-running is not an equivalent recovery: a non-idempotent
 call (``execute`` reading changing state) returns different evidence, and a
 call whose arguments were dropped cannot be re-run at all.
 
-Tool *results* are not the only bulk in a transcript: a ``write_file`` or
-``apply_patch`` call carries its whole payload in the assistant message's
-arguments, which no amount of result eviction can reach. Those strings are
-replaced with a JSON object ``{"$evicted": N}`` (not a string and not a
-truncated prefix — either form is copied into the next ``write_file`` /
-``execute`` call). The live tool round is
-left intact (in-flight calls and the trailing result batch), matching the
-trailing-result exclusion: that payload is what just executed. The cutoff is
-by message position, not tool name — SDK ``tools=``, CLI ``--tools``, Web
-extra tools, and MCP share the round with builtins. When Layer 1
-cannot get the request under target, the answer is Layer 2
-(``CompressionManager.auto_compact``), not eating the round in progress.
+Tool-call *arguments* are never rewritten. A ``write_file`` / ``apply_patch``
+payload is bulk, but it is also the model's only example of how it calls that
+tool: replacing it with a stand-in — a truncated prefix, a string marker, or
+the ``{"$evicted": N}`` object we last used — taught models to emit the
+stand-in as the payload of their next call (one session: 248 such calls,
+every one refused). Arguments are a fifth of the bytes results are, so
+leaving them costs little; when results alone cannot get the request under
+target, the answer is Layer 2 (``CompressionManager.auto_compact``). Old
+session logs may still carry markers from that pass;
+``upgrade_legacy_omitted_args`` keeps the oldest string form out of a slot
+where it could pass as content, and ``get_function_call`` refuses any call
+that carries one.
+
+The live tool round (in-flight calls and the trailing result batch) is never
+evicted: that is the evidence the model has not read yet. The cutoff is by
+message position, not tool name — SDK ``tools=``, CLI ``--tools``, Web extra
+tools, and MCP share the round with builtins.
 
 **The unit of eviction is a result, not a message**, because the two provider
 shapes disagree about how results are packed:
@@ -60,7 +65,6 @@ from agentica.compression.tool_call_args import (
     is_omitted_tool_arg,
     omitted_tool_args,
     rewrite_omitted_arg_leaves,
-    shrink_tool_arg_leaves,
 )
 from agentica.utils.log import logger
 from agentica.utils.tokens import count_message_tokens, count_tokens
@@ -112,9 +116,6 @@ def evict_threshold_ratio() -> float:
 # the model is working from, and evicting them buys re-reads.
 EVICT_TARGET_RATIO = 0.3
 
-# Head kept from each long string inside tool-call arguments.
-TOOL_CALL_ARG_MAX_CHARS = 150
-
 # Cap on the rendered call arguments inside a placeholder.
 _MAX_CALL_SIGNATURE_CHARS = 120
 
@@ -128,11 +129,10 @@ _TOOL_RESULT_BLOCK = "tool_result"
 class EvictionResult(NamedTuple):
     """What Layer 1 managed to reclaim."""
     tool_results: int = 0
-    tool_call_args: int = 0
 
     @property
     def total(self) -> int:
-        return self.tool_results + self.tool_call_args
+        return self.tool_results
 
 
 def under_pressure(context_tokens: int, context_window: int) -> bool:
@@ -546,35 +546,6 @@ def upgrade_legacy_omitted_args(messages: "List[Message]") -> int:
     return changed
 
 
-def shrink_tool_call_arguments(
-    messages: "List[Message]",
-    *,
-    context_tokens: int,
-    context_window: int,
-    max_string_chars: int = TOOL_CALL_ARG_MAX_CHARS,
-) -> int:
-    """Omit long strings inside older assistant tool-call arguments (in-place).
-
-    A ``write_file`` payload lives in the assistant message, not in a tool
-    result, so eviction cannot reach it. The live tool round is skipped
-    (``live_tool_round_start``). Older turns keep JSON valid. OpenAI stores
-    the payload in ``tool_calls[].function.arguments``; Anthropic also keeps
-    it in ``content`` ``tool_use.input`` — both shrink together.
-    """
-    if not under_pressure(context_tokens, context_window):
-        return 0
-
-    start = live_tool_round_start(messages)
-    shrunk = 0
-    for msg in messages[:start]:
-        if msg.role != "assistant":
-            continue
-        shrunk += _map_assistant_tool_args(
-            msg, lambda value: shrink_tool_arg_leaves(value, max_string_chars),
-        )
-    return shrunk
-
-
 def evict_context(
     messages: "List[Message]",
     *,
@@ -585,16 +556,10 @@ def evict_context(
 ) -> EvictionResult:
     """Run Layer 1: reclaim context without an LLM call.
 
-    Argument shrinking runs first because it is bounded and reaches bulk that
-    eviction cannot; whatever it saves is bulk eviction then does not have to
-    throw away. ``context_tokens`` is the pre-shrink measurement, so eviction
-    aims slightly high — cheap, and it errs toward buying headroom rather than
-    re-triggering next turn.
+    Only tool results are evicted; tool-call arguments stay as the model
+    wrote them (see the module docstring).
     """
     upgrade_legacy_omitted_args(messages)
-    shrunk = shrink_tool_call_arguments(
-        messages, context_tokens=context_tokens, context_window=context_window,
-    )
     evicted = evict_tool_results(
         messages,
         context_tokens=context_tokens,
@@ -602,4 +567,4 @@ def evict_context(
         model_id=model_id,
         recoverable=recoverable,
     )
-    return EvictionResult(tool_results=evicted, tool_call_args=shrunk)
+    return EvictionResult(tool_results=evicted)

@@ -1,5 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Helpers for shrinking tool-call argument JSON without breaking validity."""
+"""The eviction marker for tool-call arguments.
+
+Layer 1 no longer writes it (arguments are never rewritten), but session logs
+from before still carry it, and a model that saw it may emit it. These helpers
+recognise both forms so ``get_function_call`` can refuse such a call.
+"""
 
 import json
 from typing import Any, Optional
@@ -91,32 +96,3 @@ def rewrite_omitted_arg_leaves(value: Any) -> Any:
     if isinstance(value, list):
         return [rewrite_omitted_arg_leaves(item) for item in value]
     return value
-
-
-def shrink_tool_arg_leaves(value: Any, max_string_chars: int) -> Any:
-    """Replace oversize string leaves with ``omitted_tool_arg``, keeping JSON shape."""
-    if isinstance(value, str):
-        n = _legacy_omitted_chars(value)
-        if n is not None:
-            return omitted_tool_arg(n)
-        if len(value) > max_string_chars:
-            return omitted_tool_arg(len(value))
-        return value
-    if isinstance(value, dict):
-        if _is_omitted_object(value):
-            return value
-        return {key: shrink_tool_arg_leaves(item, max_string_chars) for key, item in value.items()}
-    if isinstance(value, list):
-        return [shrink_tool_arg_leaves(item, max_string_chars) for item in value]
-    return value
-
-
-def shrink_tool_call_arguments_json(arguments: str, max_string_chars: int = 200) -> str:
-    """Shrink long string leaves inside tool-call arguments while preserving JSON."""
-    try:
-        parsed = json.loads(arguments)
-    except (TypeError, ValueError):
-        return arguments
-
-    shrunken = shrink_tool_arg_leaves(parsed, max_string_chars)
-    return json.dumps(shrunken, ensure_ascii=False)

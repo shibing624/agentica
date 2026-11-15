@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Layer 1 不再把旧工具调用的参数换成 `{"$evicted": N}` 占位符，只淘汰工具结果**：参数是模型怎么调这个工具的唯一范例，被换成占位符后，模型会照着把占位符当成下一次调用的参数发出来（本机日志统计：Gemini 系列累计 248 次 `apply_patch` / `write_file` / `execute` 的参数就是占位符，全部被拒、白跑一轮；最新一个 memhub 会话里 Gemini 的 16 次 `apply_patch` 失败有 11 次是这个原因）。参数的字节量只有工具结果的约五分之一，留着代价小；只淘汰结果不够时交给 Layer 2 换窗。删除 `shrink_tool_call_arguments`、`shrink_tool_arg_leaves`、`shrink_tool_call_arguments_json`、`TOOL_CALL_ARG_MAX_CHARS` 和 `EvictionResult.tool_call_args`，`compact.evict` 事件去掉 `shrunk` 字段。旧日志里残留的标记仍由 `get_function_call` 拒绝执行，旧字符串标记仍会升级成对象形式（`agentica/compression/evict.py`、`agentica/compression/tool_call_args.py`）。
+
 - **轮次开头触发自动压缩时，召回 / hook 块不再写进用户消息**：自动压缩把本轮问题作为新窗口的尾巴补写到会话日志，此时它仍是发给模型的那份副本，带着 `<memory_recall>`、`<session_recall>`、`UserPromptSubmit` hook 注入的上下文（如 `<relevant-memories>`）。这些块原样落盘后，Web 回放会把它们显示在用户气泡里，`/resume` 也会把过期的召回结果重放一遍。现在 `append_post_compact_messages` 写入前按 `_request_only_blocks` 精确去掉这些块（新增 `Message.durable_content()`，`strip_request_only_blocks` 也改用它），发给模型的请求不受影响（`agentica/memory/session_log.py`、`agentica/model/message.py`、`agentica/runner/persist.py`）。
 
 #### added

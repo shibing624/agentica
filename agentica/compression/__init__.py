@@ -6,7 +6,6 @@
 from agentica.compression.evict import (
     evict_context,
     evict_tool_results,
-    shrink_tool_call_arguments,
     live_tool_round_start,
     carries_tool_results,
     tool_result_blocks,
@@ -67,7 +66,6 @@ __all__ = [
     "reminder_threshold",
     "evict_context",
     "evict_tool_results",
-    "shrink_tool_call_arguments",
     "live_tool_round_start",
     "carries_tool_results",
     "tool_result_blocks",

@@ -178,7 +178,6 @@ class CompressMixin:
                 )
                 logger.debug(
                     f"Layer 1 (evict): {reclaimed.tool_results} tool result(s), "
-                    f"{reclaimed.tool_call_args} tool-call argument(s), "
                     f"freed {tokens_before - raw_tokens} tokens, "
                     f"prefix break at message {break_index} "
                     f"({invalidated_tokens} tokens to re-cache)"
@@ -190,7 +189,6 @@ class CompressMixin:
                             "agent_name": agent_name,
                             "is_main_agent": is_main_agent,
                             "evicted": reclaimed.tool_results,
-                            "shrunk": reclaimed.tool_call_args,
                             "freed_tokens": tokens_before - raw_tokens,
                             "break_index": break_index,
                             "invalidated_tokens": invalidated_tokens,

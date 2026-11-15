@@ -4,7 +4,7 @@
 Layer 1 runs before the next LLM call. The round the model has not seen yet
 (or is still executing) is the assistant that issued the trailing results —
 or a trailing assistant with tool_calls and no results yet. Evicting those
-results or shrinking those arguments is how the agent loop eats its own
+results is how the agent loop eats its own
 evidence: write_file/apply_patch write ``...[truncated]`` to disk, execute
 runs a cut command, grep/glob lose the match set they just produced.
 
@@ -17,7 +17,6 @@ import json
 import pytest
 
 from agentica.compression.evict import evict_context, live_tool_round_start
-from agentica.compression.tool_call_args import omitted_tool_arg
 from agentica.model.message import Message
 
 WINDOW = 10_000
@@ -121,8 +120,8 @@ def test_in_flight_call_arguments_are_not_shrunk(name, args, key):
 
 
 @pytest.mark.parametrize("name,args,key", LIVE_TOOLS)
-def test_older_round_in_the_same_user_turn_may_shrink_args(name, args, key):
-    """Reclaiming older payloads is Layer 1's job. The live round stays whole."""
+def test_older_round_arguments_are_never_rewritten(name, args, key):
+    """Layer 1 evicts the older round's result, not its arguments."""
     msgs, live_payload, old_payload = _conversation(name, args, key)
     old_assistant = 1
     live_assistant = len(msgs) - 2
@@ -130,8 +129,8 @@ def test_older_round_in_the_same_user_turn_may_shrink_args(name, args, key):
     evict_context(msgs, model_id="gpt-4o", **PRESSURE)
 
     assert _arg(msgs, live_assistant, key) == live_payload
-    assert _arg(msgs, old_assistant, key) == omitted_tool_arg(len(old_payload))
-    assert "...[truncated]" not in json.dumps(_arg(msgs, old_assistant, key))
+    assert _arg(msgs, old_assistant, key) == old_payload
+    assert msgs[old_assistant + 1].content.startswith("[Tool result evicted")
 
 
 def test_parallel_live_batch_of_mixed_tools_survives():
@@ -339,7 +338,7 @@ def test_an_ordinary_user_message_still_ends_the_live_round():
 
     evict_context(msgs, model_id="gpt-4o", **PRESSURE)
 
-    assert _arg(msgs, 1, "content") == omitted_tool_arg(len(long))
+    assert _arg(msgs, 1, "content") == long
 
 
 def test_the_todo_reminder_does_not_unprotect_the_batch_it_follows():
