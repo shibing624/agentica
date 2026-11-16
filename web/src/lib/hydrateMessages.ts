@@ -45,22 +45,22 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
     const type = String(e.type || "");
     const explicitTs = rawTsOf(e);
     if (type === "user") {
-      let content = String(e.content || "");
-      if (e.automated === true) {
+      const row = rowOf(e);
+      if (row.automated) {
         closeAssistant();
         const job = e.cron_job as { id?: unknown; name?: unknown } | undefined;
         msgs.push({
           role: "user",
           automated: true,
-          content,
+          content: row.text,
           ts: tsOf(e),
           ...(uuidOf(e) ? { uuid: uuidOf(e) } : {}),
           ...(job && typeof job.id === "string" ? { cronJob: { id: job.id, name: String(job.name || "") } } : {}),
         });
         continue;
       }
-      const pre = splitWindowPreamble(content);
-      if (pre) {
+      let content = row.text;
+      if (row.window) {
         closeAssistant();
         // A new window's preamble is chrome, not something the user said: it
         // becomes the compact card (with the notes it started from), and only
@@ -71,18 +71,18 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
           card = { role: "assistant", content: "", ts: tsOf(e), compact: {} };
           msgs.push(card);
         }
-        Object.assign(card.compact!, { notes: pre.notes, notesPath: pre.notesPath || card.compact!.notesPath || "" });
+        Object.assign(card.compact!, { notes: row.window.notes, notesPath: row.window.notes_path || card.compact!.notesPath || "" });
         // Logs older than the boundary's `trigger`: an idle /compact folds no
         // question behind its preamble; an auto cut keeps the pending one.
-        if (pendingTrigger === "" && !pre.rest) insertCompactCommand(msgs, card);
+        const bare = !row.text.trim();
+        if (pendingTrigger === "" && bare) insertCompactCommand(msgs, card);
         else if (pendingTrigger === "") card.compact!.auto = true;
         pendingTrigger = null;
-        if (!pre.rest) continue;
-        content = pre.rest;
+        if (bare) continue;
         dropShadowedQuestion(msgs, card, splitImageMarkers(content).text);
       }
-      if (isSteerUserEvent(e, content)) {
-        const clean = splitImageMarkers(cleanSteerContent(content)).text;
+      if (row.steer) {
+        const clean = splitImageMarkers(content).text;
         if (!clean) continue;
         if (!turnStartTs && explicitTs) turnStartTs = explicitTs;
         if (explicitTs > turnEndTs) turnEndTs = explicitTs;
@@ -153,23 +153,21 @@ const IMAGE_MARK_RE = /(?:^|\n\n)\[图片: ([0-9a-f]{64}\.(?:png|jpg|gif|webp))\
 export const STEER_GUIDANCE_PREFIX = "[User guidance received while you were working]";
 const FOLDED_STEER_RE = /(?:^|\n\n)\[User guidance received while you were working\]\n([\s\S]*?)(?=(?:\n\n\[User guidance received while you were working\]\n)|$)/g;
 
-export function isSteerUserEvent(e: Record<string, unknown>, content = String(e.content || "")): boolean {
-  if (content.trimStart().startsWith(WINDOW_OPEN)) return false;
-  if (e.steer === true) return true;
-  if (content.startsWith("__RELAYED__")) return true;
-  if (content.startsWith(STEER_GUIDANCE_PREFIX)) return true;
-  return false;
-}
+/** What the gateway decided a user row is (`agentica.memory.log_rows.row_payload`).
+ *  The client draws from it and never parses `content` for these markers. */
+export type RowView = {
+  automated: boolean;
+  steer: boolean;
+  text: string;
+  window: { notes: string; notes_path: string } | null;
+};
 
-export function cleanSteerContent(raw: string): string {
-  let text = raw.trimStart();
-  if (text.startsWith("__RELAYED__")) {
-    text = text.slice("__RELAYED__".length).trimStart();
+function rowOf(e: Record<string, unknown>): RowView {
+  const row = e.row as RowView | undefined;
+  if (!row || typeof row.text !== "string") {
+    throw new Error(`user row ${String(e.uuid || "?")} has no server-side \`row\`; the gateway and web bundle are out of step`);
   }
-  if (text.startsWith(STEER_GUIDANCE_PREFIX)) {
-    text = text.slice(STEER_GUIDANCE_PREFIX.length).replace(/^\n+/, "");
-  }
-  return text.trim();
+  return row;
 }
 
 function splitFoldedSteer(result: string): { toolResult: string; steers: string[] } {
@@ -224,125 +222,6 @@ function dropShadowedQuestion(msgs: ChatMsg[], card: ChatMsg, question: string) 
 }
 
 const WINDOW_OPEN = "<context_window>";
-const WINDOW_CONTINUATION = "New context window started. Continue from session notes and search_session.";
-
-function peelOneWindowLayer(input: string): string {
-  let s = input.trimStart();
-  if (!s.startsWith(WINDOW_OPEN)) return input;
-
-  const cwClose = s.indexOf("</context_window>");
-  if (cwClose < 0) return input;
-  s = s.slice(cwClose + "</context_window>".length).trimStart();
-
-  if (s.startsWith("<session_notes")) {
-    const dsAt = s.indexOf("\n</session_notes>\n\n<dropped_span>\n");
-    const contAt = s.indexOf(`\n</session_notes>\n\n${WINDOW_CONTINUATION}`);
-    const nextCwAt = s.indexOf("\n</session_notes>\n\n<context_window>");
-    let endAt = -1;
-    if (dsAt >= 0) endAt = dsAt + "\n</session_notes>".length;
-    else if (contAt >= 0) endAt = contAt + "\n</session_notes>".length;
-    else if (nextCwAt >= 0) endAt = nextCwAt + "\n</session_notes>".length;
-    else {
-      const lineIdx = s.lastIndexOf("\n</session_notes>");
-      if (lineIdx >= 0) endAt = lineIdx + "\n</session_notes>".length;
-      else {
-        const plain = s.indexOf("</session_notes>");
-        if (plain >= 0) endAt = plain + "</session_notes>".length;
-      }
-    }
-    if (endAt >= 0) s = s.slice(endAt).trimStart();
-  }
-
-  if (s.startsWith("<dropped_span>")) {
-    const contMarker = `\n</dropped_span>\n\n${WINDOW_CONTINUATION}`;
-    const contAt = s.lastIndexOf(contMarker);
-    const nextCwMarker = "\n</dropped_span>\n\n<context_window>";
-    const nextCwAt = s.indexOf(nextCwMarker);
-    if (contAt >= 0) {
-      s = s.slice(contAt + contMarker.length).trimStart();
-    } else if (nextCwAt >= 0) {
-      s = s.slice(nextCwAt + "\n</dropped_span>".length).trimStart();
-    } else {
-      const lineIdx = s.lastIndexOf("\n</dropped_span>");
-      if (lineIdx >= 0) s = s.slice(lineIdx + "\n</dropped_span>".length).trimStart();
-      else {
-        const plain = s.indexOf("</dropped_span>");
-        if (plain >= 0) s = s.slice(plain + "</dropped_span>".length).trimStart();
-      }
-    }
-  }
-
-  if (s.startsWith(WINDOW_CONTINUATION)) {
-    s = s.slice(WINDOW_CONTINUATION.length).trimStart();
-  }
-  return s;
-}
-
-/**
- * Split a new-context-window preamble off a logged user row, the way
- * `agentica.memory.session_search.strip_window_preamble` does: peel every
- * layer, keep what follows. `notes` / `notesPath` come from the outermost
- * (latest) layer's `<session_notes>`. `null` when the row is not a preamble.
- */
-export function splitWindowPreamble(content: string): { notes: string; notesPath: string; rest: string } | null {
-  if (!content.trimStart().startsWith(WINDOW_OPEN)) return null;
-  const m =
-    content.match(/<session_notes(?:\s+path="([^"]*)")?>\n([\s\S]*?)\n<\/session_notes>(?=\n|$)/)
-    || content.match(/<session_notes(?:\s+path="([^"]*)")?>([\s\S]*?)<\/session_notes>/);
-  let rest = content.trimStart();
-  while (rest.startsWith(WINDOW_OPEN)) {
-    const peeled = peelOneWindowLayer(rest);
-    if (peeled === rest) break;
-    rest = peeled;
-  }
-  // Logs written before the fix carry the harness's own remaining-tokens
-  // fragment after the question (it was folded in, then the window rolled).
-  const tail = rest.lastIndexOf(`\n\n${WINDOW_OPEN}`);
-  if (tail >= 0 && rest.endsWith("</context_window>")) rest = rest.slice(0, tail);
-  return { notes: (m?.[2] || "").trim(), notesPath: m?.[1] || "", rest };
-}
-
-export function isPureWindowPreamble(e: Record<string, unknown>): boolean {
-  if (e.type !== "user" || e.automated === true || e.steer === true) return false;
-  const pre = splitWindowPreamble(String(e.content || ""));
-  return Boolean(pre && !pre.rest);
-}
-
-/**
- * A turn page that starts on a ``compact_boundary`` should also keep the
- * unanswered question sitting immediately before it. The boundary re-logs
- * that question behind its preamble; if the cut leaves the original on the
- * previous page, prepending that page shows it a second time above the card.
- * An assistant reply between the question and the boundary means it was
- * answered, so it stays on the previous page.
- */
-export function includeShadowedQuestion(entries: Array<Record<string, unknown>>, start: number): number {
-  if (start <= 0) return start;
-  const boundary = entries[start];
-  if (!boundary || boundary.type !== "compact_boundary") return start;
-  let tail: Record<string, unknown> | undefined;
-  for (let i = start + 1; i < entries.length; i++) {
-    const e = entries[i];
-    if (!e || e.type === "compact_boundary") break;
-    if (e.type === "user" && e.automated !== true && !isSteerUserEvent(e)) {
-      tail = e;
-      break;
-    }
-  }
-  if (!tail) return start;
-  const tailProse = questionProse(tail);
-  if (!tailProse) return start;
-  const prev = entries[start - 1];
-  if (!prev || prev.type !== "user" || prev.automated === true || isSteerUserEvent(prev)) return start;
-  if (questionProse(prev) !== tailProse) return start;
-  return start - 1;
-}
-
-function questionProse(e: Record<string, unknown>): string {
-  const raw = String(e.content || "");
-  const peeled = splitWindowPreamble(raw);
-  return splitImageMarkers(peeled ? peeled.rest : raw).text.trim();
-}
 
 function uuidOf(e: Record<string, unknown>): string {
   return typeof e.uuid === "string" ? e.uuid : "";

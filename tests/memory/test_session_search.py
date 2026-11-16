@@ -6,12 +6,12 @@ import unittest
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
 from agentica.compression.token_budget import WINDOW_CONTINUATION_MARK
+from agentica.memory.log_rows import strip_window_preamble
 from agentica.memory.session_log import SessionLog
 from agentica.memory.session_search import (
     USER_QUESTION_BUDGET_CHARS,
     list_user_questions,
     search_terms,
-    strip_window_preamble,
 )
 
 

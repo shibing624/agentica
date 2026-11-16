@@ -11,7 +11,7 @@ const vite = await createServer({
   server: { middlewareMode: true },
 });
 const {
-  collapseSessionRows, findQueryRanges, searchEventsConversation, searchMsgsConversation, sessionMatches, sessionSourceBadge, sessionSourceTitle,
+  collapseSessionRows, findQueryRanges, searchMsgsConversation, sessionMatches, sessionSourceBadge, sessionSourceTitle,
 } = await vite.ssrLoadModule("/src/lib/sessionRows.ts");
 after(() => vite.close());
 
@@ -55,17 +55,17 @@ test("pinned rows never disappear behind the fold", () => {
 });
 
 test("conversation search matches both user queries and assistant answers with turn numbers", () => {
-  const events = [
-    { type: "user", content: "how do I configure sglang on gpu?" },
-    { type: "assistant", content: "Run tmux on 29.206.1.234." },
-    { type: "user", content: "what about vllm?" },
-    { type: "assistant", content: "Use gpu4 at 28.8.205.124." },
+  const msgs = [
+    { role: "user", content: "how do I configure sglang on gpu?" },
+    { role: "assistant", content: "Run tmux on 29.206.1.234." },
+    { role: "user", content: "what about vllm?" },
+    { role: "assistant", content: "Use gpu4 at 28.8.205.124." },
   ];
-  const qHits = searchEventsConversation(events, "sglang");
+  const qHits = searchMsgsConversation(msgs, 0, "sglang");
   assert.equal(qHits.length, 1);
   assert.equal(qHits[0].turn, 1);
   assert.equal(qHits[0].role, "user");
-  const aHits = searchEventsConversation(events, "28.8.205.124");
+  const aHits = searchMsgsConversation(msgs, 0, "28.8.205.124");
   assert.equal(aHits.length, 1);
   assert.equal(aHits[0].turn, 2);
   assert.equal(aHits[0].role, "assistant");

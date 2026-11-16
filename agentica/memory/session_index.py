@@ -34,11 +34,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from agentica.config.project import projects_root, read_project_file
-from agentica.memory.session_search import (
-    score_content,
-    search_terms,
-    strip_window_preamble,
-)
+from agentica.memory.log_rows import classify_user
+from agentica.memory.session_search import score_content, search_terms
 from agentica.utils.log import logger
 
 INDEX_FILENAME = "session_index.db"
@@ -139,12 +136,10 @@ def _iso_to_epoch(value: Any) -> float:
 
 def human_user_text(entry: Dict[str, Any]) -> str:
     """Prose a person typed in a ``user`` row, or "" if it is not one."""
-    if entry.get("type") != "user" or entry.get("automated") is True:
+    if entry.get("type") != "user":
         return ""
-    content = entry.get("content")
-    if not isinstance(content, str):
-        return ""
-    return strip_window_preamble(content).strip()
+    view = classify_user(entry)
+    return "" if view.automated else view.text.strip()
 
 
 class SessionIndex:

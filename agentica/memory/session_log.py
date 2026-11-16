@@ -38,6 +38,7 @@ from agentica.compression.token_budget import (
     CONTEXT_WINDOW_OPEN,
     WINDOW_CONTINUATION_MARK,
 )
+from agentica.memory.log_rows import classify_user
 from agentica.utils.log import logger
 from agentica.utils.skill_invocation import invocation_label
 from agentica.utils.tokens import count_text_tokens
@@ -1049,10 +1050,7 @@ class SessionLog:
         return entries[:last_boundary_idx] if last_boundary_idx >= 0 else entries
 
     def _conversation_rows(self) -> List[Dict[str, Any]]:
-        from agentica.memory.session_search import (
-            drop_shadowed_by_boundary,
-            strip_window_preamble,
-        )
+        from agentica.memory.session_search import drop_shadowed_by_boundary
 
         # Keep compact_boundary in this pass: it is what tells
         # ``drop_shadowed_by_boundary`` where a preserved tail begins, and the
@@ -1066,12 +1064,7 @@ class SessionLog:
         for entry in drop_shadowed_by_boundary(typed):
             if entry.get("type") == "compact_boundary":
                 continue
-            content = entry.get("content", "")
-            if (
-                isinstance(content, str)
-                and content.lstrip().startswith(CONTEXT_WINDOW_OPEN)
-                and not strip_window_preamble(content).strip()
-            ):
+            if entry.get("type") == "user" and classify_user(entry).is_pure_window:
                 continue
             rows.append(entry)
         return rows
@@ -1115,7 +1108,7 @@ class SessionLog:
         uuid-prefix match is returned so the caller can tell "none" from
         "ambiguous" instead of this layer picking one.
         """
-        from agentica.memory.session_search import _entry_text, strip_window_preamble
+        from agentica.memory.session_search import _prose
 
         original = next(
             (
@@ -1134,7 +1127,7 @@ class SessionLog:
                 "uuid": e["uuid"],
                 "type": "tool" if e["type"] == "tool_audit" else e["type"],
                 "timestamp": e.get("timestamp", ""),
-                "content": strip_window_preamble(_entry_text(e)),
+                "content": _prose(e),
             }
             for e in matched
         ]
@@ -1455,10 +1448,12 @@ class SessionLog:
         return bool(entry_uuid) and any(e.get("uuid") == entry_uuid for e in self._iter_entries())
 
     def first_user_message(self) -> str:
-        """Text of the first ``user`` row, or ``""``."""
+        """What the person asked first (never a preamble, a steer or a job report), or ``""``."""
         for e in self._iter_entries():
-            if e.get("type") == "user" and not e.get("steer") and isinstance(e.get("content"), str):
-                return e["content"].strip()
+            if e.get("type") == "user":
+                view = classify_user(e)
+                if view.starts_turn and view.text.strip():
+                    return view.text.strip()
         return ""
 
     def _derived_count_after(self, since_uuid: str) -> Optional[int]:
@@ -1643,7 +1638,7 @@ class SessionLog:
                 continue
             if entry_type == "compact_boundary":
                 stats["compactions"] += 1
-            elif entry_type == "user" and not entry.get("steer"):
+            elif entry_type == "user" and classify_user(entry).starts_turn:
                 stats["turns"] += 1
             elif entry_type == "assistant":
                 stats["assistant_messages"] += 1
@@ -1873,8 +1868,6 @@ class SessionLog:
         Reads the file once line-by-line so even multi-MB logs stay cheap;
         malformed lines are skipped.
         """
-        from agentica.memory.session_search import strip_window_preamble
-
         first_user = ""
         cron_job_name = ""
         user_count = 0
@@ -1891,20 +1884,18 @@ class SessionLog:
                         continue
                     if entry.get("type") != "user":
                         continue
-                    if entry.get("steer") is True:
+                    view = classify_user(entry)
+                    if view.steer:
                         continue
                     # Another agent's message or a job report: not a request
                     # the person made, so not what the picker should show.
-                    if entry.get("automated") is True:
+                    if view.automated:
                         if not first_user and not cron_job_name:
                             cj = entry.get("cron_job")
                             if isinstance(cj, dict) and isinstance(cj.get("name"), str) and cj["name"].strip():
                                 cron_job_name = cj["name"].strip()[:max_chars]
                         continue
-                    content = entry.get("content") or ""
-                    if not isinstance(content, str):
-                        continue
-                    content = strip_window_preamble(content)
+                    content = view.text
                     if not content.strip():
                         continue
                     user_count += 1
@@ -2558,20 +2549,21 @@ class SessionLog:
             return []
 
         user_msgs = []
-        for line in self.path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
+        for entry in self._conversation_rows():
+            if entry.get("type") != "user":
                 continue
-            try:
-                entry = json.loads(line)
-                if entry.get("type") == "user" and not entry.get("steer"):
-                    content = entry.get("content", "")
-                    user_msgs.append({
-                        "uuid": entry.get("uuid", ""),
-                        "content": content[:100] + ("..." if len(content) > 100 else ""),
-                        "timestamp": entry.get("timestamp", ""),
-                    })
-            except json.JSONDecodeError:
+            view = classify_user(entry)
+            # A fork point is a position in the transcript, so a report or peer
+            # message counts; a steer joins the turn before it and bare window
+            # chrome is nothing anyone said.
+            if not view.opens_round:
                 continue
+            content = view.text
+            user_msgs.append({
+                "uuid": entry.get("uuid", ""),
+                "content": content[:100] + ("..." if len(content) > 100 else ""),
+                "timestamp": entry.get("timestamp", ""),
+            })
 
         # Most recent first, limited
         return list(reversed(user_msgs[-limit:]))

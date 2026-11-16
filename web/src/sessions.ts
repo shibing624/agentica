@@ -3,14 +3,14 @@ import { loadCronJobs } from "./data";
 import { getStrings } from "./i18n";
 import { uid, lastQueryTs } from "./lib/format";
 import {
-  eventsToChatMsgs, includeShadowedQuestion, isPureWindowPreamble, isSteerUserEvent, mergeClientSteers,
+  eventsToChatMsgs, mergeClientSteers,
   rememberSteersFromMsgs,
 } from "./lib/hydrateMessages";
 import { emptyChatIds } from "./lib/sessionDrafts";
 import { shouldApplyDisplayTitle } from "./lib/sessionTitle";
 import { messageFileCandidates } from "./lib/messageFiles";
 import { cachedExisting, statWorkspaceFilesBatched } from "./lib/workspaceStat";
-import { searchEventsConversation, searchMsgsConversation, type SessionContentHit } from "./lib/sessionRows";
+import { searchMsgsConversation, type SessionContentHit } from "./lib/sessionRows";
 import { normalizeApprovalMode, resolveChatTier } from "./lib/approvalMode";
 import {
   askConfirm, bump, getState, isStreamResuming, projectIdForDir, pushPrefs, readLastSessionId, readSessionCache,
@@ -316,87 +316,6 @@ function countUserTurns(msgs: Session["msgs"]): number {
   return n;
 }
 
-const CHAT_ENTRY_TYPES = new Set(["user", "assistant", "tool", "tool_audit", "compact_boundary"]);
-
-/** Client-side turn-aligned tail slice when talking to a gateway process started
- *  before ``/trace/events?turns=`` existed (which returns ``offset=0, limit=200``
- *  from the head of the log with no ``has_more`` field). */
-function sliceTurnPageClient(all: any[], turns: number, before?: number): api.TraceEventsPage {
-  const chatEntries = all.filter((e) => e && typeof e === "object" && CHAT_ENTRY_TYPES.has(String(e.type || "")));
-  const total = chatEntries.length;
-  const end = before != null ? Math.min(total, Math.max(0, before)) : total;
-  const turnStarts: number[] = [];
-  for (let i = 0; i < end; i++) {
-    const e = chatEntries[i];
-    if (e.type === "user" && !e.automated && !isSteerUserEvent(e) && !isPureWindowPreamble(e)) {
-      turnStarts.push(i);
-    }
-  }
-  let start = 0;
-  let olderTurns = 0;
-  if (turnStarts.length > turns) {
-    start = turnStarts[turnStarts.length - turns];
-    olderTurns = turnStarts.length - turns;
-    while (
-      start > 0
-      && (chatEntries[start - 1]?.type === "compact_boundary" || isPureWindowPreamble(chatEntries[start - 1]))
-    ) {
-      start -= 1;
-    }
-    const attached = includeShadowedQuestion(chatEntries, start);
-    if (attached < start) {
-      if (turnStarts.includes(attached)) olderTurns -= 1;
-      start = attached;
-    }
-  }
-  return {
-    session_id: "",
-    offset: start,
-    limit: end - start,
-    total,
-    events: chatEntries.slice(start, end),
-    has_more: start > 0,
-    next_before: start,
-    older_turns: olderTurns,
-  };
-}
-
-async function fetchAllTraceEvents(id: string, firstPage?: api.TraceEventsPage): Promise<any[] | null> {
-  const all: any[] = [];
-  let offset = 0;
-  const limit = 1000;
-  if (firstPage && Array.isArray(firstPage.events) && firstPage.offset === 0) {
-    all.push(...firstPage.events);
-    const total = typeof firstPage.total === "number" ? firstPage.total : all.length;
-    if (all.length >= total) return all;
-    offset = all.length;
-  }
-  for (;;) {
-    const { ok, data } = await api.fetchTraceEvents(id, offset, limit);
-    if (!ok || !data?.events) return offset === 0 ? null : all;
-    all.push(...data.events);
-    const total = typeof data.total === "number" ? data.total : all.length;
-    if (all.length >= total || data.events.length < limit) return all;
-    offset += data.events.length;
-  }
-}
-
-async function fetchTurnPageCompat(
-  id: string,
-  turns: number,
-  before?: number,
-  includeTurn?: number,
-): Promise<{ ok: boolean; data?: api.TraceEventsPage | null }> {
-  const res = await api.fetchTraceTurnPage(id, turns, before, includeTurn);
-  if (!res.ok || !res.data?.events) return res;
-  if (typeof res.data.has_more === "boolean") return res;
-  // Running gateway predates `?turns=`: it returned the first 200 raw rows from
-  // offset 0 (only round 1). Read the full log and slice the tail turns here.
-  const all = await fetchAllTraceEvents(id, before == null ? res.data : undefined);
-  if (!all) return { ok: false };
-  return { ok: true, data: { ...sliceTurnPageClient(all, turns, before), session_id: id } };
-}
-
 const FILE_CARD_PREFETCH_MS = 600;
 
 async function prefetchFileCards(msgs: Session["msgs"], workspace: string) {
@@ -424,7 +343,7 @@ export async function hydrateSession(id: string, force = false, allowResuming = 
   const turns = existing && existing.hasOlder === false
     ? 200
     : Math.max(CHAT_PAGE_TURNS, countUserTurns(existing?.msgs || []));
-  const { ok, data } = await fetchTurnPageCompat(id, turns);
+  const { ok, data } = await api.fetchTraceTurnPage(id, turns);
   if (!ok || !data?.events || hydrateGenerations[id] !== generation) return;
   const sess = getState().sessions[id];
   if (!sess || sessionIsLive(id, allowResuming)) return;
@@ -472,7 +391,7 @@ export async function loadOlderMessages(id: string, includeTurn?: number): Promi
   const generation = hydrateGenerations[id] || 0;
   sess.loadingOlder = true;
   bump();
-  const { ok, data } = await fetchTurnPageCompat(id, CHAT_PAGE_TURNS, before, includeTurn);
+  const { ok, data } = await api.fetchTraceTurnPage(id, CHAT_PAGE_TURNS, before, includeTurn);
   const cur = getState().sessions[id];
   if (!cur) return false;
   cur.loadingOlder = false;
@@ -528,7 +447,7 @@ async function msgUuid(id: string, idx: number): Promise<string | undefined> {
   if (cur?.uuid) return cur.uuid;
   if (!sess) return undefined;
   const fromEnd = sess.msgs.length - idx;
-  const { ok, data } = await fetchTurnPageCompat(id, Math.max(1, CHAT_PAGE_TURNS));
+  const { ok, data } = await api.fetchTraceTurnPage(id, Math.max(1, CHAT_PAGE_TURNS));
   if (!ok || !data?.events) return undefined;
   const tail = eventsToChatMsgs(data.events);
   return tail[tail.length - fromEnd]?.uuid;
@@ -807,15 +726,12 @@ export function deleteSession(id: string) {
   });
 }
 
-const rawEventsCache = new Map<string, { size: number; events: any[] }>();
-
 /** Matches returned for the session being read (the rest return a handful). */
 const FOCUS_SESSION_HITS = 100;
 
 /**
  * Search user queries and assistant answers across all visible sessions.
- * Uses `/api/sessions/search` when available, and falls back to client-side
- * event scanning if the running gateway process predates that endpoint.
+ * The gateway searches the logs; sessions still in memory are merged in below.
  */
 export async function searchAllSessionsContent(
   query: string,
@@ -840,37 +756,6 @@ export async function searchAllSessionsContent(
     Object.assign(out, data.results);
     const full = focused?.ok ? focused.data?.results?.[focusSessionId!] : undefined;
     if (full?.length) out[focusSessionId!] = full;
-  } else {
-    // Client-side fallback when the gateway process has not been restarted yet.
-    const entries = Object.entries(st.sessions).filter(([, s]) => !s.archived);
-    const queue = [...entries];
-    const workers = Array.from({ length: Math.min(4, queue.length) }, async () => {
-      while (queue.length && !signal?.aborted) {
-        const item = queue.shift();
-        if (!item) break;
-        const [id, sess] = item;
-        if (!sess.sizeBytes && sess.msgs.length) {
-          const hits = searchMsgsConversation(sess.msgs, sess.olderTurns || 0, q);
-          if (hits.length) out[id] = hits;
-          continue;
-        }
-        if (!sess.sizeBytes) continue;
-        let cached = rawEventsCache.get(id);
-        if (!cached || cached.size !== sess.sizeBytes) {
-          const events = await fetchAllTraceEvents(id);
-          if (signal?.aborted) return;
-          if (events) {
-            cached = { size: sess.sizeBytes, events };
-            rawEventsCache.set(id, cached);
-          }
-        }
-        if (cached?.events) {
-          const hits = searchEventsConversation(cached.events, q);
-          if (hits.length) out[id] = hits;
-        }
-      }
-    });
-    await Promise.all(workers);
   }
   // Merge any in-memory live messages that haven't been flushed or hydrated yet.
   for (const [id, sess] of Object.entries(getState().sessions)) {
