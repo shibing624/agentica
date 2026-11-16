@@ -535,7 +535,7 @@ from agentica.agent.config import ToolConfig
 
 agent = Agent(
     tool_config=ToolConfig(
-        enable_evict=True,           # Layer 1, default on
+        enable_evict=True,           # Layer 1：到换窗线时先修剪旧工具结果，默认开
         enable_auto_compact=True,    # Layer 2 空窗换窗，默认开；有 session log 时先重写 notes
         compression_manager=CompressionManager(
             compact_token_limit=50000,
