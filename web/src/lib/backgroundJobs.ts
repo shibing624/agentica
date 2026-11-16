@@ -27,6 +27,30 @@ export function visibleJobBadgeCount(liveCount: number, settledCount: number): n
   return liveCount > 0 ? liveCount : settledCount;
 }
 
+/** When the latest request a person wrote began. Automated turns (a job's own
+ *  report, another session's message) and mid-run steers are not new requests,
+ *  so a job's report arriving does not start a fresh scope. */
+export function currentRequestStartMs(
+  msgs: ReadonlyArray<{ role: string; ts?: number; automated?: boolean; steer?: boolean }>,
+): number | undefined {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (m.role === "user" && !m.automated && !m.steer) return m.ts;
+  }
+  return undefined;
+}
+
+/** Finished jobs belong to the request that started them: once the next request
+ *  begins, they leave the header. Running jobs are never dropped, whichever
+ *  request started them, so they stay visible and stoppable. */
+export function settledInRequest<T extends { started_at_ms: number }>(
+  settled: T[],
+  requestStartMs: number | undefined,
+): T[] {
+  if (requestStartMs === undefined) return settled;
+  return settled.filter((j) => j.started_at_ms >= requestStartMs);
+}
+
 const BG_START_RE = /^Started background command #(\d+)\s+\(PID\s+(\d+),\s*id:\s*([A-Za-z0-9_-]+)\)\.(?:\s*\nLog:\s*(.+))?/m;
 
 export type ParsedBackgroundStart = {

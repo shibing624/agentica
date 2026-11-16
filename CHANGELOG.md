@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **换过窗口的会话重启后不再按整段原始记录重放（Web 输入框用量变 100%）**：会话日志在恢复时会核对最近一次压缩边界记录的 lineage（会话 + 目录 + 分支 + 模型），不一致就丢弃边界、从第一轮起重放整段原始记录。这条规则本是为「模型写的摘要换了模型后不可信」设计的，但现在的换窗边界没有摘要，边界之后的内容就是当前窗口本身。于是只要压缩之后切过模型、换过分支或绑定过另一个目录，重启服务后整个会话就按压缩前的全部记录重建（本机一个会话实测 756K token 对 54K），用量环直接顶满，下一次请求也被迫重新压缩。现在只有带摘要的边界才做 lineage 校验，无摘要的换窗边界一律信任（`agentica/memory/session_log.py`）。
+
+- **Web / Desktop 右上角的后台任务不再把上一轮已结束的任务挂到新一轮**：已结束的任务只归属于启动它的那次请求，下一条用户请求开始后就从徽标和列表里消失；仍在运行的任务不受影响，始终可见、可停止。后台任务完成后自动开的回报轮和中途插话都不算新请求（`web/src/lib/backgroundJobs.ts`、`web/src/components/BackgroundJobs.tsx`）。
+
 - **带召回的那一轮之后，下一次请求不再从这条消息起整段重写缓存**：召回 / `UserPromptSubmit` hook / 文件变更提示只拼在发出去的那份用户消息上，写进历史的却是去掉这些块的版本，于是下一轮请求在这条消息处和上一次请求不再一致，后面整段历史都要重新写缓存。人类轮次通常隔了好几分钟、缓存本来就过期，看不出来；后台任务完成后马上开的自动回报轮就很明显（本机日志：每次回报轮只命中 tools + system 约 2.9 万 token，30 多万 token 全部重写，缓存命中 7%–8%）。现在历史保存发出去的原字节，块的原文记在 `_request_only_blocks`，需要「用户原话」的地方（`/history`、`/retry`、命令审查器、换窗笔记、会话日志的 `content`）统一用 `Message.durable_content()`。会话日志另存 `wire_content` 和 `request_only_blocks`，恢复会话时按发出的字节重放；压缩补写的尾部问题同样处理。删除 `strip_request_only_blocks`（`agentica/agent/prompts.py`、`agentica/memory/session_log.py`、`agentica/memory/working.py`、`agentica/runner/persist.py`）。
 
 - **`wait` 拿到结果后，该后台任务不再触发回报轮**：`wait` 返回已结束任务的退出码和输出时，没有把会话的任务记录标为已投递，于是会话空闲后网关 / CLI 的 sweep 仍会开一个自动回报轮，模型只能回一句「这条结果上一条已经用过了」，还要为这一轮重读整段上下文。现在 `wait` 看到任务结束就调用 `mark_job_delivered`（`delivery_owner` 为 `wait:pid:...`）；watcher 线程也改为先写完成记录、再置 `finished`，避免完成记录覆盖 `wait` 刚写的标记。没被 `wait` 过的任务仍照常回报（`agentica/tools/builtin/execute_tool.py`、`agentica/tools/background_processes.py`）。

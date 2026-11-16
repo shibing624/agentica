@@ -7,7 +7,9 @@ import * as api from "../api";
 import type { BackgroundJob } from "../api";
 import { useStrings } from "../i18n";
 import { IconChevronDown, IconCopy, IconExternal, IconLayers, IconSpinner, IconStop } from "../icons";
-import { isLiveJob, jobDuration, orderJobs, visibleJobBadgeCount } from "../lib/backgroundJobs";
+import {
+  currentRequestStartMs, isLiveJob, jobDuration, orderJobs, settledInRequest, visibleJobBadgeCount,
+} from "../lib/backgroundJobs";
 import { normalizeMentionedPath } from "../lib/filePath";
 import { formatToolDisplay } from "../lib/toolDisplay";
 import { bump, getState, showToast, useAppState } from "../store";
@@ -108,7 +110,11 @@ export function BackgroundJobs({
 
   const rows = useMemo(() => orderJobs(jobs), [jobs]);
   const live = useMemo(() => rows.filter(isLiveJob), [rows]);
-  const settled = useMemo(() => rows.filter((j) => !isLiveJob(j) && !cleared.has(j.id)), [rows, cleared]);
+  const requestStart = currentRequestStartMs(sess?.msgs ?? []);
+  const settled = useMemo(
+    () => settledInRequest(rows.filter((j) => !isLiveJob(j) && !cleared.has(j.id)), requestStart),
+    [rows, cleared, requestStart],
+  );
   const hasLive = live.length > 0;
   const visibleCount = live.length + settled.length;
 

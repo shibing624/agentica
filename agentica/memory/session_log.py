@@ -1189,6 +1189,19 @@ class SessionLog:
             return True
         return key == self.lineage_key(model)
 
+    def _stale_summary(self, boundary: Optional[Dict[str, Any]], model: Optional[str]) -> bool:
+        """True when the boundary's summary was written under another lineage.
+
+        Only a boundary that *carries* a summary has a projection to distrust.
+        A new-window cut has none: the entries after it are the window itself,
+        so a model or branch change after the cut leaves them valid. Treating
+        that as a mismatch replays the whole pre-cut transcript, which the cut
+        exists to drop, and a rebuilt session lands far over its window.
+        """
+        if not boundary or not boundary.get("summary"):
+            return False
+        return not self._projection_valid(boundary, model)
+
     def load(self, resume_at: Optional[str] = None, model: Optional[str] = None) -> List[Dict[str, Any]]:
         """Replay JSONL log for session resume.
 
@@ -1197,9 +1210,11 @@ class SessionLog:
                        (inclusive). Mirrors CC's --resume-session-at <uuid>.
                        Messages after this UUID are discarded (forms a fork point).
             model: Optional model id that will consume the transcript. When the
-                       last compact boundary was written under a different
-                       lineage (model/branch/cwd/session), the stale summary is
-                       skipped and the full canonical transcript replays.
+                       last compact boundary's summary was written under a
+                       different lineage (model/branch/cwd/session), the stale
+                       summary is skipped and the full canonical transcript
+                       replays. A boundary without a summary (a new-window
+                       cut) is always trusted.
 
         Returns:
             List of message dicts with 'role' and 'content' keys.
@@ -1256,7 +1271,7 @@ class SessionLog:
         if entries:
             self._last_uuid = entries[-1].get("uuid")
 
-        if not self._projection_valid(last_boundary_entry, model):
+        if self._stale_summary(last_boundary_entry, model):
             logger.warning(
                 "Compact boundary lineage mismatch for session %s — replaying "
                 "canonical transcript instead of the stale summary",
@@ -1288,7 +1303,7 @@ class SessionLog:
                     except json.JSONDecodeError:
                         pass
 
-        if not self._projection_valid(last_boundary_entry, model):
+        if self._stale_summary(last_boundary_entry, model):
             logger.warning(
                 "Compact boundary lineage mismatch for session %s — replaying "
                 "canonical transcript instead of the stale summary",

@@ -1260,6 +1260,21 @@ class TestProjectionLineage:
         assert "CANONICAL-A1" in joined
         assert "TAIL-Q2" in joined
 
+    def test_window_cut_survives_model_switch(self, tmp_path):
+        """A new-window cut has no summary to distrust: after a model switch the
+        rebuilt session must still start at the cut, not at turn one."""
+        base = str(tmp_path)
+        log = SessionLog("s-lin", base_dir=base)
+        log.append("user", "CANONICAL-Q1")
+        log.append("assistant", "CANONICAL-A1")
+        log.append_compact_boundary("", model="model-a")
+        log.append("user", "TAIL-Q2")
+        log.append("assistant", "TAIL-A2")
+        joined = self._contents(self._reload(base, model="model-b"))
+        assert "TAIL-Q2" in joined
+        assert "CANONICAL-Q1" not in joined, "pre-cut transcript replayed after a model switch"
+        assert self._contents(self._reload(base, model="model-a")) == joined
+
     def test_resume_without_model_keeps_legacy_behavior(self, tmp_path):
         base = str(tmp_path)
         self._write_session(base)
