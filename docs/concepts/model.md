@@ -125,7 +125,7 @@ Model 层集成了多项运行时安全机制：
 | **Cost Budget** | 通过 `CostTracker` 追踪成本，超预算自动停止 |
 | **Max Tokens Recovery** | 输出被截断时自动重试（最多 3 次） |
 | **API 重试** | 可重试错误（429, 503, timeout 等）指数退避重试（最多 3 次） |
-| **Context 压缩** | Layer 1 免费淘汰旧 tool result（80%→50%，水位按 provider 实测校准）；接近窗口上限时 Layer 2 空窗换窗，有 session log 的自动换窗先用主模型重写 notes；API 拒收时 reactive compact 不重写 notes |
+| **Context 压缩** | 只有一条换窗线（`compact_token_limit`，未设时取窗口 95%，水位按 provider 实测校准），线以下不改历史；到线时 Layer 1 先把旧 tool result 修剪为头尾，能降到工作窗口 50% 以下才应用，否则 Layer 2 空窗换窗，有 session log 的自动换窗先用主模型重写 notes；API 拒收时 reactive compact 不重写 notes |
 
 当 Death Spiral / Max Turns / Cost Budget 任一安全检查中断循环时，Runner **不会**把英文错误文本拼进回复内容，而是写入 `RunResponse` 的结构化字段，下游据此分支处理，无需正则剥离：
 

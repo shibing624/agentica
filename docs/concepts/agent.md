@@ -388,7 +388,7 @@ result = await agent.run("""
 
 **DeepAgent 默认开启**：
 - `enable_agentic_prompt=True`（Soul + Tools Guide + Heartbeat）
-- 两层上下文压缩（淘汰 → 空窗换窗），旧轮次用 `search_session` 从 JSONL 取回，见 [Compression](../advanced/compression.md)
+- 单触发点上下文压缩（到换窗线时先修剪旧工具结果头尾，不够再空窗换窗），旧轮次用 `search_session` 从 JSONL 取回，见 [Compression](../advanced/compression.md)
 - Workspace 长期记忆
 - Session Log 会话持久化
 
