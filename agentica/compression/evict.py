@@ -85,9 +85,16 @@ IRREDUCIBLE_PROMPT_RATIO = 0.9
 
 
 def trailing_user_turn_start(messages: "List[Message]") -> int:
-    """Index of the last real user message (not an Anthropic tool_result pack)."""
+    """Index of the last real user message (not an Anthropic tool_result pack).
+
+    A mid-turn injection (todo reminder, steering, peer message) is a user
+    message too, but it belongs to the turn it landed in, not a new one. Read
+    as the turn's start it left the question and the tool round before it in
+    the dropped span, and the new window opened on the reminder alone.
+    """
     for i in range(len(messages) - 1, -1, -1):
-        if messages[i].role == "user" and not carries_tool_results(messages[i]):
+        m = messages[i]
+        if m.role == "user" and not m._injected and not carries_tool_results(m):
             return i
     return len(messages)
 

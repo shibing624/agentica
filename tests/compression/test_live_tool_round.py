@@ -16,7 +16,7 @@ import json
 
 import pytest
 
-from agentica.compression.evict import live_tool_round_start, prune_tool_results
+from agentica.compression.evict import live_tool_round_start, prune_tool_results, trailing_user_turn_start
 from agentica.model.message import Message
 
 # Unconditional: these tests pin *what* may be pruned, not whether it pays.
@@ -367,3 +367,23 @@ def test_the_todo_reminder_does_not_unprotect_the_batch_it_follows():
 
     assert _arg(msgs, 1, "content") == long
     assert live_tool.content == live_result
+
+
+def test_a_mid_turn_injection_is_not_where_the_turn_starts():
+    """A compaction at the line keeps the trailing turn. The reminder, a steer
+    and a peer message are user messages inside that turn: taken as its start,
+    the question and the tool round above them were dropped from the window."""
+    for tag in ("[Todo Reminder] ...", "[User guidance received while you were working]\nx"):
+        injected = Message(role="user", content=tag)
+        injected._injected = True
+        msgs = [
+            Message(role="system", content="sys"),
+            Message(role="user", content="earlier"),
+            Message(role="assistant", content="answer"),
+            Message(role="user", content="do the work"),
+            Message(role="assistant", content="working"),
+            injected,
+        ]
+        assert trailing_user_turn_start(msgs) == 3, tag
+    # Only injections: no real turn to keep.
+    assert trailing_user_turn_start([injected]) == 1

@@ -392,6 +392,53 @@ class TestAutoCompactWritesNotes(unittest.TestCase):
             self.assertTrue(tail["content"].startswith("<context_window>"))
             self.assertTrue(tail["content"].endswith("</dropped_span>\n\nhi"))
 
+    def test_logged_tail_drops_runtime_notices(self):
+        """The todo reminder is the runtime talking to the model, not the user.
+
+        A compaction that fires right after the tool round that produced it
+        carries it in the preserved tail; written to the log it came back as a
+        user bubble in Web and /resume. The real hook builds the reminder here,
+        so the mark under test is the one production sets.
+        """
+        import asyncio
+        import json
+
+        from agentica.agent import Agent
+        from agentica.agent.config import PromptConfig
+        from agentica.model.openai import OpenAIChat
+        from agentica.tools.builtin import BuiltinTodoTool
+
+        agent_for_hook = Agent(
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
+            tools=[BuiltinTodoTool()],
+            prompt_config=PromptConfig(todo_reminder_interval=1),
+        )
+        agent_for_hook.update_model()
+        agent_for_hook.todos = [{"content": "Task A", "status": "in_progress"}]
+        hook = agent_for_hook._build_post_tool_hook()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            slog = SessionLog("notes-notice", base_dir=tmp)
+            cm = CompressionManager()
+            agent = type("A", (), {"_session_log": slog})()
+            model = type("M", (), {"id": "gpt-4o", "context_window": 128_000})()
+            model._agent_ref = lambda: agent
+            msgs = [
+                Message(role="system", content="sys"),
+                Message(role="user", content="earlier question"),
+                Message(role="assistant", content="earlier answer"),
+                Message(role="user", content="do the work"),
+                Message(role="assistant", content="working"),
+            ]
+            asyncio.run(hook(msgs, []))
+            self.assertIn("[Todo Reminder]", msgs[-1].content)
+            asyncio.run(cm.auto_compact(msgs, model=model, force=True))
+
+            rows = [json.loads(line) for line in Path(slog.path).read_text(encoding="utf-8").splitlines()]
+            logged = " ".join(str(r.get("content", "")) for r in rows if r.get("type") in ("user", "assistant", "tool"))
+            self.assertNotIn("Todo Reminder", logged)
+            self.assertIn("do the work", logged)
+
     def test_existing_notes_inject_both_session_notes_and_dropped_span(self):
         import asyncio
 

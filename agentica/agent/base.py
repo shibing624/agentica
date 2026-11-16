@@ -1706,6 +1706,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             if note:
                 notice = Message(role="user", content=note)
                 notice._injected = True
+                notice._runtime_notice = True
                 messages.append(notice)
                 logger.debug("Injected external file-change note")
             if todo_hook is not None:
@@ -1802,6 +1803,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             # results of the tools that just ran.
             reminder = Message(role="user", content=reminder_content)
             reminder._injected = True
+            reminder._runtime_notice = True
             messages.append(reminder)
             logger.debug(f"Injected todo reminder ({len(todos)} items, {turns_since_write} turns since write)")
 

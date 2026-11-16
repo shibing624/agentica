@@ -138,6 +138,12 @@ class Message(BaseModel):
     # evidence, so ``live_tool_round_start`` must look past it rather than treat
     # it as the start of a fresh history.
     _injected: bool = False
+    # A note the runtime wrote for the model (the todo reminder, an external
+    # file-change note): never anything a person typed and not part of the
+    # conversation. It rides the live request, and stays out of the session log
+    # — and so out of every transcript rebuilt from it (Web, /resume) — even
+    # when compaction carries it in the window's preserved tail.
+    _runtime_notice: bool = False
     _steered_items: List[Dict[str, Any]] = []
 
     # Exact blocks the prompt builder prepended to this request copy of a user

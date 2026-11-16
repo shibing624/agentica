@@ -655,7 +655,9 @@ class SessionLog:
         passes the *preserved tail* (never the summary turn, which would then
         appear twice); without it, ``/compact`` followed by ``/fork`` or
         ``/resume`` keeps the summary and drops the pending question.
-        System messages are skipped — they are rebuilt when the Agent is created.
+        System messages are skipped — they are rebuilt when the Agent is created —
+        and so are runtime notices (todo reminder, file-change note): the tail
+        is the conversation, and those were never part of it.
         This runs before the request goes out, so the trailing user message is
         still the request copy: it is written without its request-only blocks
         (recall, hook context), which ``load()`` must not replay.
@@ -663,6 +665,8 @@ class SessionLog:
         written = 0
         for msg in messages:
             if msg.role not in ("user", "assistant", "tool"):
+                continue
+            if msg._runtime_notice:
                 continue
             meta: Dict[str, Any] = {}
             if msg.tool_call_id:
