@@ -22,6 +22,7 @@ import uuid
 import dataclasses
 from dataclasses import dataclass
 from collections import OrderedDict
+from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -35,6 +36,8 @@ from datetime import datetime
 
 from agentica.subagents.handoff import default_handoff_mapper
 from agentica.run.response import AgentCancelledError
+from agentica.compression.tool_result_storage import get_tool_result_path
+from agentica.security.redact import redact_sensitive_text
 from agentica.tools.base import Function, ModelTool, Tool
 from agentica.tools.safety import is_read_only_command
 from agentica.utils.log import logger
@@ -171,6 +174,10 @@ class SubagentRun:
     # Token usage statistics
     token_usage: Optional[Dict[str, int]] = None
 
+    # Recoverable transcript locator for this child session.
+    child_session_id: Optional[str] = None
+    transcript_path: Optional[str] = None
+
 
 class SubagentRegistry:
     """
@@ -272,6 +279,35 @@ class SubagentRegistry:
             logger.debug(f"Cleaned up {len(to_remove)} old subagent runs")
 
         return len(to_remove)
+
+    @staticmethod
+    def _child_session_id(parent_session_id: Optional[str], run_id: str) -> str:
+        prefix = parent_session_id or "subagent"
+        return f"{prefix}.subagent.{run_id}"
+
+    @staticmethod
+    def _child_session_base_dir(parent_agent: "Agent") -> Optional[str]:
+        parent_log = parent_agent._session_log
+        if parent_log is None:
+            return None
+        return str(parent_log.base_dir / "subagents")
+
+    @staticmethod
+    def _write_child_tool_output(
+        *,
+        run_id: str,
+        child_session_id: str,
+        tool_call_id: Optional[str],
+        tool_name: str,
+        content: str,
+        cwd: Optional[str],
+        user_id: Optional[str],
+    ) -> str:
+        file_id = f"{run_id}-{tool_call_id or tool_name}"
+        path = Path(get_tool_result_path(file_id, cwd=cwd, session_id=child_session_id, user_id=user_id))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(redact_sensitive_text(content), encoding="utf-8")
+        return str(path)
 
     # ================================================================
     # Execution methods (spawn isolated subagents and run to completion)
@@ -488,6 +524,7 @@ class SubagentRegistry:
         child: "Agent",
         task: str,
         run_id: Optional[str] = None,
+        child_session_id: str = "subagent",
         output_sink: Optional[Dict[str, Any]] = None,
         max_turns: Optional[int] = None,
         tool_call_limit: Optional[int] = None,
@@ -541,7 +578,16 @@ class SubagentRegistry:
                 return
             output_sink["content"] = final_content
             output_sink["tool_calls_summary"] = [
-                {"name": tc["name"], "info": tc.get("info", "")}
+                {
+                    k: v
+                    for k, v in {
+                        "name": tc["name"],
+                        "info": tc.get("info", ""),
+                        "input": tc.get("input", ""),
+                        "output_path": tc.get("output_path"),
+                    }.items()
+                    if v
+                }
                 for tc in tool_calls_log
             ]
 
@@ -594,6 +640,16 @@ class SubagentRegistry:
                             idx = log_index_by_id.get(call_id)
                             if idx is not None:
                                 tool_calls_log[idx]["info"] = brief
+                                if isinstance(content, str) and content:
+                                    tool_calls_log[idx]["output_path"] = self._write_child_tool_output(
+                                        run_id=run_id or "subagent",
+                                        child_session_id=child_session_id,
+                                        tool_call_id=call_id,
+                                        tool_name=tool_name,
+                                        content=content,
+                                        cwd=parent_agent.work_dir,
+                                        user_id=parent_agent.user_id,
+                                    )
                                 _mirror_to_sink()
                         if cb is not None:
                             elapsed_t = (tool_info.get("metrics") or {}).get("time")
@@ -626,6 +682,7 @@ class SubagentRegistry:
                     "name": tc["name"],
                     "info": tc.get("info", ""),
                     "input": tc.get("input", ""),
+                    "output_path": tc.get("output_path", ""),
                 }
                 for tc in tool_calls_log
             ],
@@ -757,9 +814,12 @@ class SubagentRegistry:
                 name = tool_call.get("name", "tool")
                 input_text = tool_call.get("input", "")
                 info = tool_call.get("info", "")
+                output_path = tool_call.get("output_path", "")
                 detail = f" input={input_text}" if input_text else ""
                 if info:
                     detail += f" result={info}"
+                if output_path:
+                    detail += f" output_path={output_path}"
                 tool_lines.append(f"- {name}:{detail}")
             previous_tools = "\n".join(tool_lines) or "(none recorded)"
             resume_prefix = (
@@ -771,9 +831,8 @@ class SubagentRegistry:
                 f"--- END OF PREVIOUS OUTPUT ---\n\n"
                 f"--- COMPLETED TOOL CALLS ---\n{previous_tools}\n"
                 f"--- END OF TOOL CALLS ---\n\n"
-                "The tool-call list records what was attempted, not the underlying file "
-                "contents. Re-run only the reads needed to recover evidence before giving "
-                "a verdict.\n\n"
+                "When a completed tool call has output_path, read_file that path to recover "
+                "the exact output. Re-run only the reads still needed before giving a verdict.\n\n"
                 f"[CONTINUATION TASK]\n"
             )
             task = resume_prefix + task
@@ -805,6 +864,7 @@ class SubagentRegistry:
             task_description=task,
             started_at=datetime.now(),
             status="running",
+            child_session_id=self._child_session_id(parent_agent.session_id, run_id),
         )
         self.register(run)
 
@@ -842,11 +902,17 @@ class SubagentRegistry:
         from agentica.agent import Agent
         from agentica.agent.config import PromptConfig, ToolConfig
 
+        child_session_id = self._child_session_id(parent_agent.session_id, run_id)
+        child_session_base_dir = self._child_session_base_dir(parent_agent)
         child_kwargs: Dict[str, Any] = dict(
             name=f"{parent_agent.name or 'agent'}_sub_{config.name}",
             model=self._clone_parent_model(source_model),
             instructions="\n".join(instructions_parts),
             tools=child_tools,
+            session_id=child_session_id,
+            session_base_dir=child_session_base_dir,
+            user_id=parent_agent.user_id,
+            work_dir=parent_agent.work_dir,
             prompt_config=PromptConfig(markdown=True),
             tool_config=ToolConfig(tool_call_limit=config.tool_call_limit),
             # The child faces the same flaky gateway as the parent, so it gets
@@ -866,6 +932,8 @@ class SubagentRegistry:
 
         child = Agent(**child_kwargs)
         child._max_turns = config.max_turns
+        child_transcript_path = str(child._session_log.path) if child._session_log is not None else ""
+        run.transcript_path = child_transcript_path
 
         # Wire arch_v5.md Phase 0 lineage so the child's RunContext records
         # who spawned it (used by Runner._run_impl to set parent_run_id +
@@ -891,6 +959,7 @@ class SubagentRegistry:
                 child,
                 task,
                 run_id=run_id,
+                child_session_id=child_session_id,
                 output_sink=partial_sink,
                 max_turns=config.max_turns,
                 tool_call_limit=config.tool_call_limit,
@@ -931,6 +1000,8 @@ class SubagentRegistry:
                 "model": resolved_model_label,
                 "model_tier": config.model_tier,
                 "run_id": run_id,
+                "child_session_id": child_session_id,
+                "transcript_path": child_transcript_path,
                 "content": content_out,
                 "tool_calls_summary": partial_tools,
                 "tool_count": len(partial_tools),
@@ -986,6 +1057,8 @@ class SubagentRegistry:
                     "model": resolved_model_label,
                     "model_tier": config.model_tier,
                     "run_id": run_id,
+                    "child_session_id": child_session_id,
+                    "transcript_path": child_transcript_path,
                     "content": content_out,
                     "tool_calls_summary": partial_tools,
                     "tool_count": len(partial_tools),
@@ -1036,6 +1109,8 @@ class SubagentRegistry:
                 "model": resolved_model_label,
                 "model_tier": config.model_tier,
                 "run_id": run_id,
+                "child_session_id": child_session_id,
+                "transcript_path": child_transcript_path,
                 "content": partial_content,
                 "tool_calls_summary": partial_tools,
                 "tool_count": len(partial_tools),
@@ -1106,6 +1181,8 @@ class SubagentRegistry:
                 "model": resolved_model_label,
                 "model_tier": config.model_tier,
                 "run_id": run_id,
+                "child_session_id": child_session_id,
+                "transcript_path": child_transcript_path,
                 "tool_calls_summary": tool_calls_summary,
                 "tool_count": len(tool_calls_summary),
                 "elapsed_seconds": elapsed,
@@ -1140,6 +1217,8 @@ class SubagentRegistry:
             "model": resolved_model_label,
             "model_tier": config.model_tier,
             "run_id": run_id,
+            "child_session_id": child_session_id,
+            "transcript_path": child_transcript_path,
             "tool_calls_summary": stream_result["tool_calls_summary"],
             "tool_count": len(stream_result["tool_calls_summary"]),
             "execution_time": elapsed,

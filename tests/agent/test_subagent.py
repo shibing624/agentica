@@ -2,6 +2,7 @@
 """Tests for agentica.subagents registry execution helpers."""
 import asyncio
 import inspect
+import json
 import re
 import tempfile
 from pathlib import Path
@@ -41,6 +42,7 @@ class RecordingAgent:
     def __init__(self, **kwargs):
         RecordingAgent.last_init_kwargs = kwargs
         self.name = kwargs.get("name", "child")
+        self._session_log = None
         # Preserve the cloned model passed by ``SubagentRegistry.spawn`` so the
         # registry's ``parent.usage.merge(child.usage)`` step gets a real
         # ``Usage`` instance.
@@ -83,6 +85,10 @@ def _make_parent_agent(auxiliary_model=None):
         workspace="workspace-ref",
         working_memory=working_memory,
         context={},
+        session_id=None,
+        user_id=None,
+        work_dir=None,
+        _session_log=None,
         _event_callback=None,
         # arch_v5.md Phase 0 lineage fields read by SubagentRegistry.spawn():
         # subagent.spawn() expects parent_agent to expose Agent's RunContext
@@ -160,6 +166,108 @@ def test_spawn_applies_config_to_child_agent():
     assert init_kwargs["context"]["_can_spawn_subagents"] is False
 
 
+def test_spawn_persists_child_transcript_and_returns_locator(tmp_path):
+    """A completed subagent must leave a readable transcript, not only a short
+    parent-facing summary. The locator is the recovery path when the summary is
+    insufficient."""
+    from agentica.memory.session_log import SessionLog
+
+    registry = SubagentRegistry()
+    _RUNTIME_SUBAGENT_CONFIGS["worker"] = SubagentConfig(
+        type="worker",
+        name="worker",
+        description="worker",
+        system_prompt="system prompt",
+    )
+    parent = _make_parent_agent()
+    parent.session_id = "parent-session"
+    parent.work_dir = str(tmp_path)
+    parent.user_id = "u1"
+    parent._session_log = SessionLog(
+        session_id="parent-session",
+        base_dir=str(tmp_path / "sessions"),
+        work_dir=str(tmp_path),
+        user_id="u1",
+    )
+
+    class _TranscriptAgent(RecordingAgent):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self._session_log = SessionLog(
+                session_id=kwargs["session_id"],
+                base_dir=kwargs["session_base_dir"],
+                work_dir=kwargs.get("work_dir"),
+                user_id=kwargs.get("user_id"),
+            )
+
+        async def run_stream(self, task, config=None):
+            self._session_log.append("user", task)
+            self._session_log.append("assistant", "child saw ZX-41827")
+            yield SimpleNamespace(event="RunResponse", content="summary only", tools=None)
+
+    with patch("agentica.agent.Agent", _TranscriptAgent), patch(
+        "agentica.agent.config.ToolConfig", FakeToolConfig
+    ):
+        result = asyncio.run(
+            registry.spawn(parent_agent=parent, task="inspect ticket ZX-41827", agent_type="worker")
+        )
+
+    assert result["status"] == "completed"
+    assert result["run_id"]
+    assert result["child_session_id"].startswith("parent-session.subagent.")
+    assert result["transcript_path"].endswith(f"{result['child_session_id']}.jsonl")
+    transcript = Path(result["transcript_path"])
+    assert transcript.is_file()
+    text = transcript.read_text(encoding="utf-8")
+    assert "inspect ticket ZX-41827" in text
+    assert "child saw ZX-41827" in text
+
+
+def test_spawn_records_child_tool_output_paths_in_summary(tmp_path):
+    """The parent summary must not reduce child tool output to a count only;
+    it needs a path that can recover the exact text on demand."""
+    registry = SubagentRegistry()
+    _RUNTIME_SUBAGENT_CONFIGS["worker"] = SubagentConfig(
+        type="worker",
+        name="worker",
+        description="worker",
+        system_prompt="system prompt",
+    )
+    parent = _make_parent_agent()
+    parent.session_id = "parent-session"
+    parent.work_dir = str(tmp_path)
+    parent.user_id = "u1"
+    full_tool_output = "line 1\nunique-child-tool-output-ZX-41827\nline 3"
+
+    class _ToolOutputAgent(RecordingAgent):
+        async def run_stream(self, task, config=None):
+            tool = {
+                "tool_name": "read_file",
+                "tool_call_id": "call-read-1",
+                "tool_args": {"file_path": "target.py"},
+            }
+            yield SimpleNamespace(event="ToolCallStarted", content=None, tools=[tool])
+            done = dict(tool)
+            done["content"] = full_tool_output
+            done["metrics"] = {"time": 0.1}
+            yield SimpleNamespace(event="ToolCallCompleted", content=None, tools=[done])
+            yield SimpleNamespace(event="RunResponse", content="summary", tools=None)
+
+    with patch("agentica.agent.Agent", _ToolOutputAgent), patch(
+        "agentica.agent.config.ToolConfig", FakeToolConfig
+    ):
+        result = asyncio.run(
+            registry.spawn(parent_agent=parent, task="inspect", agent_type="worker")
+        )
+
+    summary = result["tool_calls_summary"]
+    assert summary[0]["name"] == "read_file"
+    output_path = Path(summary[0]["output_path"])
+    assert output_path.is_file()
+    assert output_path.read_text(encoding="utf-8") == full_tool_output
+    assert "unique-child-tool-output-ZX-41827" not in json.dumps(summary, ensure_ascii=False)
+
+
 def test_spawn_filters_toolkit_functions_by_allowed_and_denied_lists():
     registry = SubagentRegistry()
     _RUNTIME_SUBAGENT_CONFIGS["worker"] = SubagentConfig(
@@ -230,6 +338,7 @@ class _CumulativeToolStreamAgent:
         _CumulativeToolStreamAgent.last_init_kwargs = kwargs
         self.name = kwargs.get("name", "child")
         self.model = kwargs.get("model")
+        self._session_log = None
 
     async def run_stream(self, task, config=None):
         # Simulate two tool calls (read_file + ls), each going through
@@ -577,6 +686,107 @@ def test_builtin_task_tool_surfaces_partial_on_timeout():
     assert payload["tool_calls_summary"][0]["name"] == "read_file"
 
 
+def test_builtin_task_tool_spills_large_completed_result_and_keeps_locators(tmp_path, monkeypatch):
+    """The task result handed to the parent should be a bounded preview plus a
+    read_file-able path when the subagent's final answer is large. A test that
+    only checks for a key would miss the failure mode; this verifies the saved
+    file contains the exact middle that the preview omits."""
+    from agentica.tools.builtin_task_tool import BuiltinTaskTool
+
+    monkeypatch.setenv("AGENTICA_PROJECTS_DIR", str(tmp_path / "projects"))
+    tool = BuiltinTaskTool()
+    head = "HEAD\n" + ("h\n" * 30000)
+    middle = "MIDDLE-ONLY-ZX-41827\n"
+    tail = ("t\n" * 30000) + "TAIL\n"
+    long_result = head + middle + tail
+    transcript_path = str(tmp_path / "child.jsonl")
+
+    async def fake_spawn(self, **kwargs):
+        return {
+            "status": "completed",
+            "agent_type": "code",
+            "subagent_name": "code",
+            "model": "fake",
+            "model_tier": "auxiliary",
+            "run_id": "run-large-result",
+            "child_session_id": "parent.subagent.run-large-result",
+            "transcript_path": transcript_path,
+            "content": long_result,
+            "tool_calls_summary": [],
+            "tool_count": 0,
+            "execution_time": 0.1,
+        }
+
+    parent = SimpleNamespace(
+        _event_callback=None,
+        run_context=None,
+        run_id=None,
+        session_id="parent-session",
+        work_dir=str(tmp_path),
+        user_id="u1",
+    )
+    tool._parent_agent = parent
+
+    with patch("agentica.subagents.runtime.SubagentRegistry.spawn", new=fake_spawn):
+        raw = asyncio.run(tool.task(description="d", prompt="d", subagent_type="code"))
+    payload = json.loads(raw)
+    assert payload["success"] is True
+    assert payload["run_id"] == "run-large-result"
+    assert payload["child_session_id"] == "parent.subagent.run-large-result"
+    assert payload["transcript_path"] == transcript_path
+    assert "<persisted-output>" in payload["result"]
+    assert "MIDDLE-ONLY-ZX-41827" not in payload["result"]
+    saved_line = next(
+        line for line in payload["result"].splitlines()
+        if line.endswith("run-large-result-result.txt")
+    )
+    assert Path(saved_line).read_text(encoding="utf-8") == long_result
+
+
+def test_builtin_task_tool_get_task_result_returns_registry_record():
+    from agentica.subagents import SubagentRun
+    from agentica.tools.builtin_task_tool import BuiltinTaskTool
+    from datetime import datetime
+
+    registry = SubagentRegistry()
+    registry._runs["run-lookup"] = SubagentRun(
+        run_id="run-lookup",
+        subagent_type="code",
+        parent_agent_id="parent-1",
+        task_label="lookup",
+        task_description="lookup the trace",
+        started_at=datetime.now(),
+        status="completed",
+        result="final answer with ZX-41827",
+        tool_calls_summary=[{
+            "name": "read_file",
+            "info": "Read 3 lines from a.py",
+            "input": '{"file_path": "a.py"}',
+            "output_path": "/tmp/a.py.out",
+        }],
+        child_session_id="parent.subagent.run-lookup",
+        transcript_path="/tmp/run-lookup.jsonl",
+    )
+
+    payload = json.loads(asyncio.run(BuiltinTaskTool().get_task_result("run-lookup")))
+    assert payload == {
+        "found": True,
+        "run_id": "run-lookup",
+        "status": "completed",
+        "subagent_type": "code",
+        "task": "lookup the trace",
+        "result": "final answer with ZX-41827",
+        "tool_calls_summary": [{
+            "name": "read_file",
+            "info": "Read 3 lines from a.py",
+            "input": '{"file_path": "a.py"}',
+            "output_path": "/tmp/a.py.out",
+        }],
+        "child_session_id": "parent.subagent.run-lookup",
+        "transcript_path": "/tmp/run-lookup.jsonl",
+    }
+
+
 # ---------------------------------------------------------------------------
 # ReAct feedback loop: the parent Agent must be able to READ the failure
 # reason from a task result and RETRY with adjusted params (timeout / prompt /
@@ -661,6 +871,7 @@ def test_spawn_resume_stitches_previous_partial_into_task():
             "name": "execute",
             "info": "git diff HEAD -- A.py B.py",
             "input": '{"command": "git diff HEAD -- A.py B.py"}',
+            "output_path": "/tmp/subagent-output.txt",
         }],
     )
     parent = _make_parent_agent()
@@ -684,7 +895,9 @@ def test_spawn_resume_stitches_previous_partial_into_task():
     assert "A.py and B.py" in stitched, "previous partial output must be injected"
     assert "COMPLETED TOOL CALLS" in stitched
     assert "git diff HEAD -- A.py B.py" in stitched
-    assert "Re-run only the reads needed" in stitched
+    assert "output_path=/tmp/subagent-output.txt" in stitched
+    assert "read_file that path" in stitched
+    assert "Re-run only the reads still needed" in stitched
     assert "Continue: now analyze C.py." in stitched, "new task must still be present"
     assert prior_run_id in stitched
 

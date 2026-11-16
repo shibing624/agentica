@@ -188,7 +188,9 @@ if result["status"] == "completed":
 
 ## 预算中断与续跑
 
-正常完成时，`task` 返回结果、工具调用摘要、耗时和工具次数。遇到 `timeout`、`max_turns`、`tool_call_limit` 或截断时，返回值会明确标记 `success: false`、`partial: true`，并保留已有结果、`run_id` 和建议的下一步。主 Agent 可以使用 `resume_from_run_id` 延续该次调查，不必从头开始。
+正常完成时，`task` 返回结果、工具调用摘要、耗时、工具次数，以及 `run_id`、`child_session_id`、`transcript_path`。子代理的完整会话轨迹会作为独立 `SessionLog` 落盘；每个子工具调用如果产生文本输出，摘要里会带 `output_path`，主 Agent 可用 `read_file` 按需取回全文，而不是只能依赖计数摘要。若最终回答过大，`task` 返回给父 Agent 的 `result` 也会变成 `<persisted-output>` 预览加全文路径。
+
+遇到 `timeout`、`max_turns`、`tool_call_limit` 或截断时，返回值会明确标记 `success: false`、`partial: true`，并保留已有结果、`run_id` 和建议的下一步。主 Agent 可以使用 `resume_from_run_id` 延续该次调查，不必从头开始；续跑提示会把上一轮的 `output_path` 一并带给子代理，优先读取已有输出，只重跑仍缺的证据。需要在后续轮次重新查看某个子任务时，调用 `get_task_result(run_id)` 读取结构化记录。
 
 配置错误的项目级或用户级文件会记录 warning 并跳过；安装包内置定义错误会直接抛出异常，因为这表示安装内容损坏。
 

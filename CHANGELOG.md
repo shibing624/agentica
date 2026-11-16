@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **`task` 子代理结果改为「摘要 + 定位符 + 按需取全文」**：子代理现在拥有派生 `session_id` 并写独立 `SessionLog`，`task` 完成/部分完成 payload 带 `run_id`、`child_session_id`、`transcript_path`。子代理内部工具调用的完整文本输出会落盘到 `output_path`，父 Agent 的 `tool_calls_summary` 只保留简述和路径；续跑时也把这些路径带给下一次子代理，让它先 `read_file` 已有输出而不是盲目重跑。最终回答过大时，`task` 返回给父 Agent 的 `result` 复用 `<persisted-output>` 预览 + 全文路径。新增只读工具 `get_task_result(run_id)`，用于后续轮次按 `run_id` 找回结构化结果和轨迹定位符（`agentica/subagents/runtime.py`、`agentica/tools/builtin_task_tool.py`）。
+
 - **压缩恰好发生在 todo 提醒之后时，提醒不再冒充用户的提问出现在 Web / `/resume` 里，新窗口也不再只剩提醒**：待办提醒（`[Todo Reminder]`）和外部文件变更提示是运行时写给模型看的，不是你输入的。压缩在它们刚注入后触发时，会把它们当成「本轮最后一条用户消息」：一是把它们写进会话日志，Web 回放就成了一个用户气泡；二是更严重，新窗口只保留了这条提醒，真正的问题和前面那一轮工具调用都被扔进了 `<dropped_span>`。现在注入的消息（提醒、插话、同伴消息）不再被当作回合起点，新窗口保留的是真正的用户消息加上它之后的整轮；这两类运行时提示另标 `Message._runtime_notice`，写压缩尾部时跳过，不进日志、不进任何由日志重建的回放。已经写进旧日志的那几行不会自动消失（`agentica/compression/evict.py`、`agentica/memory/session_log.py`、`agentica/model/message.py`、`agentica/agent/base.py`）。
 
 - **Web 子智能体卡片里出现一大块紫色柱子（模型标签撑满整屏）**：`task` 子智能体卡片和 Trace 里的模型标签，用 `main` 作为「主模型」的修饰类名，而 `.main` 同时是整个页面内容栏的布局类（`flex:1; height:100vh`，mac 桌面端还带背景和左边框），于是标签继承了这些规则，被撑成一个整屏高、紫色的方块，里面只有一个 `main` 字（浏览器实测 824×577，修复后 41×22）。修饰类改名为 `tier-main`（`web/src/components/TaskCard.tsx`、`web/src/pages/TracesPage.tsx`、`web/src/style.css`），并新增测试禁止再有选择器把 `.main` 当修饰类用（`web/src/lib/cssClassCollisions.test.mjs`）。

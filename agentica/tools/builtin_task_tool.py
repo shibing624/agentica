@@ -18,6 +18,7 @@ import re
 from textwrap import dedent
 from typing import Optional, Dict, Any, TYPE_CHECKING
 
+from agentica.compression.tool_result_storage import DEFAULT_MAX_RESULT_SIZE_CHARS, maybe_persist_result
 from agentica.tools.base import Tool
 
 if TYPE_CHECKING:
@@ -66,7 +67,10 @@ class BuiltinTaskTool(Tool):
       limit the subagent is told to stop and report what it has.
     - On `partial=true`, synthesize the partial output; if it holds no
       findings, finish the work yourself. Resume at most once, with the SAME
-      `prompt` plus `resume_from_run_id`.""")
+      `prompt` plus `resume_from_run_id`.
+    - Each completed task returns a `run_id`, child transcript path, and any
+      child tool `output_path` locators. If a summary is insufficient, call
+      `get_task_result(run_id)` and then read the transcript/output paths you need.""")
 
     def __init__(self, auxiliary_model: Optional["Model"] = None):
         """
@@ -87,6 +91,7 @@ class BuiltinTaskTool(Tool):
         # "launch independent tasks in one message to run them in parallel"
         # (stated in this tool's own system prompt) a lie.
         self.register(self.task, concurrency_safe=True, is_read_only=True)
+        self.register(self.get_task_result, concurrency_safe=True, is_read_only=True)
         task_fn = self.functions["task"]
         task_fn.manages_own_timeout = True
         task_fn.process_entrypoint()
@@ -143,6 +148,31 @@ class BuiltinTaskTool(Tool):
     def set_parent_agent(self, agent: "Agent") -> None:
         """Bind to the parent agent so ``task()`` can spawn through the registry."""
         self._parent_agent = agent
+
+    async def get_task_result(self, run_id: str) -> str:
+        """Fetch a prior subagent run by run_id.
+
+        Use this when an earlier ``task`` result was summarized or pushed out of
+        context but you still have its ``run_id``. The response includes the
+        final/partial answer, completed tool summaries, ``output_path`` locators,
+        and the child transcript path when available.
+        """
+        from agentica.subagents import SubagentRegistry
+
+        run = SubagentRegistry().get(run_id)
+        if run is None:
+            return json.dumps({"found": False, "run_id": run_id}, ensure_ascii=False, indent=2)
+        return json.dumps({
+            "found": True,
+            "run_id": run.run_id,
+            "status": run.status,
+            "subagent_type": run.subagent_type,
+            "task": run.task_description,
+            "result": run.result or "",
+            "tool_calls_summary": run.tool_calls_summary or [],
+            "child_session_id": run.child_session_id or "",
+            "transcript_path": run.transcript_path or "",
+        }, ensure_ascii=False, indent=2)
 
     def model_label_for(self, tool_args: Optional[dict] = None) -> Optional[str]:
         """Which model the subagent this call would spawn actually runs.
@@ -254,17 +284,35 @@ class BuiltinTaskTool(Tool):
         # use whatever work was done. Only genuine ``error`` / ``cancelled``
         # states drop into the bare error payload.
         if status == "completed":
+            result_content = result["content"]
+            if len(result_content) > DEFAULT_MAX_RESULT_SIZE_CHARS:
+                parent = self._parent_agent
+                result_content = maybe_persist_result(
+                    "task",
+                    f"{result.get('run_id') or 'subagent'}-result",
+                    result_content,
+                    session_id=parent.session_id,
+                    cwd=parent.work_dir,
+                    user_id=parent.user_id,
+                    recoverable=True,
+                )
             payload: Dict[str, Any] = {
                 "success": True,
                 "subagent_type": result["agent_type"],
                 "subagent_name": result.get("subagent_name", result["agent_type"]),
                 "model": result.get("model", ""),
                 "model_tier": result.get("model_tier", ""),
-                "result": result["content"],
+                "result": result_content,
                 "tool_calls_summary": result.get("tool_calls_summary", []),
                 "execution_time": result.get("execution_time", 0.0),
                 "tool_count": result.get("tool_count", 0),
             }
+            if result.get("run_id"):
+                payload["run_id"] = result["run_id"]
+            if result.get("child_session_id"):
+                payload["child_session_id"] = result["child_session_id"]
+            if result.get("transcript_path"):
+                payload["transcript_path"] = result["transcript_path"]
             return json.dumps(payload, ensure_ascii=False, indent=2)
 
         if status in ("timeout", "max_turns", "tool_call_limit", "truncated"):
