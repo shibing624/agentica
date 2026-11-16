@@ -606,6 +606,22 @@ def command_class_display(command: str) -> str:
     return " ".join(tokens) if tokens else ""
 
 
+def missing_call_work_dir(fc: FunctionCall, *, work_dir: Optional[str]) -> Optional[str]:
+    """The resolved per-call ``work_dir`` of a file write when it is not a directory.
+
+    Same resolution as ``call_paths`` and the check ``FileTool._call_root``
+    makes first, so the text matches what the tool would have said. ``None``
+    when the call has no ``work_dir``, is not a write, or the directory exists.
+    """
+    if fc.function.name not in WRITE_FILE_TOOLS:
+        return None
+    raw = (fc.arguments or {}).get("work_dir")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    resolved = _resolve_tool_path(raw.strip(), work_dir)
+    return None if Path(resolved).is_dir() else resolved
+
+
 def call_paths(fc: FunctionCall, *, work_dir: Optional[str]) -> List[str]:
     """Resolved filesystem paths this file-tool call would touch. Empty = unknown."""
     args = fc.arguments or {}
@@ -708,6 +724,27 @@ def make_approve(
                 "mode": mode,
                 "decision": "deny",
                 "reason": "deny_grant",
+                "wait_s": 0,
+                "grant": None,
+            }
+            return "deny"
+        # A write aimed at a ``work_dir`` that does not exist cannot be approved:
+        # there is nothing to approve, and parking it held a whole turn for ten
+        # minutes over a typo (``Docs`` for ``Documents``). It is not run, so a
+        # directory that appears before the tool starts cannot widen what the
+        # card never covered; the model gets the tool's own error and fixes it.
+        bad_root = missing_call_work_dir(fc, work_dir=work_dir)
+        if bad_root is not None:
+            fc.denied_result = (
+                f"work_dir is not a directory: {(fc.arguments or {}).get('work_dir')}\n"
+                f"Resolved path: {bad_root}"
+            )
+            fc.approval_trace = {
+                "tool": fc.function.name,
+                "arguments": _clip_trace_args(fc.arguments or {}),
+                "mode": mode,
+                "decision": "deny",
+                "reason": "bad_work_dir",
                 "wait_s": 0,
                 "grant": None,
             }

@@ -56,6 +56,66 @@ def _file_fc(name: str, file_path: str, **kwargs):
     )
 
 
+class TestMissingCallWorkDir:
+    """A write aimed at a ``work_dir`` that is not a directory is refused at once.
+
+    It sits under home, not tmp, so the temp exemption cannot be what spares
+    the card; a real directory outside the session still parks.
+    """
+
+    @staticmethod
+    def _approve(mode, work, registry):
+        return make_approve(
+            get_mode=lambda: mode,
+            get_grants=lambda: SessionGrants(),
+            get_registry=lambda: registry,
+            get_work_dir=lambda: work,
+            publish=lambda pending: None,
+            apply_path_grant=lambda path, prefix: None,
+        )
+
+    @pytest.mark.parametrize("mode", ["read-only", "auto"])
+    @pytest.mark.parametrize("name", ["apply_patch", "write_file"])
+    def test_typo_work_dir_is_denied_with_the_tools_own_error_and_never_parks(self, tmp_path, mode, name):
+        missing = os.path.join(str(Path.home()), "Docs-agentica-approval", "repo", ".worktrees", "x")
+        assert not os.path.isdir(missing)
+        args = {"patch": "*** Begin Patch\n*** Update File: a.py\n@@\n-a\n+b\n*** End Patch"} if name == "apply_patch" \
+            else {"file_path": "a.py", "content": "x"}
+        fc = _fc(name, {**args, "work_dir": missing}, is_destructive=True)
+        registry = ApprovalRegistry()
+
+        async def run():
+            return await asyncio.wait_for(self._approve(mode, str(tmp_path), registry)(fc), timeout=2)
+
+        decision = asyncio.run(run())
+
+        assert decision == "deny"
+        assert registry.size == 0
+        assert fc.denied_result == f"work_dir is not a directory: {missing}\nResolved path: {missing}"
+        assert fc.approval_trace["reason"] == "bad_work_dir"
+        assert fc.approval_trace["wait_s"] == 0
+
+    def test_existing_work_dir_outside_the_session_still_parks(self, tmp_path):
+        with tempfile.TemporaryDirectory(dir=str(Path.home())) as real:
+            fc = _fc("write_file", {"file_path": "a.py", "content": "x", "work_dir": real}, is_destructive=True)
+            registry = ApprovalRegistry()
+
+            async def run():
+                task = asyncio.ensure_future(self._approve("auto", str(tmp_path), registry)(fc))
+                await asyncio.sleep(0.05)
+                parked = registry.size
+                registry.deny_all()
+                await task
+                return parked
+
+            assert asyncio.run(run()) == 1
+
+    def test_allow_all_leaves_it_to_the_tool(self, tmp_path):
+        missing = os.path.join(str(Path.home()), "Docs-agentica-approval", "nope")
+        fc = _fc("write_file", {"file_path": "a.py", "content": "x", "work_dir": missing}, is_destructive=True)
+        assert asyncio.run(self._approve("allow-all", str(tmp_path), ApprovalRegistry())(fc)) == "allow"
+
+
 class TestApprovalRegistry(unittest.TestCase):
     def test_wait_decide_and_unknown_id(self):
         async def _run():
