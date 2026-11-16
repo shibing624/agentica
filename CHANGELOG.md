@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Web 子智能体卡片里出现一大块紫色柱子（模型标签撑满整屏）**：`task` 子智能体卡片和 Trace 里的模型标签，用 `main` 作为「主模型」的修饰类名，而 `.main` 同时是整个页面内容栏的布局类（`flex:1; height:100vh`，mac 桌面端还带背景和左边框），于是标签继承了这些规则，被撑成一个整屏高、紫色的方块，里面只有一个 `main` 字（浏览器实测 824×577，修复后 41×22）。修饰类改名为 `tier-main`（`web/src/components/TaskCard.tsx`、`web/src/pages/TracesPage.tsx`、`web/src/style.css`），并新增测试禁止再有选择器把 `.main` 当修饰类用（`web/src/lib/cssClassCollisions.test.mjs`）。
+
 - **Web / Desktop 会话标题收敛到 `SessionLog.display_title` 单一读模型**：此前 sidecar 名称、首条提问、定时任务名和 `"Chat"` 回退在 `AgentService.list_sessions`、在途 `LiveTurn`、fork、IM `/session`、CLI `/resume` 各自推导，后台模型生成标题写回 sidecar 后也没有独立的活动脉冲。现在这些 Python 入口统一调用 `SessionLog.display_title(...)`，首轮请求先用本地草稿标题显示，后台标题真正落盘后 `live_turn.bump_pulse(owner)` 触发侧栏刷新；手动改过的标题仍不会被目录覆盖。
 - **写文件的调用带了一个不存在的 `work_dir`（多半是手误），不再弹审批卡把整轮卡住**：`apply_patch` / `write_file` 的 `work_dir` 不是目录时，工具本来会在读写任何字节之前就报错，但审批层先把路径当成「会话目录之外」弹卡，auto 模式下一个把 `Documents` 写成 `Docs` 的路径让一轮等了 10 分钟（本机日志：LLM 审批员那次返回空响应、退回人工，又无人在场）。现在审批层先检查：目标 `work_dir` 不存在就不弹卡、不跑审批员，直接拒绝这次调用，模型收到的就是工具自己的那条错误（`work_dir is not a directory: … Resolved path: …`），下一步自己改路径。拒绝而不是放行，所以目录在审批后、执行前才冒出来也不会让一个没经审批的调用跑到会话目录之外；`allow-all` 不受影响，照旧交给工具（`agentica/agent/approvals.py`）。
 

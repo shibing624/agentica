@@ -1857,9 +1857,9 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .task-status.run{background:rgba(37,99,235,.12);color:#1d4ed8}
 .task-agent{color:var(--fg);font-weight:600}
 .task-model,.tr-tool-model{display:inline-flex;align-items:center;padding:1px 6px;border-radius:5px;font-family:var(--mono);font-size:11px;font-weight:500;background:rgba(59,130,246,.1);color:#2563eb;border:var(--hair) solid rgba(59,130,246,.22);flex-shrink:0;white-space:nowrap}
-.task-model.main,.tr-tool-model.main{background:rgba(139,92,246,.12);color:#7c3aed;border-color:rgba(139,92,246,.28)}
+.task-model.tier-main,.tr-tool-model.tier-main{background:rgba(139,92,246,.12);color:#7c3aed;border-color:rgba(139,92,246,.28)}
 [data-theme="dark"] .task-model,[data-theme="dark"] .tr-tool-model{color:#60a5fa;background:rgba(59,130,246,.15)}
-[data-theme="dark"] .task-model.main,[data-theme="dark"] .tr-tool-model.main{color:#c084fc;background:rgba(139,92,246,.18)}
+[data-theme="dark"] .task-model.tier-main,[data-theme="dark"] .tr-tool-model.tier-main{color:#c084fc;background:rgba(139,92,246,.18)}
 .task-num{font-family:var(--mono);font-size:11.5px;font-variant-numeric:tabular-nums}
 .task-run{font-family:var(--mono);font-size:11px;opacity:.8}
 .task-sec>summary{cursor:pointer;list-style:none;color:var(--fg2);font-size:12px;user-select:none}

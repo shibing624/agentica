@@ -33,7 +33,7 @@ export function TaskCard({
           <span className="task-agent">{result?.subagentName || subagentType}</span>
         )}
         {(model || tier) && (
-          <span className={"task-model" + (tier === "main" ? " main" : "")} title={model || tier}>
+          <span className={"task-model" + (tier === "main" ? " tier-main" : "")} title={model || tier}>
             {tier && model ? `${tier === "main" ? "main" : "aux"} · ${model}` : (model || tier)}
           </span>
         )}

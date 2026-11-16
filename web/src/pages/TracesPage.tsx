@@ -842,7 +842,7 @@ function CallRow({ c, toolsCollapsed, onToggleTools }: { c: Call; toolsCollapsed
       <>
         <span className={"tr-tag k-tool" + (c.isError ? " err" : "")} title={c.toolName}>{c.toolName || "tool"}</span>
         {modelBadge && (
-          <span className={"tr-tool-model" + (c.toolModelTier === "main" ? " main" : "")} title={c.toolModel || c.toolModelTier}>
+          <span className={"tr-tool-model" + (c.toolModelTier === "main" ? " tier-main" : "")} title={c.toolModel || c.toolModelTier}>
             {modelBadge}
           </span>
         )}
@@ -997,7 +997,7 @@ function AssistantOverview({ body, modelTools, onOpenCall }: {
                   </svg>
                   <span className="tr-assistant-tool-name">{tc.toolName}</span>
                   {modelBadge && (
-                    <span className={"tr-tool-model" + (tc.toolModelTier === "main" ? " main" : "")} title={tc.toolModel || tc.toolModelTier}>
+                    <span className={"tr-tool-model" + (tc.toolModelTier === "main" ? " tier-main" : "")} title={tc.toolModel || tc.toolModelTier}>
                       {modelBadge}
                     </span>
                   )}
