@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **写文件的调用带了一个不存在的 `work_dir`（多半是手误），不再弹审批卡把整轮卡住**：`apply_patch` / `write_file` 的 `work_dir` 不是目录时，工具本来会在读写任何字节之前就报错，但审批层先把路径当成「会话目录之外」弹卡，auto 模式下一个把 `Documents` 写成 `Docs` 的路径让一轮等了 10 分钟（本机日志：LLM 审批员那次返回空响应、退回人工，又无人在场）。现在审批层先检查：目标 `work_dir` 不存在就不弹卡、不跑审批员，直接拒绝这次调用，模型收到的就是工具自己的那条错误（`work_dir is not a directory: … Resolved path: …`），下一步自己改路径。拒绝而不是放行，所以目录在审批后、执行前才冒出来也不会让一个没经审批的调用跑到会话目录之外；`allow-all` 不受影响，照旧交给工具（`agentica/agent/approvals.py`）。
+
 - **Web / Desktop / IM 的权限审批也会超时，不再无限卡住整轮**：此前只有 CLI 的审批卡在 5 分钟无人回应后自动放弃，网关里的审批一直挂到你回来。现在网关的审批卡和 `ask_user_question` 的提问都读同一个配置 `settings.human_wait_timeout`（默认 300 秒，`0` 表示一直等，CLI 与网关共用一个读取函数 `agentica.config.profiles.human_wait_timeout`，原来网关里写死的 `QUESTION_WAIT_S` 已删除），没人决定，就把这次调用标为超时：不执行、也不算你拒绝（不写 deny 授权），模型会被告知「无人回应，不要换个方式达成同样效果，先做不需要它的部分并在回复里列出等待项」，对话继续。所有端的卡片同步关掉（事件 `approval_resolved` 的 `by` 为 `timeout`），Web 弹一条提示，IM 卡片标注「已超时，该操作没有执行」。先有人决定的话定时器不起作用（`gateway/src/agentica_gateway/services/live_turn.py`、`services/agent_service/builder.py`）。
 
 - **Web / Desktop 添加工作区改为「打开文件夹」一步完成（借鉴 dsh Desktop）**：点侧栏的添加按钮直接弹出系统的选择文件夹对话框（macOS `osascript`、Linux `zenity` / `kdialog`、Windows PowerShell），选中即成为工作区并新建对话，取消则什么都不发生；不再先开一个要手输路径、再逐级浏览的弹窗。对话框由网关所在机器弹出，所以新增的 `POST /api/fs/pick` 只对本机直连（回环地址、无转发头）的请求生效，远程浏览器收到 409、没有选择器的系统收到 501，页面自动退回原来的页内目录浏览弹窗，行为和之前一致（`gateway/src/agentica_gateway/routes/settings.py`、`web/src/workspaces.ts`、`web/src/lib/workspacePick.ts`）。
