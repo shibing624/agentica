@@ -1045,6 +1045,11 @@ a.side-nav-item{text-decoration:none;color:inherit}
 .pf-input:disabled{opacity:.6}
 .pf-section{font-size:11px;font-weight:600;color:var(--fg2);margin:8px 0 4px;text-transform:uppercase;letter-spacing:.04em}
 .pf-row{display:flex;gap:6px}
+.pf-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 8px}
+.pf-field{display:flex;flex-direction:column;min-width:0}
+.pf-field.wide,.pf-check.wide{grid-column:1/-1}
+.pf-label{font-size:11px;color:var(--fg3);margin:0 0 2px;font-family:var(--mono)}
+.settings-item .settings-form{margin-top:10px;cursor:default;background:var(--bg)}
 .pf-row .pf-input{margin-bottom:6px}
 .pf-env{display:flex;flex-direction:column;gap:4px;margin-bottom:6px}
 .pf-env-row{display:flex;gap:4px}

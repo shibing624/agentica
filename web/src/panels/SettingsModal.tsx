@@ -663,7 +663,7 @@ function ProfilesTab() {
     : allProfiles;
   return (
     <>
-      {s.profileForm && <ProfileForm />}
+      {s.profileForm && !s.profileForm.editing && <ProfileForm />}
       <div className="settings-list">
         <ConfigFileBlock />
         {allProfiles.length > 0 && (
@@ -698,6 +698,9 @@ function ProfilesTab() {
             </div>
             {p.tuning?.length ? <div className="settings-item-tuning">{p.tuning.join(" · ")}</div> : null}
             {p.auxiliary ? <div className="settings-item-aux">aux: {p.auxiliary.model_provider || "?"}/{p.auxiliary.model_name || "?"}</div> : null}
+            {/* Edited in place, under the profile it changes: a form at the top
+                of a long list was off screen and looked unrelated to the row. */}
+            {s.profileForm?.editing && s.profileForm.name === p.name && <ProfileForm />}
           </div>
         ))}
       </div>
@@ -706,48 +709,91 @@ function ProfilesTab() {
 }
 
 
+/** A field keeps its name on screen: a placeholder disappears as soon as a
+ *  value is typed, and then "200000" says nothing about which limit it is. */
+function Field({ label, children, wide }: { label: string; children: ReactNode; wide?: boolean }) {
+  return (
+    <label className={"pf-field" + (wide ? " wide" : "")}>
+      <span className="pf-label">{label}</span>
+      {children}
+    </label>
+  );
+}
+
 function ProfileForm() {
   const s = useAppState();
   const S = useStrings();
   const f = s.profileForm!;
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    ref.current?.querySelector<HTMLInputElement>("input:not([disabled])")?.focus({ preventScroll: true });
+  }, [f.editing, f.name]);
+  const num = (key: "max_tokens" | "context_window" | "compact_token_limit" | "temperature" | "top_p", step?: string) => (
+    <Field label={key}>
+      <input className="pf-input" type="number" step={step} value={f[key]} onChange={(e) => patch({ [key]: e.target.value })} />
+    </Field>
+  );
   return (
-    <div className="settings-form">
+    <div className="settings-form" ref={ref} onClick={(e) => e.stopPropagation()}>
       <h4>{f.editing ? S.settings.editProfile(f.name) : S.settings.newProfile}</h4>
-      <input className="pf-input" placeholder={S.settings.profileName} value={f.name} disabled={f.editing}
-             onChange={(e) => patch({ name: e.target.value })} />
+      {!f.editing && (
+        <Field label="name" wide>
+          <input className="pf-input" placeholder={S.settings.profileName} value={f.name}
+                 onChange={(e) => patch({ name: e.target.value })} />
+        </Field>
+      )}
       <div className="pf-section">{S.settings.mainModel}</div>
-      <input className="pf-input" list="provider-list" placeholder={S.settings.providerPlaceholder}
-             value={f.model_provider} onChange={(e) => patch({ model_provider: e.target.value })} />
-      <datalist id="provider-list">{s.providers.map((p) => <option key={p} value={p} />)}</datalist>
-      <input className="pf-input" placeholder="model_name" value={f.model_name} onChange={(e) => patch({ model_name: e.target.value })} />
-      <input className="pf-input" placeholder={S.settings.baseUrlOptional} value={f.base_url} onChange={(e) => patch({ base_url: e.target.value })} />
-      <input className="pf-input" placeholder={f.editing ? S.settings.apiKeyKeep : "api_key"}
-             value={f.api_key} onChange={(e) => patch({ api_key: e.target.value })} />
+      <div className="pf-grid">
+        <Field label="model_provider">
+          <input className="pf-input" list="provider-list" placeholder={S.settings.providerPlaceholder}
+                 value={f.model_provider} onChange={(e) => patch({ model_provider: e.target.value })} />
+        </Field>
+        <datalist id="provider-list">{s.providers.map((p) => <option key={p} value={p} />)}</datalist>
+        <Field label="model_name">
+          <input className="pf-input" value={f.model_name} onChange={(e) => patch({ model_name: e.target.value })} />
+        </Field>
+        <Field label="base_url" wide>
+          <input className="pf-input" placeholder={S.settings.baseUrlOptional} value={f.base_url} onChange={(e) => patch({ base_url: e.target.value })} />
+        </Field>
+        <Field label="api_key" wide>
+          <input className="pf-input" placeholder={f.editing ? S.settings.apiKeyKeep : ""}
+                 value={f.api_key} onChange={(e) => patch({ api_key: e.target.value })} />
+        </Field>
+      </div>
       <div className="pf-section">{S.settings.tuning}</div>
-      <div className="pf-row">
-        <input className="pf-input" placeholder="reasoning_effort（原样透传，如 max）" value={f.reasoning_effort} onChange={(e) => patch({ reasoning_effort: e.target.value })} />
-        <input className="pf-input" type="number" placeholder="max_tokens" value={f.max_tokens} onChange={(e) => patch({ max_tokens: e.target.value })} />
-      </div>
-      <div className="pf-row">
-        <input className="pf-input" type="number" placeholder="context_window" value={f.context_window} onChange={(e) => patch({ context_window: e.target.value })} />
-        <input className="pf-input" type="number" placeholder="compact_token_limit" value={f.compact_token_limit} onChange={(e) => patch({ compact_token_limit: e.target.value })} />
-      </div>
-      <div className="pf-row">
-        <input className="pf-input" type="number" step="0.1" placeholder="temperature" value={f.temperature} onChange={(e) => patch({ temperature: e.target.value })} />
-        <input className="pf-input" type="number" step="0.05" placeholder="top_p" value={f.top_p} onChange={(e) => patch({ top_p: e.target.value })} />
-      </div>
-      <div className="pf-row">
-        <label className="pf-check">
+      <div className="pf-grid">
+        <Field label="reasoning_effort">
+          <input className="pf-input" placeholder="max / high / …" value={f.reasoning_effort} onChange={(e) => patch({ reasoning_effort: e.target.value })} />
+        </Field>
+        {num("max_tokens")}
+        {num("context_window")}
+        {num("compact_token_limit")}
+        {num("temperature", "0.1")}
+        {num("top_p", "0.05")}
+        <label className="pf-check wide">
           <input type="checkbox" checked={f.enable_cache_control} onChange={(e) => patch({ enable_cache_control: e.target.checked })} />
           <span>{S.settings.enableCacheControl}</span>
         </label>
-        <input className="pf-input" placeholder={S.settings.cacheSessionHeader} value={f.cache_control_session_header} onChange={(e) => patch({ cache_control_session_header: e.target.value })} />
+        <Field label="cache_control_session_header" wide>
+          <input className="pf-input" placeholder={S.settings.cacheSessionHeader} value={f.cache_control_session_header} onChange={(e) => patch({ cache_control_session_header: e.target.value })} />
+        </Field>
       </div>
       <div className="pf-section">{S.settings.auxModel}</div>
-      <input className="pf-input" placeholder="aux provider" value={f.aux_provider} onChange={(e) => patch({ aux_provider: e.target.value })} />
-      <input className="pf-input" placeholder="aux model_name" value={f.aux_model} onChange={(e) => patch({ aux_model: e.target.value })} />
-      <input className="pf-input" placeholder={S.settings.auxBaseUrl} value={f.aux_base_url} onChange={(e) => patch({ aux_base_url: e.target.value })} />
-      <input className="pf-input" placeholder={S.settings.auxApiKey} value={f.aux_api_key} onChange={(e) => patch({ aux_api_key: e.target.value })} />
+      <div className="pf-grid">
+        <Field label="aux model_provider">
+          <input className="pf-input" value={f.aux_provider} onChange={(e) => patch({ aux_provider: e.target.value })} />
+        </Field>
+        <Field label="aux model_name">
+          <input className="pf-input" value={f.aux_model} onChange={(e) => patch({ aux_model: e.target.value })} />
+        </Field>
+        <Field label="aux base_url" wide>
+          <input className="pf-input" placeholder={S.settings.auxBaseUrl} value={f.aux_base_url} onChange={(e) => patch({ aux_base_url: e.target.value })} />
+        </Field>
+        <Field label="aux api_key" wide>
+          <input className="pf-input" placeholder={S.settings.auxApiKey} value={f.aux_api_key} onChange={(e) => patch({ aux_api_key: e.target.value })} />
+        </Field>
+      </div>
       <div className="pf-section">{S.settings.envBlock}</div>
       <div className="pf-env">
         {f.envRows.map((row, i) => (
