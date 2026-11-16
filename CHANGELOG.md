@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Web / Desktop / IM 的权限审批也会超时，不再无限卡住整轮**：此前只有 CLI 的审批卡在 5 分钟无人回应后自动放弃，网关里的审批一直挂到你回来。现在网关的审批卡 5 分钟（`APPROVAL_WAIT_S`，与 `ask_user_question` 的 `QUESTION_WAIT_S` 一致）没人决定，就把这次调用标为超时：不执行、也不算你拒绝（不写 deny 授权），模型会被告知「无人回应，不要换个方式达成同样效果，先做不需要它的部分并在回复里列出等待项」，对话继续。所有端的卡片同步关掉（事件 `approval_resolved` 的 `by` 为 `timeout`），Web 弹一条提示，IM 卡片标注「已超时，该操作没有执行」。先有人决定的话定时器不起作用（`gateway/src/agentica_gateway/services/live_turn.py`、`services/agent_service/builder.py`）。
+
 - **Web / Desktop 添加工作区改为「打开文件夹」一步完成（借鉴 dsh Desktop）**：点侧栏的添加按钮直接弹出系统的选择文件夹对话框（macOS `osascript`、Linux `zenity` / `kdialog`、Windows PowerShell），选中即成为工作区并新建对话，取消则什么都不发生；不再先开一个要手输路径、再逐级浏览的弹窗。对话框由网关所在机器弹出，所以新增的 `POST /api/fs/pick` 只对本机直连（回环地址、无转发头）的请求生效，远程浏览器收到 409、没有选择器的系统收到 501，页面自动退回原来的页内目录浏览弹窗，行为和之前一致（`gateway/src/agentica_gateway/routes/settings.py`、`web/src/workspaces.ts`、`web/src/lib/workspacePick.ts`）。
 
 - **换过窗口的会话重启后不再按整段原始记录重放（Web 输入框用量变 100%）**：会话日志在恢复时会核对最近一次压缩边界记录的 lineage（会话 + 目录 + 分支 + 模型），不一致就丢弃边界、从第一轮起重放整段原始记录。这条规则本是为「模型写的摘要换了模型后不可信」设计的，但现在的换窗边界没有摘要，边界之后的内容就是当前窗口本身。于是只要压缩之后切过模型、换过分支或绑定过另一个目录，重启服务后整个会话就按压缩前的全部记录重建（本机一个会话实测 756K token 对 54K），用量环直接顶满，下一次请求也被迫重新压缩。现在只有带摘要的边界才做 lineage 校验，无摘要的换窗边界一律信任（`agentica/memory/session_log.py`）。

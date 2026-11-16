@@ -459,6 +459,11 @@ class AgentBuilderMixin:
             if turn is None:
                 return
             turn.publish(lt.approval_event(pending))
+            wait_s = _pkg().APPROVAL_WAIT_S
+            # A no-op once someone decided: ``expire`` finds nothing parked.
+            asyncio.get_running_loop().call_later(
+                wait_s, turn.expire_approval, pending.tool_call_id, wait_s,
+            )
 
         def apply_path_grant(path: str, prefix: bool) -> None:
             agent = self._cache.get(self._sk(session_id, owner))

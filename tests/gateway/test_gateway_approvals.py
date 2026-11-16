@@ -227,6 +227,64 @@ class TestNoLiveTurnDeny:
         asyncio.run(_run())
 
 
+class TestApprovalTimeout:
+    """Nobody at the screen: the card gives up, the call is skipped, the turn goes on."""
+
+    def test_unanswered_card_expires_without_running_or_refusing(self, tmp_path, monkeypatch):
+        from agentica_gateway.services import agent_service as svc_mod
+        from agentica_gateway.services.agent_service import AgentService
+
+        monkeypatch.setattr(svc_mod, "APPROVAL_WAIT_S", 0.1)
+
+        async def _run():
+            svc = AgentService(workspace_path=str(tmp_path))
+            svc.set_session_approval_mode("s1", "read-only", owner="default")
+            turn = live_turn.start("s1", owner="default")
+            closed = []
+            turn.approval_closed = lambda tid, by: closed.append((tid, by))
+            approve = svc._make_session_approve("s1", "default")
+            fc = _fc(call_id="idle1")
+
+            assert await asyncio.wait_for(approve(fc), timeout=5) == "deny"
+
+            assert turn.approvals.size == 0
+            assert fc.approval_trace["reason"] == "timeout"
+            # Not the user's refusal: the model is told nobody answered, and no
+            # deny-similar grant is remembered.
+            assert "nobody answered" in fc.denied_result
+            assert fc.approval_trace["grant"] is None
+            resolved = [e for e in turn.events if e.get("event") == "approval_resolved"]
+            assert [e["data"] for e in resolved] == [
+                {"tool_call_id": "idle1", "decision": "deny", "by": "timeout"}
+            ]
+            assert closed == [("idle1", "timeout")]
+
+        asyncio.run(_run())
+
+    def test_a_decision_before_the_deadline_wins_and_the_timer_is_silent(self, tmp_path, monkeypatch):
+        from agentica_gateway.services import agent_service as svc_mod
+        from agentica_gateway.services.agent_service import AgentService
+
+        monkeypatch.setattr(svc_mod, "APPROVAL_WAIT_S", 0.15)
+
+        async def _run():
+            svc = AgentService(workspace_path=str(tmp_path))
+            svc.set_session_approval_mode("s1", "read-only", owner="default")
+            turn = live_turn.start("s1", owner="default")
+            approve = svc._make_session_approve("s1", "default")
+            fc = _fc(call_id="fast1")
+            task = asyncio.create_task(approve(fc))
+            await asyncio.sleep(0.02)
+            assert turn.resolve_approval("fast1", "allow", by="Web")
+            assert await task == "allow"
+            await asyncio.sleep(0.3)  # past the deadline
+            resolved = [e["data"]["by"] for e in turn.events if e.get("event") == "approval_resolved"]
+            assert resolved == ["Web"]
+            assert fc.approval_trace["reason"] is None
+
+        asyncio.run(_run())
+
+
 class TestDenyAllOnFinish:
     def test_finish_denies_pending(self):
         async def _run():

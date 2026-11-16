@@ -24,6 +24,7 @@ from .core import AgentService
 from .types import (
     CRON_SESSION_PREFIX,
     IM_SESSION_SOURCES,
+    APPROVAL_WAIT_S,
     QUESTION_WAIT_S,
     ChatResult,
     LRUAgentCache,
@@ -48,6 +49,7 @@ __all__ = [
     "DeepAgent",
     "IM_SESSION_SOURCES",
     "LRUAgentCache",
+    "APPROVAL_WAIT_S",
     "QUESTION_WAIT_S",
     "_AGENT_BUILD_TIMEOUT_S",
     "_COMPACT_NOTES_LIMIT",

@@ -2073,6 +2073,8 @@ function applyLiveSseEvent(aiMsg: ChatMsg, evt: any, sessId?: string): boolean {
   if (evt.event === "approval_resolved" && sessId) {
     const id = String(evt.data?.tool_call_id || "");
     if (id) dequeueApproval(sessId, id);
+    // Nobody was there: say so, since the card vanishing is otherwise silent.
+    if (evt.data?.by === "timeout" && sessId === getState().curSess) showToast(getStrings().chat.approvalTimedOut, 6000);
     flushStream();
     return true;
   }

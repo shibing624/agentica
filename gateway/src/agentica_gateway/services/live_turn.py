@@ -113,6 +113,23 @@ class LiveTurn:
             self.approval_closed(tool_call_id, by)
         return True
 
+    def expire_approval(self, tool_call_id: str, waited_seconds: float) -> bool:
+        """Take down an approval card nobody answered, without running the call.
+
+        Not a refusal: the registry records it as expired, so the model is told
+        nobody answered and no deny-similar grant is written. A decision that
+        landed first wins (``expire`` then returns False and nothing is sent).
+        """
+        if not self.approvals.expire(tool_call_id, waited_seconds):
+            return False
+        self.publish({
+            "event": "approval_resolved",
+            "data": {"tool_call_id": tool_call_id, "decision": "deny", "by": "timeout"},
+        })
+        if self.approval_closed is not None:
+            self.approval_closed(tool_call_id, "timeout")
+        return True
+
     @property
     def open_questions(self) -> List[PendingQuestion]:
         return [q for q, _ in self._questions.values()]

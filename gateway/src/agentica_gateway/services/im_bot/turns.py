@@ -452,7 +452,12 @@ class ImTurnsMixin:
         def _close_approval_card(tool_call_id: str, by: str) -> None:
             card = self._cards.find_open(request_id=tool_call_id)
             if card is not None:
-                reason = "权限模式已切换" if by == "mode" else (f"已在 {by} 处理" if by else "该审批已关闭")
+                if by == "mode":
+                    reason = "权限模式已切换"
+                elif by == "timeout":
+                    reason = "无人回应已超时，该操作没有执行"
+                else:
+                    reason = f"已在 {by} 处理" if by else "该审批已关闭"
                 self._cards.expire(card.token, reason=reason)
             if state.pending is not None and state.pending.request_id == tool_call_id:
                 state.clear_pending()
