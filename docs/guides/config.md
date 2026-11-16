@@ -58,8 +58,8 @@ profiles:
 
 # 全局行为开关（CLI 与 Gateway 共用）
 settings:
-  enable_evict: true               # 窗口占用超 80% 时清理旧工具结果（默认 true）
-  enable_auto_compact: true        # 窗口占用近 95% 时自动换新窗（默认 true）
+  enable_evict: true               # 到换窗线时先把旧工具结果修剪为头尾（默认 true）
+  enable_auto_compact: true        # 修剪不够时自动换新窗（默认 true）
   # compact_token_limit: 300000    # 全局压缩工作上限（可选）
   # num_history_turns: 20          # 限制最多重放最近 N 轮（默认不限，重放当前窗口全部轮次）
   # sandbox: workspace-write       # 开启系统级沙箱（macOS Seatbelt / Linux bwrap）

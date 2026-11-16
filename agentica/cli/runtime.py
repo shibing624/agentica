@@ -475,7 +475,7 @@ def parse_args():
         "--evict",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="Layer 1: evict old tool results under context pressure "
+        help="Layer 1: at the compaction line, prune old tool results to head + tail "
         "(default: on; --no-evict disables). config.yaml settings.enable_evict also applies.",
     )
     parser.add_argument(

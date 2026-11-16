@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tests for agentica.compression — eviction, tool result storage, compression manager."""
+"""Tests for agentica.compression — pruning, tool result storage, compression manager."""
 import asyncio
 import json
 import os
@@ -14,191 +14,142 @@ from agentica.run.response import RunResponse
 
 
 # ===========================================================================
-# evict_tool_results tests
+# prune_tool_results tests
 # ===========================================================================
 
-class TestEvictToolResults(unittest.TestCase):
-    """Tests for agentica.compression.evict.evict_tool_results.
+class TestPruneToolResults(unittest.TestCase):
+    """Layer 1: keep the head and tail of older long tool results.
 
     Messages are laid out the way the runner really builds them: each parallel
     tool round is preceded by the assistant message that requested it, and the
     list ends on the round the model has not seen yet.
     """
 
-    WINDOW = 10_000
-    OVER_THRESHOLD = 9_000  # 90% — well past the 80% trigger
-    UNDER_THRESHOLD = 3_000  # 30% — nothing to buy
+    def _body(self, tag, chars=20_000):
+        """Long, non-repeating text, so a prune frees measurable tokens."""
+        words, i = [], 0
+        while sum(len(w) + 1 for w in words) < chars:
+            words.append(f"{tag}-token{i}")
+            i += 1
+        return " ".join(words)
 
-    def _body(self, tag, words=200):
-        """~1k tokens of non-repeating text, so evictions save measurable tokens."""
-        return " ".join(f"{tag}-token{i}" for i in range(words))
-
-    def _batch(self, contents):
-        msgs = [Message(role="assistant", content="calling tools")]
-        for content in contents:
-            msgs.append(Message(role="tool", content=content))
+    def _batch(self, contents, start=0):
+        calls = [{
+            "id": f"call_{start + i}", "type": "function",
+            "function": {"name": "read_file", "arguments": json.dumps({"file_path": f"f{start + i}.py"})},
+        } for i in range(len(contents))]
+        msgs = [Message(role="assistant", content="calling tools", tool_calls=calls)]
+        for i, content in enumerate(contents):
+            msgs.append(Message(role="tool", tool_call_id=f"call_{start + i}", content=content))
         return msgs
 
     def _conversation(self, *batch_sizes):
         msgs = [Message(role="user", content="hi")]
+        n = 0
         for b, size in enumerate(batch_sizes):
-            msgs += self._batch([self._body(f"b{b}r{i}") for i in range(size)])
+            msgs += self._batch([self._body(f"b{b}r{i}") for i in range(size)], start=n)
+            n += size
         return msgs
 
     def _tools(self, msgs):
         return [m for m in msgs if m.role == "tool"]
 
-    def test_gate_skips_when_context_is_roomy(self):
-        from agentica.compression.evict import evict_tool_results
-        msgs = self._conversation(*([1] * 8))
-        count = evict_tool_results(
-            msgs, context_tokens=self.UNDER_THRESHOLD, context_window=self.WINDOW,
-        )
-        self.assertEqual(count, 0, "Nothing to buy while the window has room")
-        self.assertFalse(any(m._evicted for m in self._tools(msgs)))
-
-    def test_no_context_window_disables_eviction(self):
-        from agentica.compression.evict import evict_tool_results
-        msgs = self._conversation(*([1] * 8))
-        count = evict_tool_results(msgs, context_tokens=9_000, context_window=0)
-        self.assertEqual(count, 0)
-
-    def test_evicts_oldest_first_and_stops_at_target(self):
-        from agentica.compression.evict import evict_tool_results
-        msgs = self._conversation(*([1] * 8))
-
-        count = evict_tool_results(
-            msgs, context_tokens=self.OVER_THRESHOLD, context_window=self.WINDOW,
+    def _prune(self, msgs, target=None, recoverable=False):
+        from agentica.compression.evict import prune_tool_results
+        from agentica.utils.tokens import count_tokens
+        return prune_tool_results(
+            msgs, context_tokens=count_tokens(msgs, None, "gpt-4o"),
+            target_tokens=target, model_id="gpt-4o", recoverable=recoverable,
         )
 
-        tools = self._tools(msgs)
-        self.assertGreater(count, 0)
-        self.assertLess(count, len(tools) - 1, "must stop at target, not evict everything")
-        # Evicted results form a prefix: recency decides what survives.
-        flags = [m._evicted for m in tools]
-        self.assertEqual(flags, sorted(flags, reverse=True))
-        self.assertEqual(count, sum(flags))
+    def test_keeps_head_and_tail_of_every_older_long_result(self):
+        from agentica.compression.evict import PRUNE_HEAD_CHARS, PRUNE_TAIL_CHARS
+        msgs = self._conversation(2, 2, 1)
+        originals = [m.content for m in self._tools(msgs)]
 
-    def test_never_evicts_the_unseen_trailing_batch(self):
-        """The regression: a 6-call round lost its first result before it was sent.
+        result = self._prune(msgs)
 
-        A fixed "keep the last N results" budget always loses to a batch of
-        N+1, so the model re-issued the same reads forever. Eviction now
-        excludes the trailing batch outright, even under extreme pressure.
-        """
-        from agentica.compression.evict import evict_tool_results
-        msgs = self._conversation(6)
+        self.assertEqual(result.pruned, 4)
+        self.assertGreater(result.freed_tokens, 0)
+        for msg, original in zip(self._tools(msgs)[:4], originals[:4]):
+            self.assertTrue(msg.content.startswith(original[:PRUNE_HEAD_CHARS]))
+            self.assertTrue(msg.content.endswith(original[-PRUNE_TAIL_CHARS:]))
+            cut = len(original) - PRUNE_HEAD_CHARS - PRUNE_TAIL_CHARS
+            self.assertIn(f"{cut} chars pruned from the middle", msg.content)
+        self.assertEqual(self._tools(msgs)[4].content, originals[4], "the unseen batch survives")
 
-        count = evict_tool_results(
-            msgs, context_tokens=1_000_000, context_window=self.WINDOW,
-        )
+    def test_a_pruned_result_is_never_pruned_again(self):
+        msgs = self._conversation(2, 1)
+        self._prune(msgs)
+        after_first = [m.content for m in msgs]
 
-        self.assertEqual(count, 0)
-        self.assertFalse(any(m._evicted for m in self._tools(msgs)))
+        again = self._prune(msgs)
 
-    def test_extreme_pressure_still_spares_the_trailing_batch(self):
-        from agentica.compression.evict import evict_tool_results
-        msgs = self._conversation(2, 2, 2, 6)
+        self.assertEqual(again.pruned, 0)
+        self.assertEqual([m.content for m in msgs], after_first)
 
-        evict_tool_results(msgs, context_tokens=1_000_000, context_window=self.WINDOW)
+    def test_all_or_nothing_against_the_target(self):
+        """A prune that cannot reach the target is not applied at all: it would
+        break the cache and still leave the request near the line."""
+        msgs = self._conversation(2, 1)
+        before = [m.content for m in msgs]
 
-        tools = self._tools(msgs)
-        self.assertTrue(all(m._evicted for m in tools[:6]), "older rounds go first")
-        self.assertFalse(any(m._evicted for m in tools[6:]), "current round survives")
+        missed = self._prune(msgs, target=1)
 
-    def test_skips_already_evicted(self):
-        from agentica.compression.evict import evict_tool_results
-        msgs = self._conversation(*([1] * 8))
-        for msg in self._tools(msgs):
-            msg._evicted = True
+        self.assertEqual(missed.pruned, 0)
+        self.assertEqual([m.content for m in msgs], before, "history must be byte-identical")
 
-        count = evict_tool_results(
-            msgs, context_tokens=self.OVER_THRESHOLD, context_window=self.WINDOW,
-        )
+        reached = self._prune(msgs, target=1_000_000)
+        self.assertEqual(reached.pruned, 2)
 
-        self.assertEqual(count, 0)
-
-    def test_skips_content_shorter_than_the_placeholder(self):
-        """Replacing a tiny result would make the request bigger, not smaller."""
-        from agentica.compression.evict import evict_tool_results
+    def test_short_results_are_left_alone(self):
+        from agentica.compression.evict import PRUNE_MIN_CHARS
         msgs = [Message(role="user", content="hi")]
-        msgs += self._batch(["ok"])
-        msgs += self._batch([self._body("b1")])
+        msgs += self._batch(["x" * PRUNE_MIN_CHARS], start=0)
+        msgs += self._batch([self._body("live")], start=1)
 
-        evict_tool_results(
-            msgs, context_tokens=self.OVER_THRESHOLD, context_window=self.WINDOW,
-        )
+        self.assertEqual(self._prune(msgs).pruned, 0)
 
-        self.assertEqual(self._tools(msgs)[0].content, "ok")
-
-    def test_skips_results_already_spilled_to_disk(self):
-        """Their path is the only handle on output too large to hold in context."""
-        from agentica.compression.evict import evict_tool_results
+    def test_results_already_spilled_to_disk_are_left_alone(self):
+        spilled = "<persisted-output>\n" + self._body("spill")
         msgs = [Message(role="user", content="hi")]
-        msgs += self._batch(["<persisted-output>\n" + self._body("big") + "\n</persisted-output>"])
-        msgs += self._batch([self._body("b1")])
+        msgs += self._batch([spilled], start=0)
+        msgs += self._batch([self._body("live")], start=1)
 
-        evict_tool_results(
-            msgs, context_tokens=self.OVER_THRESHOLD, context_window=self.WINDOW,
-        )
+        self.assertEqual(self._prune(msgs).pruned, 0)
+        self.assertEqual(msgs[2].content, spilled)
 
-        self.assertIn("<persisted-output>", self._tools(msgs)[0].content)
+    def test_tool_call_arguments_are_never_rewritten(self):
+        msgs = self._conversation(1, 1)
+        msgs[1].tool_calls[0]["function"]["arguments"] = json.dumps({"content": "z " * 4000})
+        calls_before = [json.dumps(m.tool_calls) for m in msgs if m.tool_calls]
 
-    def test_placeholder_names_the_call_so_it_can_be_re_issued(self):
-        from agentica.compression.evict import evict_tool_results
-        msgs = [Message(role="user", content="hi")]
-        msgs.append(Message(role="assistant", content="calling"))
-        msgs.append(Message(
-            role="tool",
-            content=self._body("old"),
-            tool_call_id="call_old",
-            tool_name="read_file",
-            tool_args={"file_path": "run.sh", "offset": 56},
-        ))
-        msgs += self._batch([self._body("b1")])
+        self._prune(msgs)
 
-        evict_tool_results(
-            msgs, context_tokens=self.OVER_THRESHOLD, context_window=self.WINDOW,
-        )
+        self.assertEqual([json.dumps(m.tool_calls) for m in msgs if m.tool_calls], calls_before)
 
-        placeholder = self._tools(msgs)[0].content
-        self.assertIn("read_file(", placeholder)
-        self.assertIn("run.sh", placeholder)
-        self.assertIn("offset=56", placeholder)
+    def test_marker_quotes_a_handle_only_when_the_log_is_readable(self):
+        with_log, without_log = self._conversation(1, 1), self._conversation(1, 1)
+        self._prune(with_log, recoverable=True)
+        self._prune(without_log, recoverable=False)
+
+        self.assertIn('search_session(uuid="call_0")', with_log[2].content)
+        self.assertNotIn("search_session", without_log[2].content)
 
 
-class TestEvictAnthropicToolResults(unittest.TestCase):
-    """Layer 1 on the Anthropic transcript shape.
+class TestPruneAnthropicToolResults(unittest.TestCase):
+    """Layer 1 on the Anthropic transcript shape: a round is one role="user"
+    message of tool_result blocks, so the unit is a block, not a message."""
 
-    Anthropic has no role="tool" message: a whole round is packed into the
-    content list of one role="user" message as tool_result blocks. Scanning
-    only role="tool" meant eviction never once ran on this path.
-    """
+    def _body(self, tag):
+        return " ".join(f"{tag}-token{i}" for i in range(3000))
 
-    WINDOW = 10_000
-    OVER_THRESHOLD = 9_000
-
-    def _body(self, tag, words=200):
-        return " ".join(f"{tag}-token{i}" for i in range(words))
-
-    def _round(self, tag, size, name="read_file"):
-        """One assistant tool_use message plus the user message answering it."""
+    def _round(self, tag, size):
         ids = [f"toolu_{tag}_{i}" for i in range(size)]
-        assistant = Message(
-            role="assistant",
-            content="calling tools",
-            tool_calls=[
-                {
-                    "type": "function",
-                    "id": call_id,
-                    "function": {
-                        "name": name,
-                        "arguments": json.dumps({"file_path": f"{tag}_{i}.py"}),
-                    },
-                }
-                for i, call_id in enumerate(ids)
-            ],
-        )
+        assistant = Message(role="assistant", content="calling tools", tool_calls=[{
+            "type": "function", "id": call_id,
+            "function": {"name": "read_file", "arguments": json.dumps({"file_path": f"{tag}_{i}.py"})},
+        } for i, call_id in enumerate(ids)])
         results = Message(role="user", content=[
             {"type": "tool_result", "tool_use_id": call_id, "content": self._body(f"{tag}{i}")}
             for i, call_id in enumerate(ids)
@@ -215,75 +166,21 @@ class TestEvictAnthropicToolResults(unittest.TestCase):
         from agentica.compression.evict import tool_result_blocks
         return [b for m in msgs for b in tool_result_blocks(m)]
 
-    def test_anthropic_results_are_evicted_at_all(self):
-        """The regression: this whole provider path was invisible to Layer 1."""
-        from agentica.compression.evict import evict_tool_results
-        msgs = self._conversation(*([1] * 8))
+    def test_older_blocks_are_pruned_and_the_unseen_round_survives(self):
+        from agentica.compression.evict import prune_tool_results
+        msgs = self._conversation(3, 3, 4)
+        live_before = [b["content"] for b in self._blocks(msgs)[6:]]
 
-        count = evict_tool_results(
-            msgs, context_tokens=self.OVER_THRESHOLD, context_window=self.WINDOW,
+        result = prune_tool_results(
+            msgs, context_tokens=1_000_000, target_tokens=None,
+            model_id="gpt-4o", recoverable=True,
         )
 
-        self.assertGreater(count, 0)
+        self.assertEqual(result.pruned, 6)
         blocks = self._blocks(msgs)
-        evicted = [b for b in blocks if b["content"].startswith("[Tool result evicted")]
-        self.assertEqual(len(evicted), count)
-
-    def test_never_evicts_the_unseen_trailing_round(self):
-        from agentica.compression.evict import evict_tool_results
-        msgs = self._conversation(6)
-
-        count = evict_tool_results(
-            msgs, context_tokens=1_000_000, context_window=self.WINDOW,
-        )
-
-        self.assertEqual(count, 0)
-
-    def test_evicts_block_by_block_oldest_first(self):
-        from agentica.compression.evict import evict_tool_results
-        msgs = self._conversation(3, 3, 3, 4)
-
-        evict_tool_results(msgs, context_tokens=1_000_000, context_window=self.WINDOW)
-
-        flags = [b["content"].startswith("[Tool result evicted") for b in self._blocks(msgs)]
-        self.assertEqual(flags[:9], [True] * 9, "older rounds go first")
-        self.assertEqual(flags[9:], [False] * 4, "current round survives")
-
-    def test_placeholder_resolves_the_call_through_the_assistant_message(self):
-        """A tool_result block carries only tool_use_id, never the tool name."""
-        from agentica.compression.evict import evict_tool_results
-        msgs = self._conversation(1, 1)
-
-        evict_tool_results(
-            msgs, context_tokens=self.OVER_THRESHOLD, context_window=self.WINDOW,
-        )
-
-        placeholder = self._blocks(msgs)[0]["content"]
-        self.assertIn("read_file(", placeholder)
-        self.assertIn("r0_0.py", placeholder)
-
-    def test_partially_evicted_message_is_revisited(self):
-        """A round is one message but many results; the flag must not close it early."""
-        from agentica.compression.evict import evict_tool_results
-        msgs = self._conversation(4, 1)
-        results = msgs[2]
-
-        evict_tool_results(
-            msgs, context_tokens=self.OVER_THRESHOLD, context_window=self.WINDOW,
-        )
-        first_pass = sum(
-            b["content"].startswith("[Tool result evicted") for b in results.content
-        )
-        self.assertGreater(first_pass, 0)
-        if first_pass < 4:
-            self.assertFalse(results._evicted, "more results left to reclaim here")
-            evict_tool_results(
-                msgs, context_tokens=1_000_000, context_window=self.WINDOW,
-            )
-            self.assertTrue(all(
-                b["content"].startswith("[Tool result evicted") for b in results.content
-            ))
-        self.assertTrue(results._evicted)
+        self.assertTrue(all("pruned from the middle" in b["content"] for b in blocks[:6]))
+        self.assertIn('search_session(uuid="toolu_r0_0")', blocks[0]["content"])
+        self.assertEqual([b["content"] for b in blocks[6:]], live_before)
 
 
 # ===========================================================================
@@ -312,35 +209,12 @@ class TestToolCallArgumentShrinking(unittest.TestCase):
             messages[assistant_index].tool_calls[0]["function"]["arguments"]
         )["content"]
 
-    def test_older_arguments_survive_eviction_under_pressure(self):
-        """Layer 1 evicts results, never arguments: a stand-in in an old call is
-        what models copy into their next call as its payload."""
-        from agentica.compression.evict import evict_context
-
-        old_payload = "z " * 400
-        new_payload = "n " * 400
-        messages = (
-            self._write_file_call(old_payload, call_id="call_old", path="old.txt")
-            + self._write_file_call(new_payload, call_id="call_new", path="new.txt")
-        )
-        messages[2].content = " ".join(f"old-result-{i}" for i in range(400))
-        calls_before = [json.dumps(m.tool_calls) for m in messages if m.tool_calls]
-
-        result = evict_context(
-            messages, context_tokens=9_000, context_window=10_000, model_id="gpt-4o",
-        )
-
-        self.assertEqual(result.tool_results, 1)
-        self.assertTrue(messages[2].content.startswith("[Tool result evicted"))
-        self.assertEqual([json.dumps(m.tool_calls) for m in messages if m.tool_calls], calls_before)
-        self.assertEqual(self._content_of(messages, 1), old_payload)
-
-    def test_anthropic_tool_use_input_and_thinking_survive_eviction(self):
+    def test_anthropic_tool_use_input_and_thinking_survive_a_prune(self):
         """Claude keeps the payload in tool_use.input next to a signed thinking
-        block; neither may change when the old round's result is evicted."""
-        from agentica.compression.evict import evict_context
+        block; neither may change when the old round's result is pruned."""
+        from agentica.compression.evict import prune_tool_results
 
-        old_payload = "z " * 400
+        old_payload = "z " * 4000
         old = Message(
             role="assistant",
             content=[
@@ -366,19 +240,19 @@ class TestToolCallArgumentShrinking(unittest.TestCase):
             old,
             Message(role="user", content=[{
                 "type": "tool_result", "tool_use_id": "call_old",
-                "content": " ".join(f"old-result-{i}" for i in range(400)),
+                "content": " ".join(f"old-result-{i}" for i in range(3000)),
             }]),
             Message(role="user", content="second"),
             Message(role="assistant", content="done"),
         ]
         content_before = json.dumps(old.content)
 
-        result = evict_context(
-            messages, context_tokens=9_000, context_window=10_000, model_id="gpt-4o",
+        result = prune_tool_results(
+            messages, context_tokens=1_000_000, target_tokens=None, model_id="gpt-4o",
         )
 
-        self.assertEqual(result.tool_results, 1)
-        self.assertTrue(messages[2].content[0]["content"].startswith("[Tool result evicted"))
+        self.assertEqual(result.pruned, 1)
+        self.assertIn("pruned from the middle", messages[2].content[0]["content"])
         self.assertEqual(json.dumps(old.content), content_before)
         self.assertEqual(self._content_of(messages, 1), old_payload)
 
@@ -392,7 +266,7 @@ class TestToolCallArgumentShrinking(unittest.TestCase):
 
     def test_upgrade_rewrites_old_string_marker_even_when_roomy(self):
         """Live JSONL still has the string form. Leave it and the model copies it."""
-        from agentica.compression.evict import evict_context, upgrade_legacy_omitted_args
+        from agentica.compression.evict import prune_tool_results, upgrade_legacy_omitted_args
         from agentica.compression.tool_call_args import omitted_tool_arg
 
         old = "<evicted-tool-arg chars=1183>"
@@ -417,8 +291,8 @@ class TestToolCallArgumentShrinking(unittest.TestCase):
         self.assertEqual(parsed["message"], omitted_tool_arg(1183))
         self.assertIsInstance(parsed["message"], dict)
 
-        evict_context(
-            messages, context_tokens=100, context_window=10_000, model_id="gpt-4o",
+        prune_tool_results(
+            messages, context_tokens=100, target_tokens=None, model_id="gpt-4o",
         )
         parsed = json.loads(messages[1].tool_calls[0]["function"]["arguments"])
         self.assertEqual(parsed["message"], omitted_tool_arg(1183))
@@ -459,119 +333,9 @@ class TestToolCallArgumentShrinking(unittest.TestCase):
             omitted_tool_arg(1183),
         )
 
-    def test_result_placeholder_does_not_invite_reissue_of_omitted_args(self):
-        """Re-running a string tool argument with the marker is how it spreads."""
-        from agentica.compression.evict import evict_tool_results
-        from agentica.compression.tool_call_args import omitted_tool_arg
-
-        payload = omitted_tool_arg(1183)
-        msgs = [
-            Message(role="user", content="hi"),
-            Message(role="assistant", tool_calls=[{
-                "id": "s1",
-                "type": "function",
-                "function": {
-                    "name": "write_note",
-                    "arguments": json.dumps({
-                        "target": "vpetmac-05",
-                        "message": payload,
-                    }),
-                },
-            }]),
-            Message(
-                role="tool",
-                tool_call_id="s1",
-                tool_name="write_note",
-                content=" ".join(f"queued-token{i}" for i in range(200)),
-            ),
-            Message(role="user", content="next"),
-            Message(role="assistant", content="ok"),
-        ]
-
-        evict_tool_results(
-            msgs, context_tokens=9_000, context_window=10_000, model_id="gpt-4o",
-        )
-
-        placeholder = msgs[2].content
-        self.assertIn("write_note(", placeholder)
-        self.assertNotIn("Re-run the call", placeholder)
-        self.assertNotIn("<evicted-tool-arg", placeholder)
-        self.assertIn("cannot be recovered", placeholder)
-
-    def _round(self, call_id, name="execute"):
-        return [
-            Message(role="user", content="hi"),
-            Message(role="assistant", tool_calls=[{
-                "id": call_id,
-                "type": "function",
-                "function": {"name": name, "arguments": json.dumps({"command": "ls"})},
-            }]),
-            Message(
-                role="tool", tool_call_id=call_id, tool_name=name,
-                content=" ".join(f"line-token{i}" for i in range(200)),
-            ),
-            Message(role="user", content="next"),
-            Message(role="assistant", content="ok"),
-        ]
-
-    def test_placeholder_quotes_a_handle_only_when_the_log_is_readable(self):
-        from agentica.compression.evict import evict_tool_results
-
-        with_log, without_log = self._round("call_a1"), self._round("call_b2")
-        for msgs, recoverable in ((with_log, True), (without_log, False)):
-            evict_tool_results(
-                msgs, context_tokens=9_000, context_window=10_000,
-                model_id="gpt-4o", recoverable=recoverable,
-            )
-
-        self.assertIn('search_session(uuid="call_a1")', with_log[2].content)
-        self.assertNotIn("search_session", without_log[2].content)
-
-    def test_anthropic_placeholder_quotes_the_tool_use_id(self):
-        from agentica.compression.evict import evict_tool_results
-
-        msgs = [
-            Message(role="user", content="hi"),
-            Message(role="assistant", tool_calls=[{
-                "id": "toolu_9",
-                "type": "function",
-                "function": {"name": "execute", "arguments": json.dumps({"command": "ls"})},
-            }]),
-            Message(role="user", content=[{
-                "type": "tool_result", "tool_use_id": "toolu_9",
-                "content": " ".join(f"line-token{i}" for i in range(200)),
-            }]),
-            Message(role="user", content="next"),
-            Message(role="assistant", content="ok"),
-        ]
-
-        evict_tool_results(
-            msgs, context_tokens=9_000, context_window=10_000,
-            model_id="gpt-4o", recoverable=True,
-        )
-
-        self.assertIn('search_session(uuid="toolu_9")', msgs[2].content[0]["content"])
-
-    def test_dropped_arguments_still_point_at_the_original_result(self):
-        from agentica.compression.evict import evict_tool_results
-        from agentica.compression.tool_call_args import omitted_tool_arg
-
-        msgs = self._round("call_c3", name="write_note")
-        msgs[1].tool_calls[0]["function"]["arguments"] = json.dumps(
-            {"message": omitted_tool_arg(900)}
-        )
-
-        evict_tool_results(
-            msgs, context_tokens=9_000, context_window=10_000,
-            model_id="gpt-4o", recoverable=True,
-        )
-
-        self.assertIn("do not re-issue", msgs[2].content)
-        self.assertIn('search_session(uuid="call_c3")', msgs[2].content)
-
 
 class TestSessionLogToolCallHandle(unittest.TestCase):
-    """The handle in an evicted placeholder must resolve to the full result."""
+    """The handle in a pruned result's marker must resolve to the full result."""
 
     def test_find_entries_resolves_a_tool_call_id(self):
         from agentica.memory.session_log import SessionLog
@@ -1097,16 +861,6 @@ class TestCompactTokenLimit(unittest.TestCase):
         self.assertFalse(cm.should_auto_compact([], model, context_tokens=7_999))
         self.assertTrue(cm.should_auto_compact([], model, context_tokens=8_000))
 
-    def test_layer1_still_before_layer2_with_cap(self):
-        from agentica.compression.evict import EVICT_THRESHOLD_RATIO
-        from agentica.compression.manager import auto_compact_threshold, working_context_window
-
-        window, cap = 1_000_000, 300_000
-        working = working_context_window(window, cap)
-        layer1 = int(working * EVICT_THRESHOLD_RATIO)
-        layer2 = auto_compact_threshold(window, cap)
-        self.assertLess(layer1, layer2)
-
     def test_parse_rejects_junk(self):
         from agentica.compression.manager import parse_compact_token_limit
 
@@ -1151,44 +905,6 @@ class TestNativeCompactionLimits(unittest.TestCase):
                 self.assertLess(limit, window)
                 self.assertGreater(limit, prev, "limit must grow with the window")
             prev = limit
-
-
-class TestEvictThresholdOverride(unittest.TestCase):
-    """P3-2: AGENTICA_EVICT_THRESHOLD_RATIO — the one user-facing knob."""
-
-    def _with_env(self, value):
-        if value is None:
-            os.environ.pop("AGENTICA_EVICT_THRESHOLD_RATIO", None)
-        else:
-            os.environ["AGENTICA_EVICT_THRESHOLD_RATIO"] = value
-
-    def tearDown(self):
-        self._with_env(None)
-
-    def test_default_is_point_eight(self):
-        from agentica.compression.evict import evict_threshold_ratio
-        self._with_env(None)
-        self.assertEqual(evict_threshold_ratio(), 0.8)
-
-    def test_env_override_applies(self):
-        from agentica.compression.evict import evict_threshold_ratio, under_pressure
-        self._with_env("0.7")
-        self.assertEqual(evict_threshold_ratio(), 0.7)
-        self.assertTrue(under_pressure(7_000, 10_000))
-        self.assertFalse(under_pressure(6_999, 10_000))
-
-    def test_garbage_env_falls_back_to_default(self):
-        from agentica.compression.evict import evict_threshold_ratio
-        self._with_env("banana")
-        self.assertEqual(evict_threshold_ratio(), 0.8)
-
-    def test_out_of_range_is_clamped_below_layer2(self):
-        from agentica.compression.evict import evict_threshold_ratio
-        self._with_env("0.99")
-        ratio = evict_threshold_ratio()
-        self.assertLess(ratio, 0.95, "must stay strictly below the Layer 2 trigger")
-        self._with_env("0")
-        self.assertGreater(evict_threshold_ratio(), 0.0)
 
 
 class TestCompressionManagerGetStats(unittest.TestCase):

@@ -24,25 +24,24 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 
 # ============================================================================
-# Demo 1: evict_tool_results 单元演示（无需 LLM）
+# Demo 1: prune_tool_results 单元演示（无需 LLM）
 # ============================================================================
 
-def demo_evict_tool_results():
-    """展示工具结果淘汰：有压力才动手，按最旧优先淘汰到目标为止。"""
+def demo_prune_tool_results():
+    """展示工具结果修剪：只在换窗线上动手，保留头尾，够不到目标就整体放弃。"""
     from agentica.compression.evict import (
-        evict_tool_results,
-        EVICT_THRESHOLD_RATIO,
-        EVICT_TARGET_RATIO,
+        prune_tool_results,
+        PRUNE_TARGET_RATIO,
+        PRUNE_HEAD_CHARS,
+        PRUNE_TAIL_CHARS,
     )
     from agentica.model.message import Message
 
     print("=" * 60)
-    print("Demo 1: 工具结果淘汰 — 有压力才清，清到目标就停")
+    print("Demo 1: 工具结果修剪 — 一个触发点，修剪或换窗二选一")
     print("=" * 60)
-    print(f"  策略: 占用超过窗口 {EVICT_THRESHOLD_RATIO:.0%} 才动手，淘汰最旧的直到降回 {EVICT_TARGET_RATIO:.0%}")
-    print("        没有「保留最近 N 条」这种参数：固定条数必然输给 N+1 个并行调用\n")
-
-    window = 20_000
+    print(f"  策略: 到换窗线才动手；旧结果保留前 {PRUNE_HEAD_CHARS} + 后 {PRUNE_TAIL_CHARS} 字符，")
+    print(f"        修剪后能降到工作窗口 {PRUNE_TARGET_RATIO:.0%} 以下才应用，否则直接换窗\n")
 
     def build_conversation(rounds):
         messages = [Message(role="user", content="请帮我分析这些文件")]
@@ -56,33 +55,26 @@ def demo_evict_tool_results():
                 role="tool",
                 tool_call_id=f"call_{i}",
                 tool_name="read_file",
-                tool_args={"file_path": f"{i}.py"},
-                content=" ".join(f"line{i}-token{w}" for w in range(200)),
+                content=" ".join(f"line{i}-token{w}" for w in range(2000)),
             ))
         return messages
 
-    # 场景 1：窗口还宽裕 —— 清掉只会逼模型重跑工具，所以一条都不动
-    roomy = build_conversation(8)
-    n_roomy = evict_tool_results(roomy, context_tokens=4_000, context_window=window)
-    print(f"  窗口宽裕 (4k/20k):  淘汰 {n_roomy} 条  ← 保留全部，避免重读循环")
+    # 场景 1：修剪够得到目标 —— 应用，窗口保住，只断一次缓存
+    reach = build_conversation(8)
+    r1 = prune_tool_results(reach, context_tokens=60_000, target_tokens=50_000)
+    # 场景 2：修剪够不到目标 —— 一个字都不改，交给换窗
+    short = build_conversation(8)
+    before = [m.content for m in short]
+    r2 = prune_tool_results(short, context_tokens=60_000, target_tokens=1_000)
 
-    # 场景 2：窗口吃紧 —— 淘汰最旧的，最新那一批（模型还没看过）永不淘汰
-    tight = build_conversation(8)
-    before = sum(len(str(m.content or "")) for m in tight if m.role == "tool")
-    n_tight = evict_tool_results(tight, context_tokens=18_000, context_window=window)
-    after = sum(len(str(m.content or "")) for m in tight if m.role == "tool")
-    saved = before - after
-    print(f"  窗口吃紧 (18k/20k): 淘汰 {n_tight} 条  |  节省字符: {saved:,} ({saved / before * 100:.0f}%)")
-
-    tool_msgs = [m for m in tight if m.role == "tool"]
-    assert n_roomy == 0, "窗口宽裕时不应淘汰"
-    assert n_tight > 0, "窗口吃紧时应淘汰旧结果"
-    assert tool_msgs[0]._evicted, "最旧结果应被淘汰"
-    assert not tool_msgs[-1]._evicted, "模型还没看过的最新一批应原样保留"
-    assert not all(m._evicted for m in tool_msgs), "清到目标就停，不应全部淘汰"
+    tool_msgs = [m for m in reach if m.role == "tool"]
+    print(f"  够得到目标: 修剪 {r1.pruned} 条，释放约 {r1.freed_tokens:,} tokens")
+    print(f"  够不到目标: 修剪 {r2.pruned} 条  ← 历史原样不动，直接换窗")
+    assert r1.pruned == 7, "除了模型还没看过的最新一批，其余全部修剪"
+    assert "pruned from the middle" not in tool_msgs[-1].content, "最新一批原样保留"
+    assert r2.pruned == 0 and [m.content for m in short] == before
     print("\n  验证通过 ✓")
-    print(f"  tool_msg[0]:  '{tool_msgs[0].content[:72]}'  ← 已淘汰(占位符写明调用，可重发)")
-    print(f"  tool_msg[-1]: '{tool_msgs[-1].content[:40]}...'  ← 保留\n")
+    print(f"  tool_msg[0] 中段标记: '{tool_msgs[0].content[PRUNE_HEAD_CHARS:PRUNE_HEAD_CHARS + 70].strip()}'\n")
 
 
 # ============================================================================
@@ -206,7 +198,7 @@ async def demo_compression_with_agent():
 
 async def main():
     # Demo 1 & 2 无需 API Key，始终运行
-    demo_evict_tool_results()
+    demo_prune_tool_results()
     demo_auto_compact_config()
 
     api_key = os.environ.get("OPENAI_API_KEY", "")

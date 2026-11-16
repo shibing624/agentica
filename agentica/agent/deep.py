@@ -9,7 +9,7 @@ Use plain Agent for SDK integrations that need the smallest stable surface.
 DeepAgent enables the product defaults users expect from an unattended assistant:
 - built-in tools (read_file / write_file / apply_patch / grep / glob, execute, web search, subagent task, todos; long HTML reports via write_file)
 - Runner agentic loop: LLM ↔ tool-call auto-loop with multi-turn reasoning
-- Two-layer compression (tool-result budget → Layer 1 evict → Layer 2
+- Two-layer compression (tool-result budget → Layer 1 prune → Layer 2
   empty window; reactive compact on prompt_too_long)
 - Death spiral detection + cost tracking + cost budget
 - Repeated tool-call detection (inject "change strategy" at 3 repeats)
@@ -93,7 +93,7 @@ class DeepAgent(Agent):
     not as the minimal SDK core contract.
 
     Enabled by default:
-    - Two-layer compression pipeline (eviction + LLM summarisation)
+    - Two-layer compression pipeline (prune + new window)
     - MCP auto-loading from local mcp_config.json/yaml when available
     - Workspace memory: MEMORY.md index in the system prompt, topic files on demand
     - Conversation auto-archive (auto_archive=True)

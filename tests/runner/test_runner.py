@@ -614,8 +614,8 @@ class TestRunnerPersistsCompactedContext(unittest.TestCase):
         self.assertIs(event["is_main_agent"], False)
 
 
-class TestRunnerEvictionGate(unittest.TestCase):
-    """Stage 3 must only evict tool results when the context is actually tight."""
+class TestRunnerPruneGate(unittest.TestCase):
+    """Layer 1 prunes only at the compaction line, never before it."""
 
     def _agent_and_messages(self):
         from agentica.agent import Agent
@@ -625,48 +625,57 @@ class TestRunnerEvictionGate(unittest.TestCase):
         agent = Agent(model=model)
         messages = [Message(role="user", content="analyse these files")]
         for i in range(8):
-            messages.append(Message(role="assistant", content="calling tools"))
-            body = " ".join(f"b{i}-token{w}" for w in range(200))
-            messages.append(Message(role="tool", content=body))
+            messages.append(Message(role="assistant", content="calling tools", tool_calls=[{
+                "id": f"c{i}", "type": "function",
+                "function": {"name": "read_file", "arguments": "{}"},
+            }]))
+            body = " ".join(f"b{i}-token{w}" for w in range(2000))
+            messages.append(Message(role="tool", tool_call_id=f"c{i}", content=body))
         return agent, model, messages
 
-    def _evicted(self, messages):
-        return sum(1 for m in messages if m.role == "tool" and m._evicted)
+    def _pruned(self, messages):
+        return sum(1 for m in messages if m.role == "tool" and "pruned from the middle" in m.content)
 
-    def test_roomy_context_keeps_every_tool_result(self):
+    def _window_for(self, messages, fill):
+        from agentica.utils.tokens import count_tokens
+        return int(count_tokens(messages, None, "gpt-4o") / fill)
+
+    def test_below_the_line_keeps_every_tool_result(self):
         from agentica.runner import Runner
 
         agent, model, messages = self._agent_and_messages()
-        model.context_window = 200_000
+        model.context_window = self._window_for(messages, 0.9)
 
         asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
 
-        self.assertEqual(self._evicted(messages), 0)
+        self.assertEqual(self._pruned(messages), 0)
 
-    def test_tight_context_evicts_the_oldest_results(self):
+    def test_at_the_line_prunes_every_older_result_and_keeps_the_window(self):
         from agentica.runner import Runner
 
         agent, model, messages = self._agent_and_messages()
-        # 8 results of ~800 tokens each: ~6.4k occupied, so an 8k window puts
-        # the request past the 70% trigger.
-        model.context_window = 8_000
+        model.context_window = self._window_for(messages, 0.97)
+        cm = agent.tool_config.compression_manager
 
-        asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
+        with patch.object(cm, "auto_compact", new_callable=AsyncMock) as cut:
+            asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
 
-        evicted = self._evicted(messages)
-        self.assertGreater(evicted, 0)
-        self.assertLess(evicted, 7, "must stop at target and spare the trailing batch")
+        self.assertEqual(self._pruned(messages), 7, "all but the unseen batch")
+        cut.assert_not_awaited()
 
-    def test_disabled_evict_keeps_every_result_even_when_tight(self):
+    def test_disabled_prune_goes_straight_to_a_new_window(self):
         from agentica.runner import Runner
 
         agent, model, messages = self._agent_and_messages()
-        model.context_window = 8_000
+        model.context_window = self._window_for(messages, 0.97)
         agent.tool_config.enable_evict = False
+        cm = agent.tool_config.compression_manager
 
-        asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
+        with patch.object(cm, "auto_compact", new_callable=AsyncMock, return_value=False) as cut:
+            asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
 
-        self.assertEqual(self._evicted(messages), 0)
+        self.assertEqual(self._pruned(messages), 0)
+        cut.assert_awaited_once()
 
 
 class TestRunnerNativeCompaction(unittest.TestCase):
@@ -684,7 +693,7 @@ class TestRunnerNativeCompaction(unittest.TestCase):
         return agent, model, cm
 
     def test_native_endpoint_is_not_invoked(self):
-        from agentica.compression import EvictionResult
+        from agentica.compression import PruneResult
         from agentica.runner import Runner
 
         agent, model, cm = self._agent()
@@ -693,13 +702,13 @@ class TestRunnerNativeCompaction(unittest.TestCase):
             side_effect=AssertionError("native compact is no longer a Layer 2 path")
         )
 
-        with patch("agentica.runner.compress.evict_context", return_value=EvictionResult()) as evict, \
+        with patch("agentica.runner.compress.prune_tool_results", return_value=PruneResult()) as prune, \
              patch.object(cm, "should_auto_compact", return_value=False), \
              patch.object(cm, "auto_compact", new_callable=AsyncMock) as local_auto:
             asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
 
         model.compact_context.assert_not_called()
-        evict.assert_called_once()
+        prune.assert_not_called()
         local_auto.assert_not_awaited()
         self.assertIsNone(messages[-1].provider_checkpoint)
 
@@ -720,20 +729,20 @@ class TestRunnerNativeCompaction(unittest.TestCase):
         local_auto.assert_not_awaited()
 
     def test_layer2_installs_local_new_window(self):
-        from agentica.compression import EvictionResult
+        from agentica.compression import PruneResult
         from agentica.runner import Runner
 
         agent, model, cm = self._agent()
         messages = [Message(role="user", content="long context")]
 
-        with patch("agentica.runner.compress.evict_context", return_value=EvictionResult()) as evict, \
+        with patch("agentica.runner.compress.prune_tool_results", return_value=PruneResult()) as prune, \
              patch.object(cm, "should_auto_compact", return_value=True), \
              patch.object(cm, "auto_compact", new_callable=AsyncMock, return_value=True) as local_auto:
             asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
 
-        evict.assert_called_once()
-        self.assertIs(evict.call_args.args[0], messages)
-        self.assertEqual(evict.call_args.kwargs["context_window"], model.context_window)
+        prune.assert_called_once()
+        self.assertIs(prune.call_args.args[0], messages)
+        self.assertIsNotNone(prune.call_args.kwargs["target_tokens"])
         local_auto.assert_awaited_once()
         self.assertIsNone(messages[-1].provider_checkpoint)
 

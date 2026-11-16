@@ -52,8 +52,9 @@ Runner._run_impl()
     │       └── Volatile Zone:    冻结的 memory/experiences + YYYY-MM-DD 日期
     │
     ├─► 上下文压缩检查 (CompressMixin)
-    │       ├── Layer 1: evict_context() — 80% 水位起免费淘汰旧工具结果与超长参数
-    │       └── Layer 2: CompressionManager.auto_compact() — 95% 水位换空窗 + 重写 notes
+    │       ├── 唯一触发线: compact_token_limit 或窗口 95%，线以下不改历史
+    │       ├── Layer 1: prune_tool_results() — 旧工具结果保留头尾，能降到 50% 才应用
+    │       └── Layer 2: CompressionManager.auto_compact() — 修剪不够时换空窗 + 重写 notes
     │
     ├─► 模型调用 (RetryMixin._call_with_retry)
     │       └── 自动处理流式首包重试、跨 provider fallback、thinking 签名修复、reactive compact
@@ -92,7 +93,7 @@ Prompt Cache（无论是 Anthropic 的显式 `cache_control` 断点，还是 Ope
 
 ## 上下文压缩的底层机制与不变量 (`agentica/compression/`)
 
-### 1. 为什么淘汰和打包以「单条工具结果」为单位？
+### 1. 为什么修剪和打包以「单条工具结果」为单位？
 
 OpenAI 与 Anthropic 对工具结果的协议形状完全不同：
 - **OpenAI 系**：一条工具结果是一条独立的 `role="tool"` 消息。
@@ -102,9 +103,9 @@ OpenAI 与 Anthropic 对工具结果的协议形状完全不同：
 
 ### 2. 保护当前工具轮次 (`live_tool_round_start`)
 
-Layer 1 绝不淘汰模型还没看过的尾部工具结果，也绝不收缩正在执行的调用参数。`live_tool_round_start` 在定位尾部边界时会先跳过带 `_injected=True` 标记的中途插话消息（`_inject_steering` / `_inject_peer_messages`），防止插话把边界抬高而误伤刚返回的工具结果。
+Layer 1 绝不修剪模型还没看过的尾部工具结果。`live_tool_round_start` 在定位尾部边界时会先跳过带 `_injected=True` 标记的中途插话消息（`_inject_steering` / `_inject_peer_messages`），防止插话把边界抬高而误伤刚返回的工具结果。
 
-Layer 1 不改写任何工具调用参数，只淘汰工具结果。历史参数里的任何占位符（截断前缀、字符串标记或 `{"$evicted": N}`）都会被模型当作写法照抄进下一次 `write_file` / `apply_patch` / `execute`；旧会话日志里残留的 `$evicted` 标记仍由 `get_function_call` 拒绝执行。
+Layer 1 不改写任何工具调用参数，只修剪工具结果。历史参数里的任何占位符（截断前缀、字符串标记或 `{"$evicted": N}`）都会被模型当作写法照抄进下一次 `write_file` / `apply_patch` / `execute`；旧会话日志里残留的 `$evicted` 标记仍由 `get_function_call` 拒绝执行。
 
 ### 3. 水位校准 (`ContextCalibration`)
 

@@ -9,7 +9,7 @@ result is produced rather than before a request. Two rules:
        is shrunk on the spot, so a 5 MB output never enters the context once.
     2. Per-batch: when the whole batch of fresh results would occupy more than
        ``TOOL_BATCH_BUDGET_RATIO`` of the window, the largest ones are shrunk
-       until it fits. Layer 1 deliberately never touches the trailing batch,
+       until it fits. Layer 1 deliberately never prunes the trailing batch,
        so without this a single wide parallel round has nothing to save it.
 
 **Shrinking to a file path is only useful when someone can open the path.**
@@ -21,8 +21,8 @@ the shrink follows the session's actual capability (``can_recover_spill``):
 spill to disk and hand over the path when it can be read back, otherwise
 truncate honestly and say so.
 
-Accumulated *history* is not this layer's problem. That is Layer 1's, gated on
-real window pressure; a second budget here in fixed chars would be a second
+Accumulated *history* is not this layer's problem. That is Layer 1's, at the
+compaction line; a second budget here in fixed chars would be a second
 threshold governing the same decision, and it fired long before the window was
 under any pressure at all.
 

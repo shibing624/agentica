@@ -88,12 +88,14 @@ class ToolConfig:
     # cross-provider fallback); these two flags gate the *automatic* path.
     # Both default on. Layer 0 (tool-result budget) is an output policy,
     # not a switch — per-function max_result_size_chars already exists.
+    # Layer 1: at the compaction line, prune old tool results to head + tail
+    # before cutting a new window.
     enable_evict: bool = True
     enable_auto_compact: bool = True
     # Optional working cap in tokens. Does not rewrite model.context_window
     # (that is the provider hard limit). Unset → Layer 2 new window at 95%
-    # of the window. Set → Layer 2 at min(this, window×0.95); Layer 1
-    # ratios use min(this, window) as the working window.
+    # of the window. Set → Layer 2 at min(this, window×0.95). Layer 1 prunes
+    # at the same line, never before it.
     compact_token_limit: Optional[int] = None
     compression_manager: Optional[Any] = None
 

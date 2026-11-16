@@ -326,7 +326,7 @@ def _seed_context_tokens(agent, tui_state: dict) -> None:
         tui_state["context_tokens"] = breakdown.total
         # The denominator comes from the measurement, which already resolved
         # the working cap. Reading ``model.context_window`` here instead is how
-        # the bar came to divide by 1M while the runner evicted against 512k.
+        # the bar came to divide by 1M while the runner compacted at 512k.
         tui_state["context_window"] = breakdown.window
         tui_state["provider_window"] = breakdown.provider_window
     except Exception as e:

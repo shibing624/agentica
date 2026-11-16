@@ -1,30 +1,29 @@
 # -*- coding: utf-8 -*-
 """The live tool round is untouchable.
 
-Layer 1 runs before the next LLM call. The round the model has not seen yet
+Layer 1 runs before the next LLM call, at the compaction line. The round the model has not seen yet
 (or is still executing) is the assistant that issued the trailing results —
-or a trailing assistant with tool_calls and no results yet. Evicting those
+or a trailing assistant with tool_calls and no results yet. Pruning those
 results is how the agent loop eats its own
 evidence: write_file/apply_patch write ``...[truncated]`` to disk, execute
 runs a cut command, grep/glob lose the match set they just produced.
 
 This file pins the round, not a tool-name allowlist. Builtin file/shell
 tools and user-defined tools (SDK ``tools=``, CLI ``--tools``, Web extra
-tools, MCP) occupy the same round and must all survive ``evict_context``.
+tools, MCP) occupy the same round and must all survive ``prune_tool_results``.
 """
 import json
 
 import pytest
 
-from agentica.compression.evict import evict_context, live_tool_round_start
+from agentica.compression.evict import live_tool_round_start, prune_tool_results
 from agentica.model.message import Message
 
-WINDOW = 10_000
-# Well past the 0.8 trigger, and large enough that result eviction has work.
-PRESSURE = dict(context_tokens=1_000_000, context_window=WINDOW)
+# Unconditional: these tests pin *what* may be pruned, not whether it pays.
+PRESSURE = dict(context_tokens=1_000_000, target_tokens=None)
 
 
-def _result_body(tag: str, words: int = 200) -> str:
+def _result_body(tag: str, words: int = 600) -> str:
     return " ".join(f"{tag}-token{i}" for i in range(words))
 
 
@@ -75,27 +74,26 @@ def _conversation(name, args, key, *, with_older=True):
 
 
 @pytest.mark.parametrize("name,args,key", LIVE_TOOLS)
-def test_evict_context_does_not_touch_live_round_arguments(name, args, key):
+def test_prune_does_not_touch_live_round_arguments(name, args, key):
     msgs, live_payload, _ = _conversation(name, args, key)
     live_assistant = len(msgs) - 2
 
-    evict_context(msgs, model_id="gpt-4o", **PRESSURE)
+    prune_tool_results(msgs, model_id="gpt-4o", **PRESSURE)
 
     assert _arg(msgs, live_assistant, key) == live_payload
     assert "...[truncated]" not in json.dumps(msgs[live_assistant].tool_calls)
 
 
 @pytest.mark.parametrize("name,args,key", LIVE_TOOLS)
-def test_evict_context_does_not_touch_live_round_results(name, args, key):
+def test_prune_does_not_touch_live_round_results(name, args, key):
     msgs, _, _ = _conversation(name, args, key)
     live_tool = len(msgs) - 1
     before = _tool_content(msgs, live_tool)
 
-    evict_context(msgs, model_id="gpt-4o", **PRESSURE)
+    prune_tool_results(msgs, model_id="gpt-4o", **PRESSURE)
 
     assert _tool_content(msgs, live_tool) == before
-    assert not before.startswith("[Tool result evicted")
-    assert msgs[live_tool]._evicted is not True
+    assert "pruned from the middle" not in before
 
 
 @pytest.mark.parametrize("name,args,key", LIVE_TOOLS)
@@ -113,7 +111,7 @@ def test_in_flight_call_arguments_are_not_shrunk(name, args, key):
     ]
     assert live_tool_round_start(msgs) == len(msgs) - 1
 
-    evict_context(msgs, model_id="gpt-4o", **PRESSURE)
+    prune_tool_results(msgs, model_id="gpt-4o", **PRESSURE)
 
     assert _arg(msgs, -1, key) == payload
     assert "...[truncated]" not in json.dumps(msgs[-1].tool_calls)
@@ -126,11 +124,11 @@ def test_older_round_arguments_are_never_rewritten(name, args, key):
     old_assistant = 1
     live_assistant = len(msgs) - 2
 
-    evict_context(msgs, model_id="gpt-4o", **PRESSURE)
+    prune_tool_results(msgs, model_id="gpt-4o", **PRESSURE)
 
     assert _arg(msgs, live_assistant, key) == live_payload
     assert _arg(msgs, old_assistant, key) == old_payload
-    assert msgs[old_assistant + 1].content.startswith("[Tool result evicted")
+    assert "pruned from the middle" in msgs[old_assistant + 1].content
 
 
 def test_parallel_live_batch_of_mixed_tools_survives():
@@ -181,11 +179,10 @@ def test_parallel_live_batch_of_mixed_tools_survives():
     args_before = json.dumps(assistant.tool_calls)
     result_before = [m.content for m in results]
 
-    evict_context(msgs, model_id="gpt-4o", **PRESSURE)
+    prune_tool_results(msgs, model_id="gpt-4o", **PRESSURE)
 
     assert json.dumps(assistant.tool_calls) == args_before
     assert [m.content for m in results] == result_before
-    assert all(not m._evicted for m in results)
 
 
 def test_live_tool_round_start_includes_the_issuing_assistant():
@@ -199,7 +196,7 @@ def test_live_tool_round_start_includes_the_issuing_assistant():
     assert msgs[4].role == "tool"
 
 
-def test_anthropic_packed_live_round_is_not_evicted():
+def test_anthropic_packed_live_round_is_not_pruned():
     """Claude packs the whole round into one user message of tool_result blocks."""
     long = "C" * 300
     live_result = _result_body("claude-live")
@@ -230,7 +227,7 @@ def test_anthropic_packed_live_round_is_not_evicted():
         ]),
     ]
 
-    evict_context(msgs, model_id="gpt-4o", **PRESSURE)
+    prune_tool_results(msgs, model_id="gpt-4o", **PRESSURE)
 
     assert live_assistant.tool_calls[0]["function"]["arguments"] == json.dumps({"text": long})
     assert live_assistant.content[0]["input"]["text"] == long
@@ -267,7 +264,7 @@ def test_injected_guidance_does_not_unprotect_the_in_flight_call():
 
     assert live_tool_round_start(msgs) == 1  # the in-flight assistant
 
-    evict_context(msgs, model_id="gpt-4o", **PRESSURE)
+    prune_tool_results(msgs, model_id="gpt-4o", **PRESSURE)
 
     assert _arg(msgs, 1, "content") == long
 
@@ -299,7 +296,7 @@ def test_injected_message_does_not_unprotect_a_packed_round():
 
     assert live_tool_round_start(msgs) == 1
 
-    evict_context(msgs, model_id="gpt-4o", **PRESSURE)
+    prune_tool_results(msgs, model_id="gpt-4o", **PRESSURE)
 
     assert live_assistant.tool_calls[0]["function"]["arguments"] == json.dumps({"message": long})
     assert live_assistant.content[0]["input"]["message"] == long
@@ -309,9 +306,8 @@ def test_injected_message_does_not_unprotect_a_packed_round():
 def test_an_injected_message_alone_creates_no_protected_round():
     """With nothing but injected text there is no round, and nothing to lose.
 
-    The boundary falls after the injected tail; either way nothing is evicted,
-    because eviction only rewrites tool results and assistant call arguments —
-    never a user message.
+    The boundary falls after the injected tail; either way nothing is pruned,
+    because pruning only rewrites tool results — never a user message.
     """
     msgs = [
         Message(role="user", content="go"),
@@ -319,7 +315,7 @@ def test_an_injected_message_alone_creates_no_protected_round():
     ]
     before = [m.content for m in msgs]
 
-    evict_context(msgs, model_id="gpt-4o", **PRESSURE)
+    prune_tool_results(msgs, model_id="gpt-4o", **PRESSURE)
 
     assert [m.content for m in msgs] == before
 
@@ -336,7 +332,7 @@ def test_an_ordinary_user_message_still_ends_the_live_round():
     # question means it is history now.
     assert live_tool_round_start(msgs) == len(msgs)
 
-    evict_context(msgs, model_id="gpt-4o", **PRESSURE)
+    prune_tool_results(msgs, model_id="gpt-4o", **PRESSURE)
 
     assert _arg(msgs, 1, "content") == long
 
@@ -346,7 +342,7 @@ def test_the_todo_reminder_does_not_unprotect_the_batch_it_follows():
 
     That batch is the one the model has not been called on yet, so it must stay
     live. Unmarked, the reminder became the tail and its own results were
-    evicted before the model ever read them.
+    pruned before the model ever read them.
     """
     long = "T" * 300
     live_result = _result_body("live")
@@ -367,8 +363,7 @@ def test_the_todo_reminder_does_not_unprotect_the_batch_it_follows():
 
     assert live_tool_round_start(msgs) == 1
 
-    evict_context(msgs, model_id="gpt-4o", **PRESSURE)
+    prune_tool_results(msgs, model_id="gpt-4o", **PRESSURE)
 
     assert _arg(msgs, 1, "content") == long
     assert live_tool.content == live_result
-    assert not live_tool._evicted

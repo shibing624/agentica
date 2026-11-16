@@ -1,146 +1,82 @@
 # -*- coding: utf-8 -*-
 """
-@description: Layer 1 — the free, LLM-free way to make an oversized request fit.
+@description: Layer 1 — the LLM-free way to make an oversized request fit.
 
-Runs before every LLM call in the tool loop. It answers one question: is the
-request too big, and if so, what is the cheapest thing to throw away?
+There is one compression trigger, not two (the dsh design): the Layer 2 line,
+``auto_compact_threshold`` — ``compact_token_limit`` or 95% of the window.
+Below it, history is never rewritten, so the request grows as a strict prefix
+and the provider cache keeps every token. Layer 1 used to fire on its own at
+80% of the window and evict oldest-first down to 30%; every pass re-cached the
+whole transcript from the first placeholder on, and since arguments and prose
+are not evictable, each pass freed less than the last and fired sooner — the
+cache paid again and again before Layer 2 ever ran.
 
-Two rules, both learned from a real re-read loop:
+At the line, the runner asks this module one question: would pruning old tool
+results bring the request under ``PRUNE_TARGET_RATIO`` of the working window?
+If so the prune is applied and the window stays — one prefix break, and the
+next crossing is far away. If not, nothing is rewritten and Layer 2 cuts a new
+window, which breaks the cache anyway; pruning first would only have been a
+second break for nothing.
 
-* **Only act under pressure.** Evicting a result the window had room for is a
-  pure loss — the model just re-runs the tool to get it back. Nothing happens
-  below ``EVICT_THRESHOLD_RATIO``.
-* **Evict oldest-first, only down to a target.** There is deliberately no
-  "keep the last N results" knob: any fixed count loses to a batch of N+1
-  parallel calls, which is exactly how a batch used to lose its first result
-  before the model had ever seen it. Recent results survive because eviction
-  stops once the request is small enough to reach them.
+**Pruning keeps the head and the tail** of every result longer than
+``PRUNE_MIN_CHARS`` (``PRUNE_HEAD_CHARS`` + ``PRUNE_TAIL_CHARS``, with a marker
+in between) instead of replacing it with a placeholder. The model keeps what a
+command printed first and how it ended — usually what it was working from —
+and does not have to re-run the tool to see it again. A pruned result is under
+``PRUNE_MIN_CHARS``, so it is never pruned twice. When the agent can read its
+session log (``recoverable``), the marker quotes the tool-call id that
+``search_session(uuid=...)`` resolves to the full output.
 
-Evicted content is replaced by a placeholder naming the call, so the model can
-re-issue it. It is deliberately *not* copied to a spill file: the session log
-already holds the full result. When the agent can read that log
-(``recoverable``: a session log plus ``search_session``), the placeholder also
-quotes the tool-call id, which ``search_session(uuid=...)`` resolves to the
-original output. Re-running is not an equivalent recovery: a non-idempotent
-call (``execute`` reading changing state) returns different evidence, and a
-call whose arguments were dropped cannot be re-run at all.
+What is never rewritten:
 
-Tool-call *arguments* are never rewritten. A ``write_file`` / ``apply_patch``
-payload is bulk, but it is also the model's only example of how it calls that
-tool: replacing it with a stand-in — a truncated prefix, a string marker, or
-the ``{"$evicted": N}`` object we last used — taught models to emit the
-stand-in as the payload of their next call (one session: 248 such calls,
-every one refused). Arguments are a fifth of the bytes results are, so
-leaving them costs little; when results alone cannot get the request under
-target, the answer is Layer 2 (``CompressionManager.auto_compact``). Old
-session logs may still carry markers from that pass;
-``upgrade_legacy_omitted_args`` keeps the oldest string form out of a slot
-where it could pass as content, and ``get_function_call`` refuses any call
-that carries one.
+* **The live tool round** (in-flight calls and the trailing result batch):
+  the evidence the model has not read yet. The cutoff is by message position,
+  not tool name — SDK ``tools=``, CLI ``--tools``, Web extra tools, and MCP
+  share the round with builtins.
+* **Tool-call arguments.** A stand-in in an old call — truncated prefix,
+  string marker, or ``{"$evicted": N}`` — taught models to emit the stand-in
+  as the payload of their next call (one session: 248 such calls, every one
+  refused). Logs from before still carry markers; ``upgrade_legacy_omitted_args``
+  keeps the oldest string form out of a slot where it could pass as content,
+  and ``get_function_call`` refuses any call that carries one.
+* **Results already bounded by Layer 0** (``<persisted-output>``): the path
+  they carry is the only handle on output too large to re-read into context.
 
-The live tool round (in-flight calls and the trailing result batch) is never
-evicted: that is the evidence the model has not read yet. The cutoff is by
-message position, not tool name — SDK ``tools=``, CLI ``--tools``, Web extra
-tools, and MCP share the round with builtins.
-
-**The unit of eviction is a result, not a message**, because the two provider
+**The unit of pruning is a result, not a message**, because the two provider
 shapes disagree about how results are packed:
 
 * OpenAI-style — one result per ``role="tool"`` message.
 * Anthropic-style — a whole round packed into the ``content`` list of a single
   ``role="user"`` message, as ``{"type": "tool_result", "tool_use_id": ...}``
   blocks (``AnthropicClaude.format_function_call_results``).
-
-Scanning only ``role="tool"`` meant Layer 1 never once ran on the Anthropic
-path. Those blocks also carry no tool name, so the placeholder resolves the
-call through an index of the assistant ``tool_calls`` that requested it.
 """
 import json
-import os
-from typing import Any, Dict, Iterator, List, NamedTuple, Optional, Tuple, TYPE_CHECKING
+from typing import List, NamedTuple, Optional, TYPE_CHECKING
 
 from agentica.compression.tool_call_args import (
-    OMITTED_ARG_KEY,
     _LEGACY_OMITTED_PREFIX,
-    is_omitted_tool_arg,
-    omitted_tool_args,
     rewrite_omitted_arg_leaves,
 )
-from agentica.utils.log import logger
-from agentica.utils.tokens import count_message_tokens, count_tokens
+from agentica.utils.tokens import count_text_tokens, count_tokens
 
 if TYPE_CHECKING:
     from agentica.model.message import Message
 
-# Occupancy at which eviction starts, as a fraction of the provider window
-# (never compact_token_limit: a cap is enforced by Layer 2 at the cap).
-# 0.8 (not 0.9): from 0.9 the pass would have to free most of the window in
-# tool results alone to reach the target — text-heavy sessions can't, and
-# Layer 2 then fires within the 5% gap, doubling prefix breaks. 0.8→0.95
-# leaves 15%. It also must not collide numerically with
-# IRREDUCIBLE_PROMPT_RATIO (0.9).
-EVICT_THRESHOLD_RATIO = 0.8
+# Occupancy a prune must reach, as a fraction of the working window, to be
+# worth its prefix break. Anything above it would cross the line again soon
+# and pay another break; a new window is the cheaper answer then.
+PRUNE_TARGET_RATIO = 0.5
 
-# The one user-facing knob of the compression policy (Reasonix /config
-# compact_ratio): project-level override via AGENTICA_EVICT_THRESHOLD_RATIO
-# (drop it in the project .env). Deliberately the ONLY exposed ratio — the
-# Layer 2 trigger (0.95) and the eviction target stay internal: touching
-# the former reopens the layer-inversion trap, the latter is a separate
-# "how hard to squeeze" question.
-ENV_EVICT_THRESHOLD_RATIO = "AGENTICA_EVICT_THRESHOLD_RATIO"
-_EVICT_THRESHOLD_MAX = 0.95  # strictly below AUTO_COMPACT_THRESHOLD_RATIO
+# A result longer than this keeps only its head and tail. It must exceed
+# head + marker + tail so a pruned result is never pruned again.
+PRUNE_MIN_CHARS = 4096
+PRUNE_HEAD_CHARS = 1000
+PRUNE_TAIL_CHARS = 1000
 
-
-def evict_threshold_ratio() -> float:
-    """Effective evict trigger ratio: env override with validation, else 0.8."""
-    raw = os.environ.get(ENV_EVICT_THRESHOLD_RATIO)
-    if not raw:
-        return EVICT_THRESHOLD_RATIO
-    try:
-        ratio = float(raw)
-    except ValueError:
-        logger.warning(f"{ENV_EVICT_THRESHOLD_RATIO}={raw!r} is not a number; using {EVICT_THRESHOLD_RATIO}")
-        return EVICT_THRESHOLD_RATIO
-    if not 0.0 < ratio < _EVICT_THRESHOLD_MAX:
-        clamped = min(max(ratio, 0.05), _EVICT_THRESHOLD_MAX - 0.01)
-        logger.warning(
-            f"{ENV_EVICT_THRESHOLD_RATIO}={ratio} outside (0, {_EVICT_THRESHOLD_MAX}); clamped to {clamped}"
-        )
-        return clamped
-    return ratio
-
-# Occupancy eviction aims to reach. Each pass breaks the provider cache from
-# the first placeholder on, so its cost is roughly what is left to re-cache:
-# going deeper makes that one write smaller, every later read cheaper, and the
-# next pass further away. Not lower: the latest results are usually the ones
-# the model is working from, and evicting them buys re-reads.
-EVICT_TARGET_RATIO = 0.3
-
-# Cap on the rendered call arguments inside a placeholder.
-_MAX_CALL_SIGNATURE_CHARS = 120
-
-_EVICTED = "Tool result evicted to free context"
-_EVICTED_PREFIX = f"[{_EVICTED}"
+_PRUNE_MARKER_OPEN = "[... "
 
 # Anthropic packs a whole tool round into one user message as blocks of this type.
 _TOOL_RESULT_BLOCK = "tool_result"
-
-
-class EvictionResult(NamedTuple):
-    """What Layer 1 managed to reclaim."""
-    tool_results: int = 0
-
-    @property
-    def total(self) -> int:
-        return self.tool_results
-
-
-def under_pressure(context_tokens: int, context_window: int) -> bool:
-    """True once the request occupies enough of the window to be worth shrinking."""
-    if context_window <= 0:
-        return False
-    return context_tokens >= context_window * evict_threshold_ratio()
-
 
 # Trailing user-turn share of the window at which reactive compact cannot help:
 # Layer 2 keeps that turn intact, so an oversized single query must surface the
@@ -253,56 +189,6 @@ def live_tool_round_start(messages: "List[Message]") -> int:
     return batch
 
 
-def _call_index(messages: "List[Message]") -> Dict[str, Tuple[Optional[str], Any]]:
-    """Map tool-call id to the ``(name, arguments)`` the assistant requested.
-
-    An Anthropic ``tool_result`` block records only ``tool_use_id``, so naming
-    the evicted call means looking back at the assistant message that made it.
-    """
-    index: Dict[str, Tuple[Optional[str], Any]] = {}
-    for msg in messages:
-        if msg.role != "assistant" or not msg.tool_calls:
-            continue
-        for call in msg.tool_calls:
-            if not isinstance(call, dict):
-                continue
-            call_id = call.get("id")
-            function = call.get("function")
-            if call_id and isinstance(function, dict):
-                index[call_id] = (function.get("name"), function.get("arguments"))
-    return index
-
-
-def _resolve_call(
-    msg: "Message", block: Optional[dict], calls: Dict[str, Tuple[Optional[str], Any]]
-) -> Tuple[Optional[str], Any]:
-    """The ``(name, arguments)`` behind one result, whichever shape holds it.
-
-    Prefer the assistant ``tool_calls`` index: Layer 1 rewrites those
-    arguments in place. ``Message.tool_args`` is a snapshot from execute
-    time and still holds the original payload (or nothing), so a
-    placeholder built from it would invite the model to re-issue a tool
-    with an argument that is already gone.
-    """
-    if block is not None:
-        return calls.get(block.get("tool_use_id") or "", (None, None))
-    indexed = calls.get(msg.tool_call_id or "", (None, None))
-    if indexed != (None, None):
-        return indexed
-    if msg.tool_name:
-        return msg.tool_name, msg.tool_args
-    return indexed
-
-
-def _render_arg_value(value: Any) -> str:
-    """Render one argument for the result placeholder, never the raw marker."""
-    if is_omitted_tool_arg(value):
-        if isinstance(value, dict):
-            return f"<omitted chars={value[OMITTED_ARG_KEY]}>"
-        return "<omitted>"
-    return repr(value)
-
-
 def _result_call_id(msg: "Message", block: Optional[dict]) -> Optional[str]:
     """The tool-call id a result answers, whichever shape holds it."""
     if block is not None:
@@ -310,144 +196,79 @@ def _result_call_id(msg: "Message", block: Optional[dict]) -> Optional[str]:
     return msg.tool_call_id or None
 
 
-def _placeholder(name: Optional[str], args: Any, handle: Optional[str] = None) -> str:
-    """Name the call that produced the evicted result.
 
-    Re-issue is only invited when the original arguments are still in the
-    transcript. After Layer 1 drops a payload, telling the model to re-run
-    ``execute`` / ``write_file`` with the marker as the body is how that
-    marker reaches a shell or the disk.
-
-    ``handle`` is the tool-call id under which the session log keeps the full
-    result; it is only passed when the model can actually read that log.
-    """
-    recover = f' Original output: search_session(uuid="{handle}").' if handle else ""
-    if not name:
-        return f"[{_EVICTED}.{recover}]"
-    if isinstance(args, str):
-        try:
-            args = json.loads(args)
-        except (ValueError, TypeError):
-            pass
-    omitted = omitted_tool_args(args) if args is not None else []
-    if isinstance(args, dict):
-        rendered = ", ".join(f"{k}={_render_arg_value(v)}" for k, v in args.items())
-    elif args:
-        rendered = _render_arg_value(args)
-    else:
-        rendered = ""
-    if len(rendered) > _MAX_CALL_SIGNATURE_CHARS:
-        rendered = rendered[:_MAX_CALL_SIGNATURE_CHARS - 3] + "..."
-    if omitted:
-        return (
-            f"[{_EVICTED}: {name}({rendered}). "
-            f"The argument payload was dropped from context and cannot be "
-            f"recovered; do not re-issue this call.{recover}]"
-        )
-    return (
-        f"[{_EVICTED}: {name}({rendered}). "
-        f"Re-run the call if you still need it.{recover}]"
-    )
+def prune_text(text: str, handle: Optional[str] = None) -> str:
+    """Head and tail of ``text`` around a marker naming what was cut."""
+    cut = len(text) - PRUNE_HEAD_CHARS - PRUNE_TAIL_CHARS
+    recover = f"; full output: search_session(uuid=\"{handle}\")" if handle else ""
+    marker = f"{_PRUNE_MARKER_OPEN}{cut} chars pruned from the middle of this tool result{recover} ...]"
+    return f"{text[:PRUNE_HEAD_CHARS]}\n\n{marker}\n\n{text[-PRUNE_TAIL_CHARS:]}"
 
 
-def _evictable_results(
-    messages: "List[Message]", cutoff: int
-) -> "Iterator[Tuple[Message, Optional[dict]]]":
-    """Yield every already-seen tool result, oldest first, as ``(message, block)``.
-
-    ``block`` is None for the OpenAI shape, where the message *is* the result;
-    it is the ``tool_result`` dict for the Anthropic shape, where one message
-    holds the whole round.
-    """
-    for msg in messages[:cutoff]:
-        if msg._evicted:
-            continue
-        if msg.role == "tool":
-            yield msg, None
-            continue
-        for block in tool_result_blocks(msg):
-            yield msg, block
+class _Prune(NamedTuple):
+    message: "Message"
+    block: Optional[dict]
+    text: str
 
 
-def _result_text(msg: "Message", block: Optional[dict]) -> Optional[str]:
-    raw = block.get("content") if block is not None else msg.content
-    if raw is None:
-        return None
-    return raw if isinstance(raw, str) else str(raw)
+def _prunable(messages: "List[Message]", recoverable: bool) -> List[_Prune]:
+    """Every already-seen result long enough to prune, with its pruned text."""
+    plan: List[_Prune] = []
+    for msg in messages[:live_tool_round_start(messages)]:
+        blocks: List[Optional[dict]] = [None] if msg.role == "tool" else list(tool_result_blocks(msg))
+        for block in blocks:
+            raw = block.get("content") if block is not None else msg.content
+            if not isinstance(raw, str) or len(raw) <= PRUNE_MIN_CHARS:
+                continue
+            if "<persisted-output>" in raw:
+                continue
+            handle = _result_call_id(msg, block) if recoverable else None
+            plan.append(_Prune(msg, block, prune_text(raw, handle)))
+    return plan
 
 
-def evict_tool_results(
+class PruneResult(NamedTuple):
+    """What a Layer 1 pass did: results rewritten and tokens freed."""
+    pruned: int = 0
+    freed_tokens: int = 0
+
+
+def prune_tool_results(
     messages: "List[Message]",
     *,
     context_tokens: int,
-    context_window: int,
+    target_tokens: Optional[int],
     model_id: str = "gpt-4o",
     recoverable: bool = False,
-) -> int:
-    """Evict the oldest tool results until the request is back under target.
+) -> PruneResult:
+    """Prune every already-seen long result, or none of them.
 
     Args:
-        messages:       Full message list for the current turn (mutated in place).
-        context_tokens: Tokens the request currently occupies.
-        context_window: Model context window. Zero disables eviction — without a
-                        window there is no way to tell pressure from comfort.
-        model_id:       Tokenizer selection for measuring what each eviction saves.
+        messages:       Full message list for the current request (mutated in place).
+        context_tokens: Tokens the request occupies now, in ``model_id`` units.
+        target_tokens:  The prune is applied only if it brings the request under
+                        this; otherwise nothing changes and the caller cuts a new
+                        window. None applies it unconditionally — for a caller
+                        with no new window to fall back on.
+        model_id:       Tokenizer for pricing what each prune frees.
         recoverable:    The model can read the session log (``search_session``),
-                        so each placeholder quotes the tool-call id to fetch the
-                        original output with.
-
-    Returns:
-        Number of tool results whose content was replaced.
+                        so each marker quotes the tool-call id of the full output.
     """
-    if not under_pressure(context_tokens, context_window):
-        return 0
-
-    must_save = context_tokens - int(context_window * EVICT_TARGET_RATIO)
-    if must_save <= 0:
-        return 0
-
-    cutoff = live_tool_round_start(messages)
-    calls = _call_index(messages)
-    saved = 0
-    evicted = 0
-    for msg, block in _evictable_results(messages, cutoff):
-        text = _result_text(msg, block)
-        if text is None or text.startswith(_EVICTED_PREFIX):
-            continue
-        if "<persisted-output>" in text:
-            # Already bounded by the tool-result budget, and the path it carries
-            # is the only handle on output too large to re-read into context.
-            continue
-        name, args = _resolve_call(msg, block, calls)
-        placeholder = _placeholder(
-            name, args, _result_call_id(msg, block) if recoverable else None,
-        )
-        if len(placeholder) >= len(text):
-            continue
-
-        before = count_message_tokens(msg, model_id)
-        if block is not None:
-            block["content"] = placeholder
+    plan = _prunable(messages, recoverable)
+    if not plan:
+        return PruneResult()
+    freed = 0
+    for item in plan:
+        old = item.block.get("content") if item.block is not None else item.message.content
+        freed += count_text_tokens(old, model_id) - count_text_tokens(item.text, model_id)
+    if target_tokens is not None and context_tokens - freed >= target_tokens:
+        return PruneResult()
+    for item in plan:
+        if item.block is not None:
+            item.block["content"] = item.text
         else:
-            msg.content = placeholder
-        saved += before - count_message_tokens(msg, model_id)
-        evicted += 1
-        if _fully_evicted(msg, block):
-            msg._evicted = True
-        if saved >= must_save:
-            break
-
-    return evicted
-
-
-def _fully_evicted(msg: "Message", block: Optional[dict]) -> bool:
-    """Whether the message has nothing left worth scanning on a later pass."""
-    if block is None:
-        return True
-    return all(
-        str(b.get("content") or "").startswith(_EVICTED_PREFIX)
-        for b in tool_result_blocks(msg)
-    )
+            item.message.content = item.text
+    return PruneResult(pruned=len(plan), freed_tokens=freed)
 
 
 def _map_assistant_tool_args(msg: "Message", transform) -> int:
@@ -545,26 +366,3 @@ def upgrade_legacy_omitted_args(messages: "List[Message]") -> int:
             changed += _map_assistant_tool_args(msg, rewrite_omitted_arg_leaves)
     return changed
 
-
-def evict_context(
-    messages: "List[Message]",
-    *,
-    context_tokens: int,
-    context_window: int,
-    model_id: str = "gpt-4o",
-    recoverable: bool = False,
-) -> EvictionResult:
-    """Run Layer 1: reclaim context without an LLM call.
-
-    Only tool results are evicted; tool-call arguments stay as the model
-    wrote them (see the module docstring).
-    """
-    upgrade_legacy_omitted_args(messages)
-    evicted = evict_tool_results(
-        messages,
-        context_tokens=context_tokens,
-        context_window=context_window,
-        model_id=model_id,
-        recoverable=recoverable,
-    )
-    return EvictionResult(tool_results=evicted)

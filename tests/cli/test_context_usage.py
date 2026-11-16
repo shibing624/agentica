@@ -101,19 +101,19 @@ class TestMeasureContext(unittest.TestCase):
         self.assertEqual(b.window, 1000)
         self.assertAlmostEqual(b.percent_full, b.total / 10, places=4)
 
-    def test_measure_reflects_what_eviction_will_actually_send(self):
+    def test_measure_reflects_what_a_prune_will_actually_send(self):
         """The idle bar must show the next request's real size, not the
         pre-compression history.
 
-        Layer 1 evicts old tool results before every request once the request
-        crosses the pressure threshold. A bar that ignores that showed 144%
+        At the compaction line Layer 1 prunes old tool results to head + tail
+        when that keeps the window. A bar that ignores that showed 144%
         (284K/192K) on a session whose next request actually shipped ~75% —
-        the user cannot tell "about to die" from "healthy, will be evicted".
+        the user cannot tell "about to die" from "healthy, will be pruned".
         """
         from agentica.model.message import Message
 
         agent = _agent(add_history_to_context=True)
-        agent.model.context_window = 8_000  # pressure threshold = 6_400
+        agent.model.context_window = 80_000
         msgs = [Message(role="user", content="question " * 50)]
         # Old tool rounds: exactly what Layer 1 replaces with placeholders.
         for i in range(20):
@@ -125,16 +125,16 @@ class TestMeasureContext(unittest.TestCase):
             ))
             msgs.append(Message(
                 role="tool", tool_call_id=f"call_{i}",
-                content="file body " * 400,
+                content=" ".join(f"body{i}_{j}" for j in range(1500)),
             ))
         agent.working_memory.add_run(AgentRun(response=RunResponse(messages=msgs)))
 
         from agentica.utils.tokens import count_tokens
         raw = count_tokens(msgs, None, "gpt-4o-mini")
-        # The raw history alone is far over the pressure line...
-        self.assertGreater(raw, 6_400)
+        # The raw history alone is over the compaction line...
+        self.assertGreater(raw, 80_000 * 0.95)
         b = _measure(agent)
-        # ...and the eviction the runner would run is already reflected: the
+        # ...and the prune the runner would run is already reflected: the
         # plain-history section shrinks below its raw size.
         self.assertLess(_row(b, "Conversation") + _row(b, "Summarized conversation"), raw)
 
@@ -194,23 +194,13 @@ class TestWorkingCapIsTheCompressionReference(unittest.TestCase):
         agent.model.context_window = 128_000
         self.assertEqual(_measure(agent).window, 128_000)
 
-    def test_a_cap_alone_does_not_report_an_eviction(self):
-        """Over the cap but far below the provider window: the runner does not
-        evict (compaction owns the cap), so the bar must show the raw history,
-        not a shrunken figure no request will ever carry."""
-        agent, msgs = self._capped_agent(cap=8_000)
+    def test_below_the_line_reports_the_raw_history(self):
+        """Under the cap nothing is rewritten, so the bar shows the raw size."""
+        agent, msgs = self._capped_agent(cap=200_000)
         raw = count_tokens(msgs, None, "gpt-4o-mini")
         b = _measure(agent)
-        self.assertGreater(raw, 8_000, "fixture must be over the cap")
-        self.assertGreaterEqual(b.total, raw, "nothing is evicted below the provider limit")
-
-    def test_eviction_is_reflected_at_the_provider_threshold(self):
-        """Near the provider limit the reported figure drops to what will ship."""
-        agent, msgs = self._capped_agent(cap=8_000, window=20_000)
-        raw = count_tokens(msgs, None, "gpt-4o-mini")
-        b = _measure(agent)
-        self.assertGreater(raw, 20_000 * 0.8, "fixture must be under provider pressure")
-        self.assertLess(b.total, raw, "reported total must be the post-evict size")
+        self.assertLess(raw, 200_000 * 0.95, "fixture must be under the line")
+        self.assertGreaterEqual(b.total, raw, "nothing is pruned below the line")
 
 
 class TestReportedHistoryWindow(unittest.TestCase):

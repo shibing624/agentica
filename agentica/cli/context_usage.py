@@ -16,8 +16,12 @@ from typing import Any, Dict, List, Optional
 
 from agentica.model.message import Message
 from agentica.utils.tokens import count_tokens, count_tool_tokens
-from agentica.compression.evict import evict_context, evict_threshold_ratio
-from agentica.compression.manager import compact_token_limit_of, working_context_window
+from agentica.compression.evict import PRUNE_TARGET_RATIO, prune_tool_results
+from agentica.compression.manager import (
+    auto_compact_threshold,
+    compact_token_limit_of,
+    working_context_window,
+)
 
 # Legacy Layer 2 summary marker. New windows use <context_window> instead.
 COMPACT_SUMMARY_PREFIX = "[Context compressed]"
@@ -164,32 +168,29 @@ async def measure_context(agent) -> ContextBreakdown:
         breakdown.history_turns = len(runs) if last_n is None else min(last_n, len(runs))
     breakdown.history_messages = len(history)
 
-    # What the next request will ACTUALLY carry. Under pressure (>= 0.8 of the
-    # provider window) the runner evicts old tool results before every
-    # request, so the raw history overstates the request. Run the same
-    # eviction on a copy so the idle bar shows the shipped size, not the
-    # pre-compression one.
+    # What the next request will ACTUALLY carry. At the compaction line the
+    # runner prunes old tool results when that brings the request under
+    # PRUNE_TARGET_RATIO of the working window; otherwise it cuts a new window,
+    # which this estimate does not model. Run the same prune on a copy so the
+    # idle bar shows the shipped size, not the pre-compression one.
     conv_tokens = count_tokens(plain_msgs, None, model_id)
-    # The pressure line and the eviction target are relative to the provider
-    # window, exactly as the runner calls evict_context. The bar still divides
-    # by the working cap; a cap is enforced by compaction, not eviction.
-    window = provider_window
-    if window > 0 and plain_msgs:
+    if provider_window > 0 and plain_msgs:
         pre_total = sum(
             [base_tokens, workspace_tokens, skills_tokens, tool_guide_tokens,
              count_tool_tokens(local_tools, model_id) if local_tools else 0,
              count_tool_tokens(mcp_tools, model_id) if mcp_tools else 0,
              count_tokens(summary_msgs, None, model_id), conv_tokens]
         )
-        if pre_total >= window * evict_threshold_ratio():
+        if pre_total >= auto_compact_threshold(provider_window, cap):
             shadow = [m.model_copy(deep=True) for m in plain_msgs]
-            evict_context(
+            pruned = prune_tool_results(
                 shadow,
                 context_tokens=pre_total,
-                context_window=window,
+                target_tokens=int(working * PRUNE_TARGET_RATIO),
                 model_id=model_id,
             )
-            conv_tokens = count_tokens(shadow, None, model_id)
+            if pruned.pruned:
+                conv_tokens = count_tokens(shadow, None, model_id)
 
     breakdown.sections = [
         ("System prompt", base_tokens),

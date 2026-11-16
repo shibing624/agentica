@@ -575,7 +575,7 @@ class BuiltinExecuteTool(Tool):
 
         Under the cap this is the decoded stdout/stderr, same as ``communicate``.
         Over it, the full bytes stay on disk (or are discarded) and the returned
-        string is a preview — Layer 1 cannot evict the live round, so this is
+        string is a preview — Layer 1 never prunes the live round, so this is
         the only bound that can save the next model call.
         """
         marker = len(b"\n[stderr]\n") if err_bytes else 0

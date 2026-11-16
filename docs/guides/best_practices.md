@@ -850,7 +850,7 @@ agent = Agent(
 ### Q: Token 超限？
 
 **A:** 解决方案：
-1. 启用压缩（Layer 1 淘汰 + Layer 2 空窗换窗，默认开）
+1. 启用压缩（同一条线上：Layer 1 修剪 + Layer 2 空窗换窗，默认开）
 2. 减少历史消息
 3. 旧事实用 `search_session` 从 JSONL 取，不要指望 prompt 里还留着
 4. 分块处理长文本

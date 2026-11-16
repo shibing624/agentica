@@ -3,9 +3,10 @@
 @author:XuMing(xuming624@qq.com)
 @description: Layer 2 compaction — start a fresh context window (no LLM summary).
 
-Layer 1 (``agentica.compression.evict``) shrinks the request for free by
-evicting old tool results. When that is not enough, the activity window is
-replaced by initial context + session-notes pointer. Prior turns stay in the
+Both layers share one trigger, ``auto_compact_threshold``. At it, Layer 1
+(``agentica.compression.evict``) first tries to prune old tool results to
+their head and tail; when that cannot bring the request well under the line,
+the activity window is replaced by initial context + session-notes pointer. Prior turns stay in the
 session JSONL and are retrieved with ``search_session``.
 
 This is Codex TokenBudget compact (#29743): same lifecycle name, no summarizer.
@@ -47,10 +48,9 @@ def working_context_window(
     context_window: int,
     compact_token_limit: Optional[int] = None,
 ) -> int:
-    """The budget Layer 2 and the occupancy bar treat as full.
+    """The budget compaction and the occupancy bar treat as full.
 
-    ``min(compact_token_limit, provider window)``. Layer 1 does not use it: it
-    measures against the provider window, so a cap never triggers eviction.
+    ``min(compact_token_limit, provider window)``.
     """
     if context_window <= 0:
         return 0

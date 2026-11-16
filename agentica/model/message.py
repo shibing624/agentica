@@ -131,12 +131,6 @@ class Message(BaseModel):
     # the Model API.
     automated: bool = False
 
-    # Set by evict_tool_results() once every result this message carries is a
-    # placeholder, so later passes can skip it outright. A message is the unit
-    # here, but a result is not: an Anthropic round packs several tool_result
-    # blocks into one user message and is only done when the last one goes.
-    _evicted: bool = False
-
     # Set by the runner's mid-turn injection points (steering / peer messages)
     # when they APPEND a user message instead of folding into the trailing tool
     # result. Such a message sits after a round that has already run, but it is

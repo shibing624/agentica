@@ -92,9 +92,8 @@ class SteerMixin:
             # Appended, so it lands *after* a round that already ran. Marked so
             # Layer 1 still sees that round as live (``live_tool_round_start``):
             # without the mark, guidance arriving mid-round makes the cutoff
-            # include the in-flight call's own arguments — which is how a
-            # ``write_file`` payload gets replaced by the eviction placeholder
-            # before the model has ever read its result.
+            # include the in-flight call and its results, which would then be
+            # pruned before the model has ever read them.
             injected = Message(role="user", content=marker)
             injected._injected = True
             injected.automated = automated

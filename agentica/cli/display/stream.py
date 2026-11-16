@@ -1481,10 +1481,10 @@ class StreamDisplayManager:
         return lines
 
     def _handle_compact_event(self, et: str, event: dict) -> None:
-        # Eviction only replaces old tool-result bodies and leaves the call
+        # Pruning only shortens old tool-result bodies and leaves the call
         # visible in the transcript. Keep it silent; surface only the heavier
         # compaction stages that change conversation structure.
-        if et == "compact.evict":
+        if et == "compact.prune":
             return
         if et in ("compact.start", "compact.end"):
             # Spinner phase only (stream_loop._make_compact_phase_handler).

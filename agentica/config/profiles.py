@@ -604,7 +604,7 @@ env: {}
 settings:
 #  cli_markdown: auto        # off|auto|on — Markdown the assistant reply; complete blocks stream live
 #  num_history_turns:        # cap on replayed turns; unset = whole context window
-#  enable_evict: true        # Layer 1: drop old tool results under pressure
+#  enable_evict: true        # Layer 1: prune old tool results at the compaction line
 #  enable_auto_compact: true # Layer 2: open an empty window when full
 #                            # (/compact still works when this is false)
 #  compact_token_limit:      # optional working cap (absolute tokens). Does

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Runner compression pipeline (tool-budget, evict, auto-compact)
+@description: Runner compression pipeline (one trigger: prune, else new window)
 """
 
 # This file was mechanically extracted from /tmp/runner_backup.py for compress.py.
@@ -20,8 +20,12 @@ from typing import (
 from agentica.utils.log import logger
 from agentica.agent.history_filter import model_identity
 from agentica.compression.calibration import ContextCalibration
-from agentica.compression.evict import evict_context, under_pressure
-from agentica.compression.manager import compact_token_limit_of, working_context_window
+from agentica.compression.evict import PRUNE_TARGET_RATIO, prune_tool_results
+from agentica.compression.manager import (
+    auto_compact_threshold,
+    compact_token_limit_of,
+    working_context_window,
+)
 from agentica.model.base import Model
 from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
@@ -89,23 +93,27 @@ class CompressMixin:
     ) -> None:
         """Run the compression pipeline before each LLM call.
 
-        There are only two ways to make an oversized request fit, and they are
-        tried cheapest-first:
+        One trigger, two answers (the dsh design). Below the Layer 2 line —
+        ``compact_token_limit``, or 95% of the window — history is not touched
+        and the request grows as a strict prefix of the cached one. At the
+        line, in this order:
 
-          Layer 1 - Evict (free): drop the bulk of old tool results and shrink
-                    oversized tool-call arguments, oldest-first, down to a
-                    target. Nothing is dropped while the window has room.
+          Layer 1 - Prune (no LLM): keep the head and tail of every older long
+                    tool result, but only if that brings the request under
+                    ``PRUNE_TARGET_RATIO`` of the working window. One prefix
+                    break, and the next crossing is far off.
           Layer 2 - New window (no LLM summary): replace the activity window
                     with initial context + notes. ``/compact`` uses the same
                     cut. Prior turns stay in JSONL.
 
+        A prune that would leave the request above the target is not applied:
+        it would break the cache now and cross the line again soon, so the new
+        window — which breaks the cache once anyway — is cheaper.
+
         Ahead of both is Layer 0, which is not compression but an output
         policy and does not run here: it bounds a result the moment it is
         produced (``Model.run_function_calls``), so nothing enters the context
-        at full size in the first place. It used to run a second sweep from
-        here over the whole transcript against a fixed char budget — a second
-        threshold governing the same decision Layer 1 owns, firing on history
-        that the window had ample room for.
+        at full size in the first place.
 
         Sets ``loop_state.context_collapsed`` whenever a stage drops messages,
         so the caller knows the ``num_input_messages`` prefix boundary is gone.
@@ -115,19 +123,9 @@ class CompressMixin:
         is_main_agent = agent._parent_run_id is None
 
         cm = agent.tool_config.compression_manager
-        enable_evict = agent.tool_config.enable_evict
-        enable_auto_compact = agent.tool_config.enable_auto_compact
+        enable_prune = agent.tool_config.enable_evict
+        new_window_ok = agent.tool_config.enable_auto_compact and cm is not None
 
-        # Layer 1: evict. Gated on real context pressure: below the threshold
-        # there is nothing to buy by dropping a result the window had room for,
-        # and the model pays for it by re-running the tool.
-        # Eviction rewrites history in place, and with a provider cache that is
-        # not free: every message after the first placeholder is written again
-        # (one such turn re-cached 343k tokens to free 35k). So it measures
-        # against the provider window — the limit a request can actually break —
-        # and never against compact_token_limit. A cap is a budget Layer 2
-        # enforces at the cap itself; with one set, compaction always fires
-        # first and the transcript grows as a strict prefix up to it.
         _window = model.context_window if isinstance(model.context_window, int) else 0
         _cap = None
         if cm is not None:
@@ -141,35 +139,56 @@ class CompressMixin:
         # what the provider will count. Thresholds read the scaled figure.
         raw_tokens = count_tokens(messages, model.tools, model.id) if _working else 0
         context_tokens = calibration.scale(raw_tokens)
-        if enable_evict:
-            # Eviction measures what each placeholder saves with the local
-            # tokenizer, so it works in raw units against a window shrunk by
-            # the same ratio.
-            evict_window = int(_window / calibration.ratio)
-            # A placeholder may only point at the session log when the model
-            # can both have one written and read it back.
+
+        # The one line. When a new window is on the table the manager owns the
+        # check (and its log line); otherwise the same threshold still bounds
+        # the request for pruning.
+        if new_window_ok:
+            over = cm.should_auto_compact(
+                messages, model, context_tokens=context_tokens if _window else None
+            )
+        else:
+            over = bool(_window) and context_tokens >= auto_compact_threshold(_window, _cap)
+
+        if not over:
+            # Only when the window stays: a rollover's preamble already states
+            # the tokens left, and a reminder folded into the trailing question
+            # first would be carried into the new window and written back to
+            # the log as part of that user row.
+            if new_window_ok:
+                CompressMixin._maybe_inject_token_budget_reminder(
+                    messages, agent, cm, context_tokens, _working,
+                )
+            calibration.record_send(messages, raw_tokens)
+            return
+
+        if enable_prune:
+            # The prune is priced with the local tokenizer, so its target is in
+            # raw units: the working window shrunk by the calibration ratio.
+            # Without a new window to fall back on, pruning is the only answer
+            # and is applied whatever it reaches.
+            target = (
+                int(_working * PRUNE_TARGET_RATIO / calibration.ratio)
+                if new_window_ok else None
+            )
+            # A marker may only point at the session log when the model can
+            # both have one written and read it back.
             recoverable = (
                 agent._session_log is not None
                 and "search_session" in (model.functions or {})
             )
-            digests_before = (
-                _prefix_digests(messages) if under_pressure(raw_tokens, evict_window) else None
-            )
-            reclaimed = evict_context(
+            digests_before = _prefix_digests(messages)
+            pruned = prune_tool_results(
                 messages,
                 context_tokens=raw_tokens,
-                context_window=evict_window,
+                target_tokens=target,
                 model_id=model.id,
                 recoverable=recoverable,
             )
-            if reclaimed.total:
-                # Eviction rewrote content, so the count taken above is stale — and
-                # too high. Re-measure before deciding on Layer 2: an LLM summary
-                # bought for a request eviction already made fit is pure waste.
+            if pruned.pruned:
                 tokens_before = raw_tokens
-                raw_tokens = count_tokens(messages, model.tools, model.id) if _working else 0
-                context_tokens = calibration.scale(raw_tokens)
-                # What this eviction cost the provider cache: every message from
+                raw_tokens = count_tokens(messages, model.tools, model.id)
+                # What this prune cost the provider cache: every message from
                 # the first rewritten one onward has to be written again.
                 break_index = _first_prefix_break(digests_before, _prefix_digests(messages))
                 invalidated_tokens = (
@@ -177,7 +196,7 @@ class CompressMixin:
                     if break_index is not None else 0
                 )
                 logger.debug(
-                    f"Layer 1 (evict): {reclaimed.tool_results} tool result(s), "
+                    f"Layer 1 (prune): {pruned.pruned} tool result(s), "
                     f"freed {tokens_before - raw_tokens} tokens, "
                     f"prefix break at message {break_index} "
                     f"({invalidated_tokens} tokens to re-cache)"
@@ -185,35 +204,23 @@ class CompressMixin:
                 if cb is not None:
                     cb(
                         {
-                            "type": "compact.evict",
+                            "type": "compact.prune",
                             "agent_name": agent_name,
                             "is_main_agent": is_main_agent,
-                            "evicted": reclaimed.tool_results,
+                            "pruned": pruned.pruned,
                             "freed_tokens": tokens_before - raw_tokens,
                             "break_index": break_index,
                             "invalidated_tokens": invalidated_tokens,
                             "tokens_after": raw_tokens,
                         }
                     )
+                calibration.record_send(messages, raw_tokens)
+                return
 
-        if not enable_auto_compact or cm is None:
+        if not new_window_ok:
             calibration.record_send(messages, raw_tokens)
             return
 
-        # Layer 2: new window. Threshold checked here so on_pre_compact
-        # (memory flush) only runs on turns that actually roll over.
-        if not cm.should_auto_compact(
-            messages, model, context_tokens=context_tokens if _window else None
-        ):
-            # Only when the window stays: a rollover's preamble already states
-            # the tokens left, and a reminder folded into the trailing question
-            # first would be carried into the new window and written back to
-            # the log as part of that user row.
-            CompressMixin._maybe_inject_token_budget_reminder(
-                messages, agent, cm, context_tokens, _working,
-            )
-            calibration.record_send(messages, raw_tokens)
-            return
         await CompressMixin._install_new_window(
             messages, agent, model, loop_state, keep_trailing_turn=True,
         )
@@ -430,7 +437,7 @@ class CompressMixin:
         provider_window = model.context_window if isinstance(model.context_window, int) else 0
         # The bar's denominator is the working window the compression policy
         # acts on. Emitting only the provider limit made the bar divide by 1M
-        # while the runner evicted against a 512k cap on the same session.
+        # while the runner compacted at a 512k cap on the same session.
         cap = compact_token_limit_of(agent.tool_config) if agent.tool_config else None
         window = working_context_window(provider_window, cap)
 

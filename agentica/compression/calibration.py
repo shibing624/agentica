@@ -8,7 +8,7 @@ request. It cannot see what the provider adds on its side: replayed encrypted
 reasoning items (OpenAI Responses), image tokens it prices differently, its own
 tokenizer. Measured on a 9-day production session (gpt-6.1-sol, 1.05M window):
 the estimate said ~640k while the gateway billed 1,047,795 for the same request.
-No layer ever fired — not the 75% reminder, not evict at 0.8, not the 95% cut —
+No layer ever fired — not the 75% reminder, not the 95% cut —
 and the session hit ``input exceeds the context window`` for hours.
 
 The provider reports the real prompt size of every request it answers

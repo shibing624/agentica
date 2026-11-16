@@ -130,37 +130,41 @@ class TestCompressionSwitches(unittest.TestCase):
         self.assertEqual(agent.tool_config.compact_token_limit, 300_000)
         self.assertEqual(agent.tool_config.compression_manager.compact_token_limit, 300_000)
 
-    def test_layer1_measures_the_provider_window_not_the_compact_cap(self):
-        # The cap is a budget for Layer 2; Layer 1 rewrites history and so
-        # only fires near the limit the provider actually enforces.
+    def test_layer1_shares_the_compact_cap_trigger(self):
+        # One trigger: below the cap nothing is pruned, at it the prune runs
+        # first, against half of the cap.
         from agentica.agent.config import ToolConfig
-        from agentica.compression import EvictionResult
+        from agentica.compression import PruneResult
 
         agent = _agent(tool_config=ToolConfig(compact_token_limit=8_000))
         agent.model.context_window = 32_768
-        with patch("agentica.runner.compress.evict_context", return_value=EvictionResult()) as evict, \
-             patch("agentica.runner.compress.count_tokens", return_value=7_000):
-            asyncio.run(
-                CompressMixin._maybe_compress_messages(
-                    [Message(role="user", content="hi")], agent, agent.model, LoopState(),
+        cm = agent.tool_config.compression_manager
+        for tokens, expect in ((7_000, False), (8_000, True)):
+            with patch("agentica.runner.compress.prune_tool_results", return_value=PruneResult()) as prune, \
+                 patch("agentica.runner.compress.count_tokens", return_value=tokens), \
+                 patch.object(cm, "auto_compact", new_callable=AsyncMock, return_value=False):
+                asyncio.run(
+                    CompressMixin._maybe_compress_messages(
+                        [Message(role="user", content="hi")], agent, agent.model, LoopState(),
+                    )
                 )
-            )
-        evict.assert_called_once()
-        self.assertEqual(evict.call_args.kwargs["context_window"], 32_768)
+            self.assertEqual(prune.called, expect, tokens)
+        self.assertEqual(prune.call_args.kwargs["target_tokens"], 4_000)
 
-    def test_layer1_off_skips_evict(self):
+    def test_layer1_off_skips_prune(self):
         from agentica.agent.config import ToolConfig
-        from agentica.compression import EvictionResult
+        from agentica.compression import PruneResult
 
         agent = _agent(tool_config=ToolConfig(enable_evict=False))
         agent.model.context_window = 8_000
-        with patch("agentica.runner.compress.evict_context", return_value=EvictionResult()) as evict:
+        with patch("agentica.runner.compress.prune_tool_results", return_value=PruneResult()) as prune, \
+             patch("agentica.runner.compress.count_tokens", return_value=7_900):
             asyncio.run(
                 CompressMixin._maybe_compress_messages(
                     [Message(role="user", content="hi")], agent, agent.model, LoopState(),
                 )
             )
-        evict.assert_not_called()
+        prune.assert_not_called()
 
     def test_layer2_off_skips_auto_and_reactive_but_keeps_the_manager(self):
         from agentica.agent.config import ToolConfig

@@ -6,7 +6,7 @@
 Demonstrates DeepAgent capabilities powered by the Runner agentic loop:
 - built-in tools (file ops, web search, execute code, subagent task, todos)
 - Runner agentic loop: LLM ↔ tool-call auto-loop with multi-turn reasoning
-- Two-layer compression (tool-result budget → Layer 1 evict → Layer 2
+- Two-layer compression (tool-result budget → Layer 1 prune → Layer 2
   empty window; reactive compact on prompt_too_long)
 - Death spiral detection (stops on consecutive all-error tool turns)
 - Cost tracking + cost budget control (max_cost_usd)

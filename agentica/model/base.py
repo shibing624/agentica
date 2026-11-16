@@ -1642,7 +1642,7 @@ class Model(ABC):
             self.deactivate_function_calls()
 
         # --- Layer 0: per-batch budget ---
-        # Layer 1 never evicts the trailing batch (the model has not seen it
+        # Layer 1 never prunes the trailing batch (the model has not seen it
         # yet), so a single wide parallel round has nothing else to bound it.
         try:
             from agentica.compression.manager import compact_token_limit_of, working_context_window
@@ -1650,7 +1650,7 @@ class Model(ABC):
                 can_recover_spill, enforce_tool_batch_budget,
             )
             _agent = self._agent_ref() if self._agent_ref else None
-            # Same working window Layer 1 measures pressure against, so a
+            # Same working window compaction measures pressure against, so a
             # small compact_token_limit shrinks the batch budget with it.
             _cap = compact_token_limit_of(_agent.tool_config) if _agent is not None else None
             enforce_tool_batch_budget(
