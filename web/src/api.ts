@@ -71,6 +71,8 @@ export const startWechatQrApi = () => postJson<{
 }>("/api/channels/wechat/qr", {});
 export const pollWechatQrApi = (id: string) =>
   request<{ status: string }>(`/api/channels/wechat/qr?id=${encodeURIComponent(id)}`);
+/** Open the OS folder dialog on the gateway's machine (only answers for a local client). */
+export const pickDirectoryApi = () => request<{ path: string | null }>("/api/fs/pick", { method: "POST" });
 export const fetchFsBrowse = (path: string) => request(`/api/fs/browse${path ? "?path=" + encodeURIComponent(path) : ""}`);
 export const fetchSessions = (scope: "recent" | "all" = "recent", signal?: AbortSignal) =>
   request(`/api/sessions?scope=${scope}&recent_days=30`, { signal });

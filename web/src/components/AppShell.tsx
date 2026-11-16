@@ -16,7 +16,7 @@ import {
   IconChat, IconDatabase, IconFolderPlus, IconDownload, IconSpinner, DefaultAvatar,
 } from "../icons";
 import { clampSidebarWidth, getState, sessionViews, setState, useAppState, type Session } from "../store";
-import { openAddWorkspace } from "../workspaces";
+import { pickWorkspace } from "../workspaces";
 import { AddWorkspaceDialog } from "./AddWorkspaceDialog";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { DirModal } from "./DirModal";
@@ -244,7 +244,7 @@ export function AppShell({
                 <IconSearch />
               </button>
             )}
-            <button className="ib sm" title={S.workspace.add} onClick={() => openAddWorkspace()}>
+            <button className="ib sm" title={S.workspace.add} onClick={() => void pickWorkspace().then((added) => { if (added) nav("/chat"); })}>
               <IconFolderPlus />
             </button>
           </div>

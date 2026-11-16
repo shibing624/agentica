@@ -1,5 +1,6 @@
 import * as api from "./api";
 import { getStrings } from "./i18n";
+import { pickOutcome } from "./lib/workspacePick";
 import { newChatInDir } from "./sessions";
 import {
   askConfirm, bump, getState, normDir, projectNameForDir, saveSessions, setState, showToast,
@@ -21,8 +22,30 @@ async function saveWorkspaces(next: Entry[]): Promise<{ ok: boolean; detail: str
   return { ok: true, detail: "" };
 }
 
-export function openAddWorkspace() {
+function openAddWorkspaceDialog() {
   setState({ workspaceAdd: { open: true, value: getState().serverDir || "" } });
+}
+
+let picking = false;
+
+/**
+ * "Add workspace" is one step: the OS folder dialog (dsh's "open a folder"),
+ * and the chosen folder becomes a workspace with a fresh chat in it. Where the
+ * gateway cannot show a dialog to this person — a remote browser, a system
+ * without a chooser — it falls back to the in-page folder walk.
+ * Resolves true when a workspace was added and the caller should open the chat.
+ */
+export async function pickWorkspace(): Promise<boolean> {
+  if (picking) return false;
+  picking = true;
+  try {
+    const outcome = pickOutcome(await api.pickDirectoryApi());
+    if (outcome.kind === "fallback") { openAddWorkspaceDialog(); return false; }
+    if (outcome.kind === "cancelled") return false;
+    return await addWorkspace(outcome.path);
+  } finally {
+    picking = false;
+  }
 }
 
 export function closeAddWorkspace() {

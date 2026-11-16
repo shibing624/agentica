@@ -765,6 +765,71 @@ async def browse_fs(path: Optional[str] = None):
     return {"path": str(base), "parent": parent, "dirs": dirs}
 
 
+_PICK_PROMPT = "Choose a workspace folder"
+_LOCAL_HOSTS = ("127.0.0.1", "::1")
+
+
+def _pick_command(platform: Optional[str] = None) -> Optional[list]:
+    """The argv of this OS's own folder chooser, or None when it has none.
+
+    Each prints the chosen absolute path on stdout and nothing when cancelled.
+    Pure, so tests check it without spawning anything.
+    """
+    platform = platform or sys.platform
+    if platform == "darwin":
+        return ["osascript", "-e", f'POSIX path of (choose folder with prompt "{_PICK_PROMPT}")']
+    if platform.startswith("linux"):
+        if shutil.which("zenity"):
+            return ["zenity", "--file-selection", "--directory", f"--title={_PICK_PROMPT}"]
+        if shutil.which("kdialog"):
+            return ["kdialog", "--getexistingdirectory", str(Path.home())]
+        return None
+    if platform == "win32":
+        script = (
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "$d = New-Object System.Windows.Forms.FolderBrowserDialog; "
+            "if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }"
+        )
+        return ["powershell", "-NoProfile", "-Command", script]
+    return None
+
+
+def _pick_directory_os(cmd: list) -> Optional[str]:
+    """Show the chooser and wait. The only place the gateway blocks on a window,
+    which is why tests replace exactly this function."""
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    chosen = done.stdout.strip() if done.returncode == 0 else ""
+    return str(Path(chosen)) if chosen else None
+
+
+_pick_pending: list = []  # at most one chooser on screen; a second click joins it
+
+
+@router.post("/api/fs/pick")
+async def pick_fs_directory(request: Request):
+    """Open the OS folder chooser and return the folder picked (``path`` is null
+    when cancelled), so adding a workspace is one native "Open folder" step.
+
+    Only meaningful when the person clicking is at the gateway's own screen: a
+    chooser popped for a remote client would appear where nobody is looking and
+    hold the request. So this answers 409 unless the request is a direct
+    loopback one, and 501 when the OS has no chooser; the page then falls back
+    to the HTTP folder walk of ``/api/fs/browse``, which works from anywhere.
+    """
+    forwarded = "x-forwarded-for" in request.headers or "forwarded" in request.headers
+    if request.client is None or request.client.host not in _LOCAL_HOSTS or forwarded:
+        raise HTTPException(status_code=409, detail="The folder dialog only opens for a client on the gateway's own machine")
+    cmd = _pick_command()
+    if cmd is None:
+        raise HTTPException(status_code=501, detail="No native folder dialog on this system")
+    if not _pick_pending:
+        pending = asyncio.get_running_loop().run_in_executor(None, _pick_directory_os, cmd)
+        _pick_pending.append(pending)
+        pending.add_done_callback(lambda _done: _pick_pending.clear())
+    path = await asyncio.shield(_pick_pending[0])
+    return {"path": path}
+
+
 @router.post("/api/fs/temp")
 async def make_temp_workspace():
     """Create a throwaway working directory for a new web chat.

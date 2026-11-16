@@ -127,6 +127,11 @@ def opened_externally(monkeypatch):
     # The real one, for the single test that checks it with Popen stubbed.
     _record.real = settings_routes._open_os
     monkeypatch.setattr(settings_routes, "_open_os", _record)
+    # The folder chooser blocks on a real window the same way; a test that wants
+    # a pick replaces this itself.
+    _no_pick = lambda cmd: None  # noqa: E731
+    _no_pick.real = settings_routes._pick_directory_os
+    monkeypatch.setattr(settings_routes, "_pick_directory_os", _no_pick)
     yield opened
 
 
