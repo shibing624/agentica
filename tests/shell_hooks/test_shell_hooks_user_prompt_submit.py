@@ -311,7 +311,10 @@ class TestAgentCoexistence:
                 _, users, sent = asyncio.run(
                     agent.get_messages_for_run(message="install deps please"))
         content = sent[-1].content
-        assert users[0].content == "install deps please"
+        # History keeps the bytes that were sent (next request repeats them for
+        # the prefix cache); what the person typed is durable_content().
+        assert users[0].content == content
+        assert users[0].durable_content() == "install deps please"
         assert content.startswith(MEMORY_RECALL_OPEN)
         assert "Use uv, never pip" in content
         assert "<ext>install deps please</ext>" in content
@@ -346,7 +349,8 @@ class TestAgentCoexistence:
                 _, users, sent = asyncio.run(
                     agent.get_messages_for_run(message="install deps"))
         assert sent[-1].content == "<py>install deps</py>\n\ninstall deps"
-        assert users[0].content == "install deps"
+        assert users[0].content == sent[-1].content
+        assert users[0].durable_content() == "install deps"
 
     def test_a_blocking_hook_ends_the_run_before_any_model_call(
         self, monkeypatch, tmp_path

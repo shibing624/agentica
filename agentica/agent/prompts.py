@@ -937,15 +937,15 @@ class PromptsMixin:
     ) -> Tuple[Optional[Message], List[Message], List[Message]]:
         """Build and return ``(system_message, user_messages, messages_for_model)``.
 
-        ``user_messages`` is this turn's input as history and the session log
-        store it: the git snapshot and runtime reminders are in it; recall,
-        hook context and the file-change note are not.
+        ``user_messages`` is this turn's input exactly as sent, and history
+        keeps it that way: the next request must repeat these bytes or the
+        provider's prefix cache breaks at this message. Its last user message
+        is a copy that also carries this turn's recall, hook context and
+        file-change note, recorded on ``_request_only_blocks`` so readers that
+        want what the person typed use ``durable_content()``.
 
         ``messages_for_model`` is the request: system prompt, replayed history
-        and this turn's input, whose last user message is a copy that also
-        carries the request-only blocks (recorded on its
-        ``_request_only_blocks``). Those blocks are regenerated per human turn,
-        so storing them would replay stale recall on the next turn and /resume.
+        and ``user_messages``.
         """
         # Popped before anything else: kwargs flows on to get_user_message and
         # must not carry recall-only keys there.
@@ -1100,13 +1100,12 @@ class PromptsMixin:
             fold_window_preamble(user_messages[0], pending_preamble)
             self.working_memory.drop_pending_window_preamble()
 
-        model_users = list(user_messages)
         if request_only:
             durable = user_messages[-1]
             sent = durable.model_copy(update={"content": _insert_request_only(durable.content, request_only)})
             sent._request_only_blocks = list(request_only)
-            model_users[-1] = sent
-        messages_for_model.extend(model_users)
+            user_messages[-1] = sent
+        messages_for_model.extend(user_messages)
         self.run_response.messages = messages_for_model
         return system_message, user_messages, messages_for_model
 

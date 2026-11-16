@@ -218,7 +218,8 @@ def _collect(messages: Sequence[Message]) -> Tuple[List[Tuple[int, str]], List[s
                 tools.append(_line(_tool_result_line("tool", text)))
             continue
         if message.role == "user":
-            raw = _content(message)
+            durable = message.durable_content()
+            raw = durable if isinstance(durable, str) else ""
             # Carried rows ride in front of this turn's own prose, keeping the
             # span chronological: earlier windows, then this row's question.
             for carried in carried_rows(raw):

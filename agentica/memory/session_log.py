@@ -666,6 +666,11 @@ class SessionLog:
             if msg.reasoning_content:
                 meta["reasoning_content"] = msg.reasoning_content
             content = msg.durable_content()
+            if msg._request_only_blocks and isinstance(msg.content, str):
+                # Replay sends what the provider already cached; the
+                # transcript shows what the person typed.
+                meta["wire_content"] = msg.content
+                meta["request_only_blocks"] = list(msg._request_only_blocks)
             self.append(
                 msg.role,
                 content if isinstance(content, str) else json.dumps(content, ensure_ascii=False),
@@ -1370,13 +1375,14 @@ class SessionLog:
                     messages.append(steered_msg)
                 continue
             if entry_type in ("user", "assistant", "system", "tool"):
-                msg_content = entry.get("content", "")
-                if entry_type == "user" and isinstance(entry.get("wire_content"), str):
-                    msg_content = entry["wire_content"]
                 msg = {
                     "role": entry_type,
-                    "content": msg_content,
+                    "content": entry.get("content", ""),
                 }
+                if entry_type == "user" and isinstance(entry.get("wire_content"), str):
+                    msg["content"] = entry["wire_content"]
+                    if entry.get("request_only_blocks"):
+                        msg["request_only_blocks"] = entry["request_only_blocks"]
                 for key in replay_fields:
                     if key in entry and entry[key] is not None:
                         msg[key] = entry[key]

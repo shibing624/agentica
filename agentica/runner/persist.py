@@ -34,20 +34,6 @@ if TYPE_CHECKING:
     from agentica.agent import Agent
 
 
-def strip_request_only_blocks(messages: List[Message]) -> None:
-    """Remove the blocks the prompt builder injected for one request only.
-
-    Only the request copy of this turn's user message carries them, and it
-    reaches history only when compaction made the whole surviving request the
-    stored conversation. The blocks were recorded when they were added, so
-    each is removed by its exact text; anything the user typed stays.
-    """
-    for message in messages:
-        if message._request_only_blocks:
-            message.content = message.durable_content()
-            message._request_only_blocks = []
-
-
 class PersistMixin:
     """Extracted Runner methods."""
 
@@ -190,6 +176,8 @@ class PersistMixin:
             wire_body = user_messages[-1].content
             if isinstance(wire_body, str) and wire_body != text:
                 meta["wire_content"] = wire_body
+            if user_messages[-1]._request_only_blocks:
+                meta["request_only_blocks"] = list(user_messages[-1]._request_only_blocks)
         if agent._run_input_meta:
             meta.update(agent._run_input_meta)
         if agent.run_context is not None:
@@ -831,7 +819,6 @@ class PersistMixin:
                 run_messages.append(synthesized)
         else:
             run_messages = user_messages + turn_msgs
-        strip_request_only_blocks(run_messages)
         if system_message is not None:
             run_messages.insert(0, system_message)
         agent.run_response.messages = run_messages

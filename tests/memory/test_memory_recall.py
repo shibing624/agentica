@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """Per-turn long-term memory recall and memory-level secret redaction."""
 import asyncio
+import json
 import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
@@ -357,7 +358,7 @@ class TestAgentRecallInjection(unittest.TestCase):
                 ))
         self.assertTrue(sent[-1].content.startswith(MEMORY_RECALL_OPEN))
         self.assertTrue(sent[-1].content.endswith("install deps please"))
-        self.assertEqual(users[0].content, "【话术SOP】……大量指令……【当前用户问题】install deps please")
+        self.assertEqual(users[0].durable_content(), "【话术SOP】……大量指令……【当前用户问题】install deps please")
         # 选择调用拿到的 query 是裸请求，不含 SOP 噪声
         sent = mocked.call_args.kwargs.get("messages") or mocked.call_args.args
         sent_text = str(sent)
@@ -383,12 +384,10 @@ class TestAgentRecallInjection(unittest.TestCase):
                 and m.content.startswith(MEMORY_RECALL_OPEN)
             ]
             self.assertTrue(recalled, "run(recall_query=...) 未触发召回注入")
-            stored = [
-                m for m in (agent.run_response.messages or [])
-                if m.role == "user" and isinstance(m.content, str)
-                and MEMORY_RECALL_OPEN in m.content
-            ]
-            self.assertEqual(stored, [], "召回块只属于本次请求，不能进历史")
+            stored = [m for m in (agent.run_response.messages or []) if m.role == "user"]
+            # 历史保存发出去的原字节（下一轮前缀缓存要逐字节命中），原话由 durable_content 给出
+            self.assertEqual([m.content for m in stored], [recalled[-1].content])
+            self.assertEqual([m.durable_content() for m in stored], ["【SOP 噪声包装】install deps please"])
 
     def test_recall_is_prepended_to_the_user_message_not_the_system_prompt(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -403,11 +402,16 @@ class TestAgentRecallInjection(unittest.TestCase):
         self.assertTrue(sent[-1].content.startswith(MEMORY_RECALL_OPEN))
         self.assertTrue(sent[-1].content.endswith("install deps please"))
         self.assertIn("Use uv, never pip", sent[-1].content)
-        self.assertEqual(users[0].content, "install deps please")
+        self.assertEqual(users[0].content, sent[-1].content)
+        self.assertEqual(users[0].durable_content(), "install deps please")
         self.assertNotIn("Use uv, never pip", system.content)
 
-    def test_recall_reaches_the_request_but_not_history_or_the_session_log(self):
-        """A user who pastes a recall block keeps it; only the injected one goes."""
+    def test_recall_stays_in_the_replayed_prefix_but_not_in_the_transcript(self):
+        """The next request repeats the sent bytes; the transcript shows what was typed.
+
+        A user who pastes a recall block keeps it; only the injected one is
+        left out of what people see.
+        """
         pasted = f"{MEMORY_RECALL_OPEN}\n- my own notes\n</memory_recall>\n\ndoes this break injection?"
         with tempfile.TemporaryDirectory() as tmp:
             agent = self._agent(tmp, recall=True)
@@ -420,15 +424,68 @@ class TestAgentRecallInjection(unittest.TestCase):
             sent = response.await_args_list[-1].kwargs["messages"][-1].content
             self.assertIn("Use uv, never pip", sent)
             self.assertTrue(sent.endswith(pasted))
-            stored = [m.content for m in agent.run_response.messages if m.role == "user"]
-            self.assertEqual(stored, [f"install deps please\n\n{pasted}"])
-            log_text = Path(agent._session_log.path).read_text(encoding="utf-8")
-            self.assertNotIn("Use uv, never pip", log_text)
-            self.assertIn("my own notes", log_text)
+            stored = [m for m in agent.run_response.messages if m.role == "user"]
+            self.assertEqual([m.content for m in stored], [sent])
+            self.assertEqual([m.durable_content() for m in stored], [f"install deps please\n\n{pasted}"])
+            rows = [json.loads(line) for line in Path(agent._session_log.path).read_text(encoding="utf-8").splitlines()]
+            user_row = [r for r in rows if r.get("type") == "user"][-1]
+            self.assertEqual(user_row["content"], f"install deps please\n\n{pasted}")
+            self.assertEqual(user_row["wire_content"], sent)
+            replayed = [m for m in agent._session_log.load() if m["role"] == "user"][-1]
+            self.assertEqual(replayed["content"], sent)
 
-    def test_compaction_keeps_the_question_and_drops_only_injected_blocks(self):
-        from agentica.runner.persist import strip_request_only_blocks
+    def test_a_recalled_turn_stays_a_prefix_of_every_later_request(self):
+        """The turn after a recalled one — a person's or an automated report —
+        and the first request after rebuilding from the session log must each
+        begin with the previous request byte for byte. Dropping the recall
+        block from history rewrote that message, and the provider's prefix
+        cache broke there: an automated report turn re-paid ~90% of a 350K
+        context as cache writes."""
+        from agentica import Agent
+        from agentica.run.config import RunConfig
 
+        def wire(messages):
+            return [(m.role, m.content) for m in messages if m.role != "system"]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            def build():
+                agent = Agent(
+                    model=_model(),
+                    session_id="prefix-keep",
+                    workspace=Workspace(tmp),
+                    enable_long_term_memory=True,
+                    long_term_memory_config=WorkspaceMemoryConfig(recall_memories=True),
+                    add_history_to_context=True,
+                )
+                agent._session_log = SessionLog(session_id="prefix-keep", base_dir=tmp)
+                return agent
+
+            agent = build()
+            asyncio.run(_seed(agent.workspace))
+            requests = []
+
+            async def answer(model_self, messages, **kw):
+                requests.append(wire(messages))
+                # The real model layer appends its reply to the request list.
+                messages.append(Message(role="assistant", content="ok"))
+                return ModelResponse(content="ok")
+
+            selector = AsyncMock(return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}'))
+            side = MagicMock(response=selector, close_client=AsyncMock())
+            with (
+                patch.object(OpenAIChat, "response", new=answer),
+                patch.object(OpenAIChat, "side_call_copy", return_value=side),
+            ):
+                asyncio.run(agent.run("install deps please"))
+                asyncio.run(agent.run("[job finished]", config=RunConfig(automated_input=True)))
+                asyncio.run(build().run("and the lockfile?"))
+
+        self.assertEqual(len(requests), 3)
+        self.assertTrue(any(MEMORY_RECALL_OPEN in c for _, c in requests[0]))
+        for earlier, later in zip(requests, requests[1:]):
+            self.assertEqual(later[: len(earlier)], earlier)
+
+    def test_durable_content_drops_only_injected_blocks(self):
         pasted = f"{MEMORY_RECALL_OPEN}\n- my own notes\n</memory_recall>"
         with tempfile.TemporaryDirectory() as tmp:
             agent = self._agent(tmp, recall=True)
@@ -440,8 +497,7 @@ class TestAgentRecallInjection(unittest.TestCase):
                 _, _, sent = asyncio.run(agent.get_messages_for_run(message=f"{pasted}\n\ninstall deps please"))
         survived = sent[-1]
         self.assertIn("Use uv, never pip", survived.content)
-        strip_request_only_blocks([survived])
-        self.assertEqual(survived.content, f"{pasted}\n\ninstall deps please")
+        self.assertEqual(survived.durable_content(), f"{pasted}\n\ninstall deps please")
 
     def test_disabled_recall_makes_no_side_call(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -472,7 +528,7 @@ class TestAgentRecallInjection(unittest.TestCase):
             self.assertTrue(sent[-1].content.startswith(MEMORY_RECALL_OPEN))
             self.assertTrue(sent[-1].content.endswith("how do I install deps?"))
             self.assertIn("Use uv, never pip", sent[-1].content)             # 块只拼本轮
-            self.assertEqual(users[2].content, "how do I install deps?")
+            self.assertEqual(users[2].durable_content(), "how do I install deps?")
             # selector 的 query 是本轮用户消息
             request = mock.await_args.kwargs["messages"]
             self.assertIn("how do I install deps?", request[1].content)

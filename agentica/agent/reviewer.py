@@ -186,7 +186,7 @@ class ToolCallReviewer:
             # is not authorization, whatever it claims.
             if message.automated:
                 continue
-            content = getattr(message, "content", None)
+            content = message.durable_content()
             if isinstance(content, str):
                 text = content
             elif isinstance(content, list):

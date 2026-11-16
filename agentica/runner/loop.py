@@ -25,7 +25,6 @@ from pydantic import BaseModel
 
 from agentica.agent.goals import is_goal_generated_prompt
 from agentica.agent.history_filter import _text_from_content_blocks, ensure_history_portable
-from agentica.runner.persist import strip_request_only_blocks
 from agentica.model.cost import CostTracker
 from agentica.guardrails.agent import (
     normalize_input_for_guardrails,
@@ -1676,9 +1675,6 @@ class LoopMixin:
                     run_messages = [m for m in messages_for_model if m.role != "system"]
                 else:
                     run_messages = user_messages + messages_for_model[num_input_messages:]
-                # After compaction the request copy of this turn's message is
-                # what survived; history keeps it without request-only blocks.
-                strip_request_only_blocks(run_messages)
                 if system_message is not None:
                     run_messages.insert(0, system_message)
                 agent.run_response.messages = run_messages

@@ -90,7 +90,8 @@ class TestAgentInjection(unittest.TestCase):
         content = sent[-1].content
         self.assertTrue(content.startswith("[File change notice]"))
         self.assertTrue(content.endswith("what is x?"))
-        self.assertEqual(user_messages[-1].content, "what is x?")
+        self.assertEqual(user_messages[-1].content, content)
+        self.assertEqual(user_messages[-1].durable_content(), "what is x?")
         _, _, again = asyncio.run(self.agent.get_messages_for_run(message="and now?"))
         self.assertEqual(again[-1].content, "and now?")
 

@@ -316,7 +316,12 @@ class WorkingMemory(BaseModel):
                 continue
 
             # role == "user": start of a new run
-            user_msg = Message(**rm)
+            # ``request_only_blocks``: the log replays the bytes that were sent
+            # and names the blocks in them that the person did not type.
+            fields = dict(rm)
+            request_only = fields.pop("request_only_blocks", None) or []
+            user_msg = Message(**fields)
+            user_msg._request_only_blocks = list(request_only)
             run_msgs: List[Message] = [user_msg]
             flat.append(user_msg)
             i += 1

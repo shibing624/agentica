@@ -139,7 +139,12 @@ def _history_stats(runs: list[AgentRun]) -> HistoryRenderStats:
 
 
 def _visible_text(message: Message) -> str:
-    return strip_elided_notice(message.get_content_string()).strip()
+    if message.role == "user":
+        durable = message.durable_content()
+        text = durable if isinstance(durable, str) else message.get_content_string()
+    else:
+        text = message.get_content_string()
+    return strip_elided_notice(text).strip()
 
 
 def _qa_blocks_for_display(messages: list[Message]) -> list[tuple[str, str]]:
@@ -974,7 +979,8 @@ def _cmd_retry(ctx: CommandContext, cmd_args: str = ""):
     if last_user_msg is None or not last_user_msg.content:
         con.print("[yellow]No user message found to retry.[/yellow]")
         return
-    user_text = last_user_msg.content if isinstance(last_user_msg.content, str) else str(last_user_msg.content)
+    durable = last_user_msg.durable_content()
+    user_text = durable if isinstance(durable, str) else str(durable)
     if wm.runs:
         wm.runs.pop()
     while wm.messages and wm.messages[-1].role in ("assistant", "tool"):

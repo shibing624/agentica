@@ -298,13 +298,17 @@ class TestAgentWiring(unittest.TestCase):
             self.assertIn(SESSION_RECALL_OPEN, captured["user"])
             self.assertIn("twine upload", captured["user"])
             self.assertTrue(captured["user"].rstrip().endswith("继续上次的"))
-            self.assertNotIn(SESSION_RECALL_OPEN, Path(b._session_log.path).read_text(encoding="utf-8"))
+            rows = [json.loads(line) for line in Path(b._session_log.path).read_text(encoding="utf-8").splitlines()]
+            user_row = [r for r in rows if r.get("type") == "user"][-1]
+            self.assertNotIn(SESSION_RECALL_OPEN, user_row["content"])
             stored = [
-                m.content for m in b.working_memory.get_messages_from_last_n_runs()
+                m for m in b.working_memory.get_messages_from_last_n_runs()
                 if m.role == "user" and isinstance(m.content, str)
             ]
             self.assertTrue(stored)
-            self.assertNotIn(SESSION_RECALL_OPEN, stored[-1])
+            # Replay repeats the sent bytes; what the person typed has no recall.
+            self.assertEqual(stored[-1].content, captured["user"])
+            self.assertNotIn(SESSION_RECALL_OPEN, stored[-1].durable_content())
 
             tool = BuiltinContextTool()
             tool.set_agent(b)
