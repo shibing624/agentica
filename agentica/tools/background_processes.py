@@ -443,7 +443,6 @@ class BackgroundProcessRegistry:
         completed_at = time.time()
         with self._lock:
             item.finished_at = completed_at
-            item.finished.set()
             event = BackgroundProcessCompleted(
                 id=item.id,
                 num=item.num,
@@ -472,6 +471,10 @@ class BackgroundProcessRegistry:
                 if prior.get(key):
                     payload[key] = prior[key]
             _write_json_atomic(Path(item.record_path), payload)
+        # Only after the completion record is on disk: ``wait`` marks that
+        # record delivered as soon as it sees ``finished``, and a mark written
+        # between the read of ``prior`` above and this write would be lost.
+        item.finished.set()
         self._completed.put(event)
         self._notify_change()
 

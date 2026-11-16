@@ -493,6 +493,38 @@ class TestBuiltinExecuteTool:
         assert "exited with code 0" in result
         assert "early" in result
 
+    def test_wait_that_returns_the_result_settles_the_completion_report(self, tmp_dir):
+        """A result the model already read through ``wait`` must not reopen a
+        report turn: that turn only repeats it, and pays a cold prompt cache."""
+        from agentica.tools.background_processes import undelivered_job_records
+
+        records_dir = Path(tmp_dir) / "records"
+        registry = BackgroundProcessRegistry()
+        registry.bind_session("s1", records_dir)
+        tool = BuiltinExecuteTool(work_dir=tmp_dir, background_process_registry=registry)
+        command = f"{shlex.quote(sys.executable)} -c {shlex.quote('print(1)')}"
+
+        async def scenario():
+            await tool.execute(command, background=True)
+            waited = registry.list(include_finished=True)[0]
+            await tool.execute(command, background=True)
+            unwaited = [i for i in registry.list(include_finished=True) if i.id != waited.id][0]
+            assert unwaited.finished.wait(timeout=30)
+            result = await tool.wait(waited.id, timeout=120)
+            return result, waited, unwaited
+
+        try:
+            result, waited, unwaited = asyncio.run(scenario())
+        finally:
+            registry.stop()
+
+        assert "exited with code 0" in result
+        owed = {Path(path).name for path, _ in undelivered_job_records(records_dir)}
+        assert owed == {Path(unwaited.record_path).name}
+        record = json.loads(Path(waited.record_path).read_text())
+        assert record["delivered_at"]
+        assert record["delivery_owner"].startswith("wait:")
+
     def test_wait_reports_a_failing_command_exit_code(self, tmp_dir):
         registry = BackgroundProcessRegistry()
         tool = BuiltinExecuteTool(work_dir=tmp_dir, background_process_registry=registry)

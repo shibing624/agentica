@@ -16,7 +16,12 @@ from uuid import uuid4
 
 
 from agentica.tools.base import Tool
-from agentica.tools.background_processes import BackgroundProcessRegistry, read_log_tail
+from agentica.tools.background_processes import (
+    BackgroundProcessRegistry,
+    delivery_owner,
+    mark_job_delivered,
+    read_log_tail,
+)
 from agentica.tools.os_sandbox import (
     SandboxPolicy,
     describe_policy,
@@ -999,6 +1004,13 @@ class BuiltinExecuteTool(Tool):
         what = f"Background command #{item.num}"
         tail = read_log_tail(item.log_path, max_lines=40, max_chars=4000)
         if item.finished.is_set():
+            # The model has the result in hand now, so the completion report is
+            # owed to nobody. Left undelivered, it opened one more turn to repeat
+            # what this call just returned — a full re-read of the prompt cache
+            # for "already handled". The watcher keeps this marker when it
+            # writes the completion record afterwards.
+            if item.record_path:
+                mark_job_delivered(item.record_path, delivery_owner("wait"))
             header = (
                 f"{what} ({item.id}) exited with code "
                 f"{item.returncode} after {item.elapsed}."
