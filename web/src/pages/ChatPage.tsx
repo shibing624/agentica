@@ -21,6 +21,7 @@ import {
 import { primeSettings } from "../panels/SettingsModal";
 import { applyPendingModel, cachedSessionModel, loadSessionModel, pickSessionModel, sessionModelKnown } from "../sessionModel";
 import { chatApprovalMode, createSession, forkAt, hydrateSession, loadOlderMessages, markSessionRead, pushPendingName, rateMessage, renameSession, sessionHydrating, setChatApprovalMode as setApprovalMode, syncSessionRoundStats } from "../sessions";
+import { titleForFirstMessage } from "../lib/sessionTitle";
 import { loadCronJobs, loadPlugins } from "../data";
 import {
   Logo, IconPlus, IconClose, IconChat, IconBook, IconAsk, IconAuto, IconSidebarRight,
@@ -2358,8 +2359,8 @@ async function sendMessage(sessId: string, text: string, files: File[]) {
   sess.msgs.push(userMsg);
   sess.msgs.push(aiMsg);
   st.streams[sessId] = { abortCtrl, aiMsg, preparing: files.length > 0 };
-  if (!sess.named && (!sess.title || sess.title === "Chat") && sess.msgs.filter((m) => m.role === "user" && !m.automated).length === 1) {
-    sess.title = (text || "Chat").slice(0, 50);
+  if (sess.msgs.filter((m) => m.role === "user" && !m.automated).length === 1) {
+    sess.title = titleForFirstMessage(sess, text);
   }
   saveSessions();
   bump();

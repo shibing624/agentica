@@ -24,6 +24,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import shutil
 import threading
 import time
@@ -136,6 +137,15 @@ def iso_timestamp(epoch: Optional[float] = None) -> str:
         else datetime.now(timezone.utc)
     )
     return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
+
+
+_CHAT_IMAGE_MARK_RE = re.compile(r"(?:^|\n\n)\[图片: [0-9a-f]")
+
+
+def strip_chat_image_markers(text: str) -> str:
+    """Drop the gateway's machine-added image markers and captions."""
+    match = _CHAT_IMAGE_MARK_RE.search(text or "")
+    return text[:match.start()] if match else text
 
 
 def _parse_iso_timestamp(value: Any) -> Optional[float]:
@@ -1903,12 +1913,56 @@ class SessionLog:
             pass
         out: Dict[str, Any] = {
             "first_user": first_user,
+            "display_title": cls.display_title(
+                name=cls._read_meta_name(Path(path).with_suffix(".meta.json")),
+                first_user=strip_chat_image_markers(first_user),
+                cron_job_name=cron_job_name,
+                fallback="Chat",
+            ),
             "user_count": user_count,
             "recent_users": list(recent),
         }
         if cron_job_name:
             out["cron_job_name"] = cron_job_name
         return out
+
+    @staticmethod
+    def display_title(
+        *,
+        name: Optional[str] = None,
+        first_user: str = "",
+        cron_job_name: str = "",
+        fallback: str = "Chat",
+        path: str = "",
+        max_chars: int = 40,
+    ) -> str:
+        """The single reader for a session's sidebar title.
+
+        The sidecar ``name`` is authoritative when present. Otherwise read the
+        structured transcript facts already supplied by ``session_preview``:
+        a real first user request, then the scheduled job's name. Present
+        callers must not repeat ``name or first_user or "Chat"`` — doing so
+        gives a still-pending title generation a different value per surface.
+        """
+        if path:
+            preview = SessionLog.session_preview(path, max_chars=max(max_chars, 60))
+            return SessionLog.display_title(
+                name=SessionLog._read_meta_name(Path(path).with_suffix(".meta.json")),
+                first_user=preview.get("first_user", ""),
+                cron_job_name=preview.get("cron_job_name", ""),
+                fallback=fallback,
+                max_chars=max_chars,
+            )
+        name = (name or "").strip()
+        if name:
+            return name[:60]
+        first = strip_chat_image_markers(first_user or "").strip()
+        if first:
+            return " ".join(first.split())[:max_chars]
+        cron = (cron_job_name or "").strip()
+        if cron:
+            return cron[:max_chars]
+        return fallback
 
     # ---- sidecar metadata (session name) -----------------------------------
     #

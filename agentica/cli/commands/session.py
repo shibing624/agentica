@@ -464,7 +464,7 @@ def _print_session_list(
         preview = SessionLog.session_preview(s["path"])
         turns = preview["user_count"]
         recent_users = preview.get("recent_users") or []
-        user_name = s.get("name") or preview.get("cron_job_name")
+        user_name = preview.get("display_title") or s.get("name")
         is_current = ctx.current_agent is not None and sid == ctx.current_agent.session_id
         current_marker = "  [green](current)[/green]" if is_current else ""
         con.print(

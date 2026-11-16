@@ -22,7 +22,7 @@ from agentica.tools.background_processes import (
 import sys
 from ...card_page import phone_card_base_url
 from ...channels.base import Message
-from .. import chat_images, live_turn
+from .. import live_turn
 from ..im_files import format_file_size
 from .commands import (
     HELP_TEXT,
@@ -89,18 +89,7 @@ class ImMenusMixin:
     def _session_title(self, work_dir: str, session_id: str) -> str:
         uid = self._user_id()
         log = SessionLog(session_id=session_id, work_dir=work_dir, user_id=uid)
-        name = log.get_name()
-        if name:
-            return name
-        if log.path.is_file() and log.path.stat().st_size > 0:
-            preview = SessionLog.session_preview(str(log.path), max_chars=48)
-            first = chat_images.strip_markers(preview.get("first_user") or "").strip()
-            if first:
-                return " ".join(first.split())[:40]
-            cron_name = str(preview.get("cron_job_name") or "").strip()
-            if cron_name:
-                return cron_name[:48]
-        return f"会话 {session_id[:8]}"
+        return SessionLog.display_title(path=str(log.path), fallback=f"会话 {session_id[:8]}")
 
     def _is_busy(self, session_id: str) -> bool:
         peer = self.find_live_cli_peer(session_id)

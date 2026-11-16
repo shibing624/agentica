@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Web / Desktop 会话标题收敛到 `SessionLog.display_title` 单一读模型**：此前 sidecar 名称、首条提问、定时任务名和 `"Chat"` 回退在 `AgentService.list_sessions`、在途 `LiveTurn`、fork、IM `/session`、CLI `/resume` 各自推导，后台模型生成标题写回 sidecar 后也没有独立的活动脉冲。现在这些 Python 入口统一调用 `SessionLog.display_title(...)`，首轮请求先用本地草稿标题显示，后台标题真正落盘后 `live_turn.bump_pulse(owner)` 触发侧栏刷新；手动改过的标题仍不会被目录覆盖。
+
 - **Web / Desktop / IM 的权限审批也会超时，不再无限卡住整轮**：此前只有 CLI 的审批卡在 5 分钟无人回应后自动放弃，网关里的审批一直挂到你回来。现在网关的审批卡和 `ask_user_question` 的提问都读同一个配置 `settings.human_wait_timeout`（默认 300 秒，`0` 表示一直等，CLI 与网关共用一个读取函数 `agentica.config.profiles.human_wait_timeout`，原来网关里写死的 `QUESTION_WAIT_S` 已删除），没人决定，就把这次调用标为超时：不执行、也不算你拒绝（不写 deny 授权），模型会被告知「无人回应，不要换个方式达成同样效果，先做不需要它的部分并在回复里列出等待项」，对话继续。所有端的卡片同步关掉（事件 `approval_resolved` 的 `by` 为 `timeout`），Web 弹一条提示，IM 卡片标注「已超时，该操作没有执行」。先有人决定的话定时器不起作用（`gateway/src/agentica_gateway/services/live_turn.py`、`services/agent_service/builder.py`）。
 
 - **Web / Desktop 添加工作区改为「打开文件夹」一步完成（借鉴 dsh Desktop）**：点侧栏的添加按钮直接弹出系统的选择文件夹对话框（macOS `osascript`、Linux `zenity` / `kdialog`、Windows PowerShell），选中即成为工作区并新建对话，取消则什么都不发生；不再先开一个要手输路径、再逐级浏览的弹窗。对话框由网关所在机器弹出，所以新增的 `POST /api/fs/pick` 只对本机直连（回环地址、无转发头）的请求生效，远程浏览器收到 409、没有选择器的系统收到 501，页面自动退回原来的页内目录浏览弹窗，行为和之前一致（`gateway/src/agentica_gateway/routes/settings.py`、`web/src/workspaces.ts`、`web/src/lib/workspacePick.ts`）。

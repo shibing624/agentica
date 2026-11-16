@@ -1136,6 +1136,39 @@ class TestSidecarSessionName:
         log = SessionLog("s-by-cls", base_dir=str(tmp_path))
         assert log.get_name() == "via-classmethod"
 
+    def test_display_title_is_the_single_naming_surface(self, tmp_path):
+        log = SessionLog("s-title", base_dir=str(tmp_path))
+        log.append("user", "帮我整理今天的 CI 失败原因")
+
+        assert SessionLog.display_title(path=str(log.path)) == "帮我整理今天的 CI 失败原因"
+
+        log.set_name("CI 巡检")
+        assert SessionLog.display_title(path=str(log.path), name=log.get_name()) == "CI 巡检"
+        assert log.get_name() == "CI 巡检"
+
+        log.clear_name()
+        assert SessionLog.display_title(path=str(log.path), name=log.get_name()) == "帮我整理今天的 CI 失败原因"
+        assert log.get_name() is None
+
+    def test_display_title_prefers_cron_job_metadata(self, tmp_path):
+        log = SessionLog("s-cron-title", base_dir=str(tmp_path))
+        log.append(
+            "user",
+            "[Scheduled task] check service",
+            automated=True,
+            cron_job={"id": "j1", "name": "服务健康检查"},
+        )
+
+        assert SessionLog.display_title(path=str(log.path)) == "服务健康检查"
+
+    def test_session_preview_carries_display_title(self, tmp_path):
+        log = SessionLog("s-preview-title", base_dir=str(tmp_path))
+        log.append("user", "解释一下缓存命中率")
+
+        preview = SessionLog.session_preview(str(log.path), max_chars=40)
+
+        assert preview["display_title"] == "解释一下缓存命中率"
+
 
 class TestSessionLastRead:
     """Web sidebar unread dot: last_read_at vs last jsonl event."""

@@ -7,6 +7,7 @@ import {
   rememberSteersFromMsgs,
 } from "./lib/hydrateMessages";
 import { emptyChatIds } from "./lib/sessionDrafts";
+import { shouldApplyDisplayTitle } from "./lib/sessionTitle";
 import { messageFileCandidates } from "./lib/messageFiles";
 import { cachedExisting, statWorkspaceFilesBatched } from "./lib/workspaceStat";
 import { searchEventsConversation, searchMsgsConversation, type SessionContentHit } from "./lib/sessionRows";
@@ -79,7 +80,7 @@ export function loadSessions(scope: "recent" | "all" = getState().sessionScope):
       const firstTs = Date.parse(sv.first_timestamp) || Date.now();
       const serverLast = Date.parse(sv.last_timestamp) || 0;
       const next: Session = {
-        title: pendingNames[id] || sv.name || "Chat",
+        title: pendingNames[id] || (shouldApplyDisplayTitle(mem || {}, sv.name || "") ? sv.name : (mem?.title || sv.name || "Chat")),
         msgs: mem?.msgs || [],
         ts: firstTs,
         lastTs: Math.max(serverLast, mem ? lastQueryTs(mem) : 0, firstTs),

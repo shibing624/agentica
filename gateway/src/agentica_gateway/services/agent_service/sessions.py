@@ -178,6 +178,11 @@ class AgentSessionsMixin:
             preview = self._session_preview(entry)
             first_user = chat_images.strip_markers(preview.get("first_user", "") or "")
             cron_title = str(preview.get("cron_job_name") or "").strip()
+            display_title = SessionLog.display_title(
+                name=entry.get("name"),
+                first_user=first_user,
+                cron_job_name=cron_title,
+            )
             first_ts = entry.get("first_timestamp")
             if not first_ts and entry.get("mtime"):
                 first_ts = iso_timestamp(entry["mtime"])
@@ -185,11 +190,7 @@ class AgentSessionsMixin:
             last_read_at = entry.get("last_read_at")
             out.append({
                 "session_id": sid,
-                "name": (
-                    entry.get("name")
-                    or (first_user[:40] if first_user else "")
-                    or (cron_title[:60] if cron_title else "Chat")
-                ),
+                "name": display_title,
                 "preview": first_user or cron_title,
                 "user_count": preview.get("user_count", 0),
                 "first_timestamp": first_ts,
@@ -217,11 +218,10 @@ class AgentSessionsMixin:
                 or _infer_im_source_from_session_id(turn.session_id)
                 or "gateway"
             )
-            live_title = (
-                live_log.get_name()
-                or ((turn.cron_job or {}).get("name") or "").strip()[:60]
-                or (chat_images.strip_markers(turn.user_message).strip()[:40] if turn.user_message else "")
-                or "Chat"
+            live_title = SessionLog.display_title(
+                name=live_log.get_name(),
+                first_user=chat_images.strip_markers(turn.user_message or ""),
+                cron_job_name=((turn.cron_job or {}).get("name") or ""),
             )
             out.append({
                 "session_id": turn.session_id,
@@ -592,8 +592,10 @@ class AgentSessionsMixin:
         new_id = str(uuid.uuid4())
         branch = log.fork(new_id, at_uuid=at_uuid)
         branch.set_source(RunSource.gateway.value)
-        meta = SessionLog._read_meta(log.meta_path)
-        title = SessionLog._meta_name(meta) or (chat_images.strip_markers(log.first_user_message() or "") or "Chat")[:40]
+        title = SessionLog.display_title(
+            name=log.get_name(),
+            first_user=chat_images.strip_markers(log.first_user_message() or ""),
+        )
         SessionLog.rename_session(new_id, f"{title} (fork)", base_dir=str(log.base_dir))
         if log._cwd:
             self._session_work_dirs[self._sk(new_id, owner)] = log._cwd
@@ -629,11 +631,13 @@ class AgentSessionsMixin:
         log = self.session_log_for(session_id, owner=owner)
         if log.get_name():
             return
-        task = asyncio.create_task(self._write_title(log, question, answer))
+        task = asyncio.create_task(
+            self._write_title(log, question, answer, self._owner(owner))
+        )
         self._title_tasks.add(task)
         task.add_done_callback(self._title_tasks.discard)
 
-    async def _write_title(self, log: SessionLog, question: str, answer: str) -> None:
+    async def _write_title(self, log: SessionLog, question: str, answer: str, owner: str) -> None:
         prompt = (
             f"User:\n{chat_images.strip_markers(question)[:2000]}\n\n"
             f"Assistant:\n{answer[:2000]}"
@@ -646,6 +650,7 @@ class AgentSessionsMixin:
         title = title.splitlines()[0].strip().strip("\"'“”「」").strip() if title else ""
         if title and not log.get_name():
             log.set_name(title[:60])
+            _pkg().live_turn.bump_pulse(owner)
 
     def archive_session(
         self, session_id: str, archived: bool = True, owner: Optional[str] = None,

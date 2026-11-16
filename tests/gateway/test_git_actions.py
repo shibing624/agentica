@@ -359,3 +359,30 @@ def test_first_exchange_names_an_unnamed_session(tmp_path):
     assert log.get_name() == "修复登录页超时"
     assert renamed.get_name() == "Mine"
     assert side.await_count == 1
+
+
+def test_generated_title_bumps_the_session_pulse(tmp_path):
+    from agentica.memory.session_log import SessionLog
+    from agentica_gateway.services import live_turn
+    import agentica_gateway.services.agent_service as svc_mod
+    from agentica_gateway.services.agent_service import AgentService
+
+    live_turn.reset()
+    svc = AgentService.__new__(AgentService)
+    svc._titled, svc._title_tasks = set(), set()
+    log = SessionLog(session_id="s1", base_dir=str(tmp_path))
+
+    async def go():
+        with patch.object(AgentService, "session_log_for", lambda self, sid, owner=None: log), \
+             patch.object(AgentService, "side_task", AsyncMock(return_value="整理 CI 失败原因")), \
+             patch.object(AgentService, "_owner", staticmethod(lambda owner=None: owner or "default")), \
+             patch.object(svc_mod, "live_turn", live_turn, create=True):
+            before = live_turn.pulse("default")["ver"]
+            svc._schedule_title("s1", "default", "帮我看下 CI", "已经整理")
+            await asyncio.gather(*svc._title_tasks)
+            return before, live_turn.pulse("default")["ver"]
+
+    before, after = asyncio.run(go())
+    assert log.get_name() == "整理 CI 失败原因"
+    assert after > before
+    live_turn.reset()
