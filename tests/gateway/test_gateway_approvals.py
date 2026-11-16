@@ -231,10 +231,10 @@ class TestApprovalTimeout:
     """Nobody at the screen: the card gives up, the call is skipped, the turn goes on."""
 
     def test_unanswered_card_expires_without_running_or_refusing(self, tmp_path, monkeypatch):
-        from agentica_gateway.services import agent_service as svc_mod
+        from agentica_gateway.services.agent_service import builder as builder_mod
         from agentica_gateway.services.agent_service import AgentService
 
-        monkeypatch.setattr(svc_mod, "APPROVAL_WAIT_S", 0.1)
+        monkeypatch.setattr(builder_mod, "human_wait_timeout", lambda: 0.1)
 
         async def _run():
             svc = AgentService(workspace_path=str(tmp_path))
@@ -262,10 +262,10 @@ class TestApprovalTimeout:
         asyncio.run(_run())
 
     def test_a_decision_before_the_deadline_wins_and_the_timer_is_silent(self, tmp_path, monkeypatch):
-        from agentica_gateway.services import agent_service as svc_mod
+        from agentica_gateway.services.agent_service import builder as builder_mod
         from agentica_gateway.services.agent_service import AgentService
 
-        monkeypatch.setattr(svc_mod, "APPROVAL_WAIT_S", 0.15)
+        monkeypatch.setattr(builder_mod, "human_wait_timeout", lambda: 0.15)
 
         async def _run():
             svc = AgentService(workspace_path=str(tmp_path))
@@ -281,6 +281,46 @@ class TestApprovalTimeout:
             resolved = [e["data"]["by"] for e in turn.events if e.get("event") == "approval_resolved"]
             assert resolved == ["Web"]
             assert fc.approval_trace["reason"] is None
+
+        asyncio.run(_run())
+
+
+class TestApprovalTimeoutSetting:
+    """The gateway reads the same ``settings.human_wait_timeout`` as the CLI."""
+
+    def test_setting_value_is_the_deadline(self, tmp_path, monkeypatch):
+        from agentica.config import profiles
+        from agentica_gateway.services.agent_service import AgentService
+
+        monkeypatch.setattr(profiles, "load_global_config", lambda: {"settings": {"human_wait_timeout": 0.1}})
+
+        async def _run():
+            svc = AgentService(workspace_path=str(tmp_path))
+            svc.set_session_approval_mode("s1", "read-only", owner="default")
+            live_turn.start("s1", owner="default")
+            approve = svc._make_session_approve("s1", "default")
+            fc = _fc(call_id="cfg1")
+            assert await asyncio.wait_for(approve(fc), timeout=5) == "deny"
+            assert fc.approval_trace["reason"] == "timeout"
+
+        asyncio.run(_run())
+
+    def test_zero_waits_forever(self, tmp_path, monkeypatch):
+        from agentica.config import profiles
+        from agentica_gateway.services.agent_service import AgentService
+
+        monkeypatch.setattr(profiles, "load_global_config", lambda: {"settings": {"human_wait_timeout": 0}})
+
+        async def _run():
+            svc = AgentService(workspace_path=str(tmp_path))
+            svc.set_session_approval_mode("s1", "read-only", owner="default")
+            turn = live_turn.start("s1", owner="default")
+            approve = svc._make_session_approve("s1", "default")
+            task = asyncio.create_task(approve(_fc(call_id="zero1")))
+            await asyncio.sleep(0.3)
+            assert not task.done() and turn.approvals.size == 1
+            turn.resolve_approval("zero1", "allow", by="Web")
+            assert await task == "allow"
 
         asyncio.run(_run())
 

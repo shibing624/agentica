@@ -24,7 +24,7 @@ from agentica.agent.permissions import (
 )
 from agentica.cli.prefs import normalize_cli_prefs
 from agentica.compression.manager import parse_compact_token_limit
-from agentica.config.profiles import get_setting
+from agentica.config.profiles import get_setting, human_wait_timeout
 from agentica.run.config import RunConfig
 from agentica.run.context import RunSource
 from agentica.skills import load_system_skills
@@ -294,7 +294,7 @@ class AgentBuilderMixin:
             multi_select: bool = False,
         ) -> str:
             pkg = _pkg()
-            wait_s = pkg.QUESTION_WAIT_S
+            wait_s = human_wait_timeout()
             loop = self._loop
             turn = pkg.live_turn.active(session_id, owner_id)
             if loop is None or turn is None:
@@ -314,7 +314,7 @@ class AgentBuilderMixin:
                         # the tool before anyone can answer.
                         logger.exception("ask_user_question notifier failed")
                 try:
-                    return await asyncio.wait_for(asyncio.shield(future), timeout=wait_s)
+                    return await asyncio.wait_for(asyncio.shield(future), timeout=wait_s or None)
                 except asyncio.TimeoutError:
                     turn.close_question(question.question_id)
                     return None
@@ -459,11 +459,12 @@ class AgentBuilderMixin:
             if turn is None:
                 return
             turn.publish(lt.approval_event(pending))
-            wait_s = _pkg().APPROVAL_WAIT_S
-            # A no-op once someone decided: ``expire`` finds nothing parked.
-            asyncio.get_running_loop().call_later(
-                wait_s, turn.expire_approval, pending.tool_call_id, wait_s,
-            )
+            wait_s = human_wait_timeout()
+            if wait_s > 0:
+                # A no-op once someone decided: ``expire`` finds nothing parked.
+                asyncio.get_running_loop().call_later(
+                    wait_s, turn.expire_approval, pending.tool_call_id, wait_s,
+                )
 
         def apply_path_grant(path: str, prefix: bool) -> None:
             agent = self._cache.get(self._sk(session_id, owner))

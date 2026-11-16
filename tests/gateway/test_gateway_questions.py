@@ -15,7 +15,7 @@ from fastapi import HTTPException
 
 from agentica.tools.ask_user_question_tool import AskUserQuestionTool
 from agentica_gateway.routes.chat import QuestionAnswerRequest, answer_session_question
-from agentica_gateway.services import agent_service as svc_mod
+from agentica_gateway.services.agent_service import builder as builder_mod
 from agentica_gateway.services import live_turn
 from agentica_gateway.services.agent_service import AgentService
 
@@ -103,7 +103,7 @@ def test_notifier_answer_wins_and_reconnect_replays_open_question(tmp_path):
 
 
 def test_nobody_answers_is_timed_out_not_an_empty_answer(tmp_path, monkeypatch):
-    monkeypatch.setattr(svc_mod, "QUESTION_WAIT_S", 0.2)
+    monkeypatch.setattr(builder_mod, "human_wait_timeout", lambda: 0.2)
 
     async def run():
         turn = live_turn.start("s1", owner="default")

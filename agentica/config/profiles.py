@@ -428,6 +428,17 @@ def get_setting(key: str, default: Any = None, config: Optional[Dict[str, Any]] 
     return settings.get(key, default)
 
 
+# Seconds to wait on a person (an approval card, an agent's question) before
+# moving on. Long enough to read and answer, short enough that stepping away
+# does not leave a turn idle for hours.
+DEFAULT_HUMAN_WAIT_TIMEOUT = 300
+
+
+def human_wait_timeout() -> float:
+    """``settings.human_wait_timeout`` for every surface; 0 means wait forever."""
+    return float(get_setting("human_wait_timeout", DEFAULT_HUMAN_WAIT_TIMEOUT) or 0)
+
+
 def set_setting(key: str, value: Any) -> None:
     """Upsert a key in the top-level ``settings`` block (comment-preserving).
 
@@ -614,9 +625,10 @@ settings:
 #                            # profile when only one model needs a smaller cap.
 #  resume_cwd: ask           # ask|session|current — directory to use when /resume
 #                            # picks a session started in another directory
-#  human_wait_timeout: 300   # seconds the CLI waits on the agent's question or
-#                            # approval card. A question then lets the agent go
-#                            # on without an answer; an approval is not granted.
+#  human_wait_timeout: 300   # seconds the CLI and the gateway (Web / Desktop /
+#                            # IM) wait on the agent's question or approval
+#                            # card. A question then lets the agent go on
+#                            # without an answer; an approval is not granted.
 #                            # 0 = wait forever.
 #  media_model:              # gateway: Gemini used to describe/transcribe
 #                            # inbound image/voice/video the base model cannot

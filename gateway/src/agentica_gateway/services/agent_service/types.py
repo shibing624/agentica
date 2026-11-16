@@ -170,15 +170,6 @@ def is_system_temp_path(path: str) -> bool:
 # evict another's cached Agent / lock / live run.
 _OWNER_SEP = "\x1f"
 
-# How long an ask_user_question waits on the Web card / IM card before the
-# model is told nobody answered (same 5 minutes as the IM pending action).
-QUESTION_WAIT_S = 300.0
-
-# How long a permission card waits for a decision before the call is skipped
-# (not run, not refused) and the model carries on with the rest. Same five
-# minutes as the CLI's ``settings.human_wait_timeout`` and the question above.
-APPROVAL_WAIT_S = 300.0
-
 
 def _cache_key_is_pinned(key: str) -> bool:
     """True while this cache entry's Agent is running a LiveTurn.
