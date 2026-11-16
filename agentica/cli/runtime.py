@@ -86,6 +86,7 @@ BUILTIN_TOOLS = [
     "fetch_url",
     "write_todos",
     "task",
+    "get_task_result",
     "analyze_image",
     "save_memory",
     "forget_memory",

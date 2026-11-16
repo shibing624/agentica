@@ -1,4 +1,3 @@
-import { cleanSteerContent, isSteerUserEvent } from "./hydrateMessages";
 
 export const COLLAPSED_SESSION_LIMIT = 5;
 
@@ -107,22 +106,6 @@ function snippetAround(text: string, needle: string, before = 24, after = 56): s
   return (start > 0 ? "…" : "") + flat.slice(start, end) + (end < flat.length ? "…" : "");
 }
 
-function stripWindowPreamble(content: string): string {
-  if (!content.startsWith("<context_window>")) return content;
-  for (const m of ["\n</dropped_span>\n", "\n</session_notes>\n", "\n</context_window>\n"]) {
-    const at = content.indexOf(m);
-    if (at >= 0) {
-      let rest = content.slice(at + m.length).replace(/^\n+/, "");
-      if (rest.startsWith("New context window started")) {
-        const nl = rest.indexOf("\n");
-        rest = nl >= 0 ? rest.slice(nl + 1).replace(/^\n+/, "") : "";
-      }
-      return rest;
-    }
-  }
-  return "";
-}
-
 /** Search user queries and assistant answers inside a hydrated `msgs` list. */
 export function searchMsgsConversation(
   msgs: Array<{ role: string; content: string; steer?: boolean; automated?: boolean; compact?: unknown; parts?: Array<{ kind: string; text?: string }> }>,
@@ -158,49 +141,6 @@ export function searchMsgsConversation(
         }
       }
       const clean = (m.content || "").trim();
-      if (!clean) continue;
-      const key = `${Math.max(1, turn)}:assistant`;
-      if (!seen.has(key) && clean.replace(/\s+/g, " ").toLocaleLowerCase().includes(needle)) {
-        seen.add(key);
-        hits.push({ turn: Math.max(1, turn), role: "assistant", snippet: snippetAround(clean, needle) });
-      }
-    }
-    if (hits.length >= maxHits) break;
-  }
-  return hits;
-}
-
-/** Search raw JSONL events (client-side fallback when gateway is not restarted). */
-export function searchEventsConversation(events: unknown[], query: string, maxHits = 8): SessionContentHit[] {
-  const needle = query.trim().replace(/\s+/g, " ").toLocaleLowerCase();
-  if (!needle) return [];
-  const hits: SessionContentHit[] = [];
-  let turn = 0;
-  const seen = new Set<string>();
-  for (const raw of events) {
-    if (!raw || typeof raw !== "object") continue;
-    const e = raw as Record<string, unknown>;
-    const type = String(e.type || "");
-    if (type === "user") {
-      if (e.automated === true) continue;
-      const content = String(e.content || "");
-      const isSteer = isSteerUserEvent(e, content);
-      let clean = "";
-      if (!isSteer) {
-        clean = stripWindowPreamble(content).trim();
-        if (!clean) continue;
-        turn += 1;
-      } else {
-        clean = cleanSteerContent(content);
-        if (!clean) continue;
-      }
-      const key = `${Math.max(1, turn)}:user`;
-      if (!seen.has(key) && clean.replace(/\s+/g, " ").toLocaleLowerCase().includes(needle)) {
-        seen.add(key);
-        hits.push({ turn: Math.max(1, turn), role: "user", snippet: snippetAround(clean, needle) });
-      }
-    } else if (type === "assistant") {
-      const clean = String(e.content || "").trim();
       if (!clean) continue;
       const key = `${Math.max(1, turn)}:assistant`;
       if (!seen.has(key) && clean.replace(/\s+/g, " ").toLocaleLowerCase().includes(needle)) {

@@ -14,7 +14,7 @@ them, not because of the words they contain.
 import re
 from typing import Dict, Iterable, List, Sequence, Set
 
-from agentica.compression.token_budget import WINDOW_CONTINUATION_MARK
+from agentica.memory.log_rows import classify_user
 from agentica.memory.session_log import local_turn_stamp
 
 ITEM_ROLES = ("user", "assistant", "tool")
@@ -32,7 +32,6 @@ _STOP = frozenset({
     "dump", "read", "background", "unrelated", "noted",
     "什么", "多少", "哪个", "哪些", "怎么", "如何", "这次", "只答",
 })
-_CONTEXT_WINDOW_OPEN = "<context_window>"
 
 
 def search_terms(query: str) -> Set[str]:
@@ -67,6 +66,17 @@ def normalize_role(role: str) -> str:
     return want
 
 
+def _prose(entry: Dict) -> str:
+    """What the row says, as searchable prose.
+
+    A user row is read through ``log_rows`` (preamble and steer prefix gone);
+    every other row is its own text.
+    """
+    if entry.get("type") == "user":
+        return classify_user(entry).text
+    return _entry_text(entry)
+
+
 def _entry_text(entry: Dict) -> str:
     content = entry.get("content", "")
     text = content if isinstance(content, str) else str(content)
@@ -83,13 +93,6 @@ def _entry_text(entry: Dict) -> str:
         if tname:
             return f"{tname}: {text}" if text else str(tname)
     return text
-
-
-def is_window_preamble(content: str) -> bool:
-    return content.lstrip().startswith(_CONTEXT_WINDOW_OPEN)
-
-
-_INJECTED_CLOSERS = ("</context_window>", "</session_notes>", "</dropped_span>")
 
 
 def drop_shadowed_by_boundary(entries: List[Dict]) -> List[Dict]:
@@ -127,7 +130,7 @@ def drop_shadowed_by_boundary(entries: List[Dict]) -> List[Dict]:
         tail_user = next((e for e in tail if e.get("type") == "user"), None)
         if tail_user is None:
             continue
-        tail_prose = strip_window_preamble(_entry_text(tail_user))
+        tail_prose = _prose(tail_user)
         if not tail_prose.strip():
             continue
         # Same window only: scan back to the previous boundary.
@@ -141,8 +144,7 @@ def drop_shadowed_by_boundary(entries: List[Dict]) -> List[Dict]:
                 i
                 for i in range(pos - 1, window_start - 1, -1)
                 if entries[i].get("type") == "user"
-                and strip_window_preamble(_entry_text(entries[i])).strip()
-                == tail_prose.strip()
+                and _prose(entries[i]).strip() == tail_prose.strip()
             ),
             None,
         )
@@ -155,39 +157,6 @@ def drop_shadowed_by_boundary(entries: List[Dict]) -> List[Dict]:
     if not drop:
         return entries
     return [e for i, e in enumerate(entries) if i not in drop]
-
-
-def strip_window_preamble(content: str) -> str:
-    """User prose after a folded new-window prefix. Unchanged otherwise.
-
-    ``start_new_context_window`` puts ``<context_window>`` / notes / dropped
-    span in front of the preserved user turn. The whole string starts with
-    the oil-gauge, so a startswith skip throws away the question. Search
-    scores this remainder; a chrome-only row (idle ``/compact``) is empty.
-
-    Peels **every** layer. Back-to-back cuts with no answered turn between
-    them fold a second preamble in front of a row that already carried one;
-    stripping only the outermost left an inner ``<context_window>`` in the
-    prose, so that row could not be recognised as a repeat of the bare
-    question and the index listed it twice.
-    """
-    if not content or not is_window_preamble(content):
-        return content
-    rest = content
-    while is_window_preamble(rest):
-        peeled = rest
-        for closer in _INJECTED_CLOSERS:
-            idx = peeled.find(closer)
-            if idx >= 0:
-                peeled = peeled[idx + len(closer):]
-        mark_at = peeled.find(WINDOW_CONTINUATION_MARK)
-        if mark_at >= 0:
-            peeled = peeled[mark_at + len(WINDOW_CONTINUATION_MARK):]
-        peeled = peeled.lstrip()
-        if peeled == rest:
-            break  # no closer found — leave as-is rather than loop
-        rest = peeled
-    return rest
 
 
 def snippet_head(content: str, width: int = USER_QUESTION_SNIPPET_CHARS) -> str:
@@ -252,7 +221,7 @@ def rank_entries(
         return []
     scored: List[tuple] = []
     for i, entry in enumerate(entries):
-        content = strip_window_preamble(_entry_text(entry))
+        content = _prose(entry)
         if not content.strip():
             continue
         sc = score_content(content, q, terms)
@@ -301,7 +270,7 @@ def list_user_questions(
         is_automated = entry.get("automated") is True
         if is_automated and automated >= automated_cap:
             continue
-        text = strip_window_preamble(_entry_text(entry))
+        text = _prose(entry)
         if not text.strip():
             continue
         snippet = snippet_head(text, snippet_width)

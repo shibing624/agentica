@@ -11,9 +11,30 @@ const vite = await createServer({
   server: { middlewareMode: true },
 });
 const {
-  eventsToChatMsgs, includeShadowedQuestion, reconcileLiveTurnMsgs,
+  eventsToChatMsgs: hydrate, reconcileLiveTurnMsgs,
 } = await vite.ssrLoadModule("/src/lib/hydrateMessages.ts");
 after(() => vite.close());
+
+// The gateway attaches `row` to every user row it serves
+// (`agentica.memory.log_rows.row_payload`); the client does not parse `content`
+// for markers. Rows here are plain unless a test gives `row` itself — what a
+// preamble or a steer prefix *means* is pinned in tests/memory/test_log_rows.py.
+const served = (e) => (e.type !== "user" || e.row ? e : {
+  ...e,
+  row: { automated: e.automated === true, steer: e.steer === true, text: String(e.content || ""), window: null },
+});
+const eventsToChatMsgs = (events) => hydrate(events.map(served));
+// A user row that opened a new context window, with the question (if any) the
+// compaction kept behind it.
+const windowRow = (rest = "", extra = {}) => ({
+  type: "user",
+  content: "<context_window>…</context_window>" + (rest ? "\n\n" + rest : ""),
+  row: {
+    automated: false, steer: false, text: rest,
+    window: { notes: "- goal: ship", notes_path: "/h/p/s1.notes.md", ...(extra.window || {}) },
+  },
+  ...(extra.event || {}),
+});
 
 test("a refused steer is dropped from the client cache, not resurrected on reload", async () => {
   // The module reads `localStorage` at call time, so installing one before the
@@ -225,13 +246,6 @@ test("a write tool row's diff comes back on reload, on the part and the step", (
   assert.equal(msgs[1].steps.find((s) => s.type === "tool").diff, diff);
 });
 
-const PREAMBLE = [
-  "<context_window>\nCurrent context window 2.\n</context_window>",
-  '<session_notes path="/h/p/s1.notes.md">\n- goal: ship\n</session_notes>',
-  "<dropped_span>\n- user: hi\n</dropped_span>",
-  "New context window started. Continue from session notes and search_session.",
-].join("\n\n");
-
 const view = (msgs) => msgs.map((m) => (m.compact ? "card" + (m.compact.auto ? ":auto" : "") : m.role + ":" + m.content));
 
 test("manual /compact replays as the user's command, then the card with notes", () => {
@@ -239,7 +253,7 @@ test("manual /compact replays as the user's command, then the card with notes", 
     { type: "user", content: "hi" },
     { type: "assistant", content: "hello" },
     { type: "compact_boundary", trigger: "manual", timestamp: "2026-11-05T05:25:42.691Z" },
-    { type: "user", content: PREAMBLE },
+    windowRow(),
     { type: "user", content: "next" },
   ]);
   assert.deepEqual(view(msgs), ["user:hi", "assistant:hello", "user:/compact", "card", "user:next"]);
@@ -252,7 +266,7 @@ test("auto compact keeps the pending question and shows no /compact", () => {
     { type: "user", content: "old" },
     { type: "assistant", content: "before" },
     { type: "compact_boundary", trigger: "auto" },
-    { type: "user", content: PREAMBLE + "\n\n" + PREAMBLE + "\n\nwhat next?" },
+    windowRow("what next?"),
     { type: "assistant", content: "this" },
   ]);
   assert.deepEqual(view(msgs), ["user:old", "assistant:before", "card:auto", "user:what next?", "assistant:this"]);
@@ -267,29 +281,10 @@ test("auto compact as a turn starts shows the question once, after the card", ()
     { type: "assistant", content: "before" },
     { type: "user", content: "batch1 怎么算？" },
     { type: "compact_boundary", trigger: "auto" },
-    { type: "user", content: PREAMBLE + "\n\nbatch1 怎么算？" },
+    windowRow("batch1 怎么算？"),
     { type: "assistant", content: "这样算" },
   ]);
   assert.deepEqual(view(msgs), ["user:old", "assistant:before", "card:auto", "user:batch1 怎么算？", "assistant:这样算"]);
-});
-
-test("a page cut keeps the unanswered question on the boundary's page", () => {
-  const entries = [
-    { type: "user", content: "old" },
-    { type: "assistant", content: "before" },
-    { type: "user", content: "batch1 怎么算？" },
-    { type: "compact_boundary", trigger: "auto" },
-    { type: "user", content: PREAMBLE + "\n\nbatch1 怎么算？" },
-    { type: "assistant", content: "这样算" },
-  ];
-  assert.equal(includeShadowedQuestion(entries, 3), 2);
-  const answered = [
-    { type: "user", content: "q" },
-    { type: "assistant", content: "a" },
-    { type: "compact_boundary", trigger: "auto" },
-    { type: "user", content: PREAMBLE + "\n\nq" },
-  ];
-  assert.equal(includeShadowedQuestion(answered, 2), 2);
 });
 
 test("a question asked again after it was answered is not a shadow", () => {
@@ -297,7 +292,7 @@ test("a question asked again after it was answered is not a shadow", () => {
     { type: "user", content: "q" },
     { type: "assistant", content: "a" },
     { type: "compact_boundary", trigger: "auto" },
-    { type: "user", content: PREAMBLE + "\n\nq" },
+    windowRow("q"),
   ]);
   assert.deepEqual(view(msgs), ["user:q", "assistant:a", "card:auto", "user:q"]);
 });
@@ -307,12 +302,12 @@ test("logs without trigger: bare preamble means /compact, a folded question mean
     { type: "user", content: "hi" },
     { type: "assistant", content: "hello" },
     { type: "compact_boundary" },
-    { type: "user", content: PREAMBLE },
+    windowRow(),
   ]);
   assert.deepEqual(view(idle), ["user:hi", "assistant:hello", "user:/compact", "card"]);
   const auto = eventsToChatMsgs([
     { type: "compact_boundary" },
-    { type: "user", content: PREAMBLE + "\n\nq" },
+    windowRow("q"),
   ]);
   assert.deepEqual(view(auto), ["card:auto", "user:q"]);
 });
@@ -387,13 +382,7 @@ test("prepending turn-aligned pages matches hydrating the full transcript at onc
   ];
   const tailPage = [
     { type: "compact_boundary", trigger: "auto", summary: "" },
-    {
-      type: "user",
-      content:
-        '<context_window>\n<session_notes path="/tmp/n.md">notes</session_notes>\n' +
-        "New context window started. Continue from session notes and search_session.\n</context_window>\n\nq3",
-      uuid: "u3",
-    },
+    windowRow("q3", { window: { notes: "notes", notes_path: "/tmp/n.md" }, event: { uuid: "u3" } }),
     { type: "assistant", content: "a3", uuid: "a3" },
     { type: "user", content: "q4", uuid: "u4" },
     { type: "assistant", content: "a4", uuid: "a4" },
@@ -464,18 +453,14 @@ test("mid-turn user steer rows and folded tool steers hydrate as steer parts ins
 });
 
 test("window preamble mentioning __RELAYED__ or closing tags in notes/dropped_span stays hidden inside compact card", () => {
-  const preambleWithMarkers = [
-    "<context_window>\nCurrent context window 1.\nYou have 512000 tokens left in this context window.\n</context_window>",
-    '<session_notes path="/tmp/s.notes.md">\n- Parsed `steer: true`, `__RELAYED__`, and `</session_notes>` in `[User guidance received while you were working]`\n</session_notes>',
-    '<dropped_span>\nconst WINDOW_CLOSERS = ["</context_window>", "</session_notes>", "</dropped_span>"];\nconst WINDOW_CONTINUATION = "New context window started. Continue from session notes and search_session.";\n</dropped_span>',
-    "New context window started. Continue from session notes and search_session.",
-  ].join("\n\n");
-
   const msgs = eventsToChatMsgs([
     { type: "user", content: "first question" },
     { type: "assistant", content: "first answer" },
     { type: "compact_boundary", trigger: "manual", timestamp: "2026-11-08T05:00:00.000Z" },
-    { type: "user", content: preambleWithMarkers, timestamp: "2026-11-08T05:00:01.000Z" },
+    windowRow("", {
+      window: { notes: "- Parsed `steer: true`, `__RELAYED__`, and `</session_notes>` in `[User guidance received while you were working]`", notes_path: "/tmp/s.notes.md" },
+      event: { timestamp: "2026-11-08T05:00:01.000Z" },
+    }),
     { type: "user", content: "next question after compact", timestamp: "2026-11-08T05:01:00.000Z" },
     { type: "assistant", content: "next answer", timestamp: "2026-11-08T05:01:05.000Z" },
   ]);
@@ -500,11 +485,10 @@ test("window preamble mentioning __RELAYED__ or closing tags in notes/dropped_sp
 });
 
 test("compact card takes notes_path from the boundary row when the preamble carries no <session_notes>", () => {
-  const bare = "<context_window>\nCurrent context window 2.\nYou have 1000 tokens left in this context window.\n</context_window>";
   const msgs = eventsToChatMsgs([
     { type: "user", content: "hi" },
     { type: "compact_boundary", trigger: "manual", notes_path: "~/.agentica/projects/p/s1.notes.md" },
-    { type: "user", content: bare },
+    windowRow("", { window: { notes: "", notes_path: "" } }),
   ]);
   const card = msgs.find((m) => m.compact);
   assert.equal(card.compact.notesPath, "~/.agentica/projects/p/s1.notes.md");
@@ -512,16 +496,12 @@ test("compact card takes notes_path from the boundary row when the preamble carr
 });
 
 test("auto-rollover question logged with the folded remaining-tokens reminder shows only the question", () => {
-  const preamble = "<context_window>\nCurrent context window 1.\nYou have 512000 tokens left in this context window.\n</context_window>";
   const question = "换个模型后输入框多了东西，fix";
   const msgs = eventsToChatMsgs([
     { type: "user", content: "earlier" },
     { type: "assistant", content: "earlier answer" },
     { type: "compact_boundary", trigger: "auto" },
-    {
-      type: "user",
-      content: `${preamble}\n\n${question}\n\n<context_window>\nYou have 13572 tokens left in this context window.\n</context_window>`,
-    },
+    windowRow(question, { window: { notes: "", notes_path: "" } }),
     { type: "assistant", content: "fixed" },
   ]);
   const users = msgs.filter((m) => m.role === "user" && !m.compact).map((m) => m.content);

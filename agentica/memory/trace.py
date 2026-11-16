@@ -13,13 +13,12 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from agentica.model.cost import CostTracker
+from agentica.memory.log_rows import classify_user, row_payload
 from agentica.model.usage import cache_hit_percent
 from agentica.utils.string import format_file_size
 from agentica.utils.tokens import count_text_tokens
 
 
-RELAYED_MARKER = "__RELAYED__"
-STEER_GUIDANCE_PREFIX = "[User guidance received while you were working]"
 _CHAT_ENTRY_TYPES = frozenset({"user", "assistant", "tool", "tool_audit", "compact_boundary"})
 
 # One expandable body is a display payload, not an archive: the file keeps the
@@ -43,38 +42,6 @@ def _ms_between(start: str, end: str) -> Optional[int]:
     if a is None or b is None:
         return None
     return int(round((b - a) * 1000))
-
-
-def _is_steering_user(entry: Dict[str, Any]) -> bool:
-    if entry.get("type") != "user":
-        return False
-    content = entry.get("content") or ""
-    if isinstance(content, str) and content.lstrip().startswith("<context_window>"):
-        return False
-    if entry.get("steer") is True:
-        return True
-    return isinstance(content, str) and (
-        content.startswith(RELAYED_MARKER)
-        or content.startswith(STEER_GUIDANCE_PREFIX)
-    )
-
-
-def _clean_steering_text(raw: str) -> str:
-    text = raw.lstrip()
-    if text.startswith(RELAYED_MARKER):
-        text = text[len(RELAYED_MARKER):].lstrip()
-    if text.startswith(STEER_GUIDANCE_PREFIX):
-        text = text[len(STEER_GUIDANCE_PREFIX):].lstrip("\n")
-    return text.strip()
-
-
-def _is_window_preamble_only(entry: Dict[str, Any]) -> bool:
-    if entry.get("type") != "user" or entry.get("automated") or entry.get("steer") is True:
-        return False
-    content = entry.get("content") or ""
-    if not isinstance(content, str) or not content.lstrip().startswith("<context_window>"):
-        return False
-    return not _strip_window_preamble(content.lstrip()).strip()
 
 
 def _empty_tokens() -> Dict[str, int]:
@@ -241,13 +208,11 @@ def analyze_entries(entries: Iterable[Dict[str, Any]], *, lite: bool = False) ->
             open_request = None
             continuation = False
 
-        is_steering = _is_steering_user(entry)
-        if is_steering:
+        user_view = classify_user(entry) if entry_type == "user" else None
+        if user_view is not None and user_view.steer:
             continuation = True
 
-        is_preamble_only = _is_window_preamble_only(entry)
-        starts_user_turn = entry_type == "user" and not is_steering and not is_preamble_only
-        if starts_user_turn:
+        if user_view is not None and user_view.opens_round:
             if pending_from is None:
                 pending_from = mi
             continuation = False
@@ -565,23 +530,6 @@ def search_calls(entries: Iterable[Dict[str, Any]], query: str, limit: int = 500
     return search_calls_in(analyze_entries(entries), query, limit)
 
 
-def _strip_window_preamble(content: str) -> str:
-    stripped = content.lstrip()
-    if not stripped.startswith("<context_window>"):
-        return content
-    for marker in ("\n</dropped_span>", "\n</session_notes>", "\n</context_window>", "</context_window>"):
-        at = stripped.rfind(marker)
-        if at >= 0:
-            rest = stripped[at + len(marker):].lstrip()
-            if rest.startswith("New context window started"):
-                nl = rest.find("\n")
-                rest = rest[nl + 1:].lstrip() if nl >= 0 else ""
-                if rest.startswith("</context_window>"):
-                    rest = rest[len("</context_window>"):].lstrip()
-            return rest
-    return ""
-
-
 def _snippet_around(text: str, needle: str, radius_before: int = 24, radius_after: int = 56) -> str:
     flat = " ".join(text.split())
     idx = flat.lower().find(needle)
@@ -611,16 +559,14 @@ def search_conversation(
             continue
         kind = e.get("type")
         if kind == "user":
-            if e.get("automated"):
+            view = classify_user(e)
+            if view.automated:
                 continue
-            raw = str(e.get("content") or "").strip()
-            if not _is_steering_user(e):
-                clean = _strip_window_preamble(raw).strip()
+            clean = view.text.strip()
+            if not view.steer:
                 if not clean:
                     continue
                 turn += 1
-            else:
-                clean = _clean_steering_text(raw)
             if needle in " ".join(clean.lower().split()) and (turn, "user") not in seen_turn_role:
                 seen_turn_role.add((turn, "user"))
                 hits.append({
@@ -658,25 +604,33 @@ def _include_shadowed_question(entries: List[Dict[str, Any]], start: int) -> int
     for entry in entries[start + 1:]:
         if entry.get("type") == "compact_boundary":
             break
-        if (
-            entry.get("type") == "user"
-            and not entry.get("automated")
-            and not _is_steering_user(entry)
-        ):
+        if entry.get("type") == "user" and classify_user(entry).starts_turn:
             tail_user = entry
             break
     if tail_user is None:
         return start
-    tail_prose = _strip_window_preamble(str(tail_user.get("content") or "")).strip()
+    tail_prose = classify_user(tail_user).text.strip()
     if not tail_prose:
         return start
     prev = entries[start - 1]
-    if prev.get("type") != "user" or prev.get("automated") or _is_steering_user(prev):
+    if prev.get("type") != "user":
         return start
-    prev_prose = _strip_window_preamble(str(prev.get("content") or "")).strip()
-    if prev_prose != tail_prose:
+    prev_view = classify_user(prev)
+    if prev_view.automated or prev_view.steer or prev_view.text.strip() != tail_prose:
         return start
     return start - 1
+
+
+def with_row_views(entries: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Copies of ``entries`` whose user rows carry ``row`` (see ``log_rows.row_payload``).
+
+    The Web client draws from ``row`` and never parses ``content`` itself.
+    """
+    out: List[Dict[str, Any]] = []
+    for e in entries:
+        payload = row_payload(e) if isinstance(e, dict) else None
+        out.append(e if payload is None else {**e, "row": payload})
+    return out
 
 
 def chat_turn_page(
@@ -708,10 +662,7 @@ def chat_turn_page(
     end = min(total, max(0, before)) if before is not None else total
     turn_starts = [
         i for i in range(end)
-        if chat_entries[i].get("type") == "user"
-        and not chat_entries[i].get("automated")
-        and not _is_steering_user(chat_entries[i])
-        and not _is_window_preamble_only(chat_entries[i])
+        if chat_entries[i].get("type") == "user" and classify_user(chat_entries[i]).starts_turn
     ]
     # How many turns before `end` the page keeps: at least `turns`, and enough
     # to take in `include_turn` plus the turn before it.
@@ -726,7 +677,10 @@ def chat_turn_page(
         older_turns = len(turn_starts) - keep
         while start > 0 and (
             chat_entries[start - 1].get("type") == "compact_boundary"
-            or _is_window_preamble_only(chat_entries[start - 1])
+            or (
+                chat_entries[start - 1].get("type") == "user"
+                and classify_user(chat_entries[start - 1]).is_pure_window
+            )
         ):
             start -= 1
         attached = _include_shadowed_question(chat_entries, start)
@@ -738,7 +692,7 @@ def chat_turn_page(
         "offset": start,
         "limit": end - start,
         "total": total,
-        "events": chat_entries[start:end],
+        "events": with_row_views(chat_entries[start:end]),
         "has_more": start > 0,
         "next_before": start,
         "older_turns": older_turns,
@@ -1046,22 +1000,17 @@ def _entry_row(
         return row
 
     if entry_type == "user":
-        content = entry.get("content") or ""
-        if entry.get("automated") is True:
+        view = classify_user(entry)
+        content = view.text
+        if view.automated:
             # A background command's / subagent's report or a peer message:
             # it opens a round, but nobody typed it.
             row["kind"] = "automated"
-        elif _is_window_preamble_only(entry):
+        elif view.is_pure_window:
             row["kind"] = "compact_boundary"
+            content = entry.get("content") or ""
         else:
-            is_steer = _is_steering_user(entry)
-            row["kind"] = "steering" if is_steer else "user"
-            if is_steer and isinstance(content, str):
-                content = _clean_steering_text(content)
-            elif isinstance(content, str) and content.lstrip().startswith("<context_window>"):
-                stripped = _strip_window_preamble(content).strip()
-                if stripped:
-                    content = stripped
+            row["kind"] = "steering" if view.steer else "user"
         row["summary"] = _clip(content, SUMMARY_CHAR_CAP)
         row["detail"] = _detail(content)
         return row

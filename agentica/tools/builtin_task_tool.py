@@ -156,6 +156,9 @@ class BuiltinTaskTool(Tool):
         context but you still have its ``run_id``. The response includes the
         final/partial answer, completed tool summaries, ``output_path`` locators,
         and the child transcript path when available.
+
+        Args:
+            run_id: The run_id returned by a previous task call.
         """
         from agentica.subagents import SubagentRegistry
 

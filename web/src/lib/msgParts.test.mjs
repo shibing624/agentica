@@ -183,7 +183,10 @@ test("user steer chip is never folded, in either mode", () => {
 
 test("hydrated JSONL turn keeps Claude/GPT-5 intermediate content as replies", () => {
   const msgs = eventsToChatMsgs([
-    { type: "user", content: "排查问题", timestamp: "2026-11-11T06:00:00Z" },
+    {
+      type: "user", content: "排查问题", timestamp: "2026-11-11T06:00:00Z",
+      row: { automated: false, steer: false, text: "排查问题", window: null },
+    },
     {
       type: "assistant",
       content: "我先看看目录与配置。",
