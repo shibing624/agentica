@@ -631,19 +631,20 @@ async def list_sessions(
     svc: AgentService = Depends(deps.get_agent_service),
 ):
     account = _account(request)
-    rows = await asyncio.to_thread(
-        svc.list_sessions,
-        owner=account,
+    catalog = await asyncio.to_thread(
+        svc.session_catalog,
+        account,
         scope=scope,
         recent_days=recent_days,
         include_cli=show_cli_sessions_pref(account),
         hide_temp_dirs=True,
     )
     return {
-        "sessions": rows,
+        "sessions": catalog.rows,
         "scope": scope,
         "recent_days": recent_days,
-        "count": len(rows),
+        "count": len(catalog.rows),
+        "hidden": catalog.hidden,
     }
 
 
@@ -673,11 +674,11 @@ async def search_sessions(
         if session_id:
             sids = [session_id]
         else:
-            rows = svc.list_sessions(
-                owner=account, scope=scope, recent_days=recent_days,
+            catalog = svc.session_catalog(
+                account, scope=scope, recent_days=recent_days,
                 include_cli=include_cli, hide_temp_dirs=True,
             )
-            sids = [r["session_id"] for r in rows if r.get("session_id") and not r.get("archived")]
+            sids = [r["session_id"] for r in catalog.active]
         out: dict = {}
         for sid in sids:
             log = svc.session_log_for(sid, owner=account)

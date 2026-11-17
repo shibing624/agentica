@@ -12,6 +12,7 @@ import stat
 import unicodedata
 
 import pytest
+from agentica.session.catalog import Catalog
 
 pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 pytest.importorskip("httpx")
@@ -63,7 +64,7 @@ def client(monkeypatch, tmp_path):
 
     svc = MagicMock()
     svc._ensure_initialized = AsyncMock()
-    svc.list_sessions = MagicMock(return_value=[])
+    svc.session_catalog = MagicMock(return_value=Catalog(rows=[]))
     with TestClient(app, raise_server_exceptions=False) as c:
         original = deps.agent_service
         deps.agent_service = svc
@@ -307,7 +308,7 @@ class TestPasswordLogin:
         monkeypatch.setattr(runtime, "RUNTIME_FILE", tmp_path / "restarted.json")
         svc = MagicMock()
         svc._ensure_initialized = AsyncMock()
-        svc.list_sessions = MagicMock(return_value=[])
+        svc.session_catalog = MagicMock(return_value=Catalog(rows=[]))
         with TestClient(app, raise_server_exceptions=False) as fresh:
             deps.agent_service = svc
             fresh.cookies.set("agentica_session", cookie)
@@ -781,15 +782,17 @@ class TestUserRoutes:
         # The pref lives in $AGENTICA_HOME/gateway/prefs; do not read the real one.
         monkeypatch.setattr("agentica_gateway.routes.chat.show_cli_sessions_pref", lambda uid: False)
         client.get("/api/sessions", headers=_auth())
-        assert deps.agent_service.list_sessions.call_args.kwargs == {
-            "owner": ADMIN_ID, "scope": "recent", "recent_days": 30,
+        assert deps.agent_service.session_catalog.call_args.args == (ADMIN_ID,)
+        assert deps.agent_service.session_catalog.call_args.kwargs == {
+            "scope": "recent", "recent_days": 30,
             "include_cli": False, "hide_temp_dirs": True,
         }
 
         self._sign_in_as(client, "kk")
         client.get("/api/sessions")
-        assert deps.agent_service.list_sessions.call_args.kwargs == {
-            "owner": "kk", "scope": "recent", "recent_days": 30,
+        assert deps.agent_service.session_catalog.call_args.args == ("kk",)
+        assert deps.agent_service.session_catalog.call_args.kwargs == {
+            "scope": "recent", "recent_days": 30,
             "include_cli": False, "hide_temp_dirs": True,
         }
 
@@ -944,7 +947,7 @@ class TestGateOff:
         monkeypatch.setattr(runtime, "RUNTIME_FILE", tmp_path / "runtime.json")
         svc = MagicMock()
         svc._ensure_initialized = AsyncMock()
-        svc.list_sessions = MagicMock(return_value=[])
+        svc.session_catalog = MagicMock(return_value=Catalog(rows=[]))
         with TestClient(app, raise_server_exceptions=False) as c:
             original = deps.agent_service
             deps.agent_service = svc

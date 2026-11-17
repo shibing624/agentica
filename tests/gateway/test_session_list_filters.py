@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Web session list: CLI sessions behind a pref, temp-dir sessions hidden; fork and feedback."""
 import os
+import threading
 from unittest.mock import patch
 
 import pytest
@@ -11,7 +12,9 @@ pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 
 from agentica_gateway.services import agent_service as svc_mod  # noqa: E402
 from agentica_gateway.services import live_turn  # noqa: E402
-from agentica_gateway.services.agent_service import AgentService, is_system_temp_path  # noqa: E402
+from agentica_gateway.services.agent_service import AgentService  # noqa: E402
+from agentica.session import catalog as catalog_mod  # noqa: E402
+from agentica.session.catalog import is_system_temp_path  # noqa: E402
 from agentica.session.log import SessionLog  # noqa: E402
 
 
@@ -39,7 +42,7 @@ def dirs(tmp_path):
         d.mkdir()
         out[name] = d
     # tmp_path itself is under the system temp dir; treat only "scratch" as temp.
-    with patch.object(svc_mod, "is_system_temp_path", lambda p: os.path.basename(str(p)) == "scratch"):
+    with patch.object(catalog_mod, "is_system_temp_path", lambda p: os.path.basename(str(p)) == "scratch"):
         yield out
 
 
@@ -88,14 +91,16 @@ class TestListFilters:
 
     def test_a_running_session_is_always_listed(self, svc, dirs):
         _session("cli-run", dirs["scratch"], source="cli")
-        with patch.object(svc, "is_session_active", side_effect=lambda sid, owner=None: sid == "cli-run"):
+        lock = threading.Lock()
+        svc._session_locks[svc._sk("cli-run", "default")] = lock
+        with lock:
             rows = svc.list_sessions(owner="default", scope="all", include_cli=False, hide_temp_dirs=True)
         assert [r["session_id"] for r in rows] == ["cli-run"]
 
     def test_running_session_listed_via_live_turn_even_when_old_and_temp(self, svc, dirs):
         _session("live-run", dirs["scratch"], source="cli")
-        with patch.object(svc_mod.live_turn, "active", side_effect=lambda sid, owner=None: {"run": 1} if sid == "live-run" else None):
-            rows = svc.list_sessions(owner="default", scope="recent", include_cli=False, hide_temp_dirs=True)
+        live_turn.start("live-run", "default")
+        rows = svc.list_sessions(owner="default", scope="recent", include_cli=False, hide_temp_dirs=True)
         assert "live-run" in {r["session_id"] for r in rows}
 
 

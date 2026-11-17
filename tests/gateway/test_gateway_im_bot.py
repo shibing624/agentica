@@ -45,6 +45,8 @@ from agentica_gateway.services.im_files import (
     format_file_size,
 )
 from agentica.agent.approvals import approval_decision_from_key
+from agentica.session.catalog import LiveState
+from agentica_gateway.services.im_bot import menus as im_menus_mod
 
 
 class FakeChannel(Channel):
@@ -159,6 +161,9 @@ class FakeAgentService:
 
     def is_session_active(self, session_id: str, owner=None) -> bool:
         return session_id in self.active_sessions
+
+    def live_state(self, owner=None) -> LiveState:
+        return LiveState(running=set(self.active_sessions))
 
     def has_cached_session(self, session_id: str, owner=None) -> bool:
         return True
@@ -408,7 +413,7 @@ class TestImBotControllerFlows:
         monkeypatch.setenv("AGENTICA_PROJECTS_DIR", str(proj_root))
         monkeypatch.setenv("AGENTICA_ATTACH_DIR", short_attach)
         monkeypatch.setattr(peers, "AGENTICA_CACHE_DIR", str(cache_dir))
-        monkeypatch.setattr(im_bot_mod, "is_system_temp_path", lambda p: Path(str(p)).name == "sys_tmp")
+        monkeypatch.setattr(im_menus_mod, "is_system_temp_path", lambda p: Path(str(p)).name == "sys_tmp")
         yield tmp_path
         shutil.rmtree(short_attach, ignore_errors=True)
 
@@ -1164,8 +1169,56 @@ class TestImBotControllerFlows:
         live_turn.reset()
 
     @pytest.mark.asyncio
+    async def test_session_picker_shows_the_recent_view_and_session_all_shows_the_rest(self, tmp_path):
+        import os
+        import time
+
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        old = time.time() - 60 * 86400
+        for i in range(5):
+            log = SessionLog(session_id=f"old-{i}", work_dir=str(proj), user_id="default")
+            log.append("user", f"旧问题 {i}")
+            log.set_source("wechat")
+            os.utime(log.path, (old, old))
+        archived = SessionLog(session_id="arch", work_dir=str(proj), user_id="default")
+        archived.append("user", "归档的")
+        archived.set_source("gateway")
+        archived.set_archived(True)
+        for sid in ("new-a", "new-b"):
+            log = SessionLog(session_id=sid, work_dir=str(proj), user_id="default")
+            log.append("user", f"新问题 {sid}")
+            log.set_source("gateway")
+
+        ch = FakeChannel()
+        bot = ImBotController(
+            channel_manager=FakeChannelManager(ch),
+            agent_service=FakeAgentService(default_work_dir=str(proj)),
+            state_file=tmp_path / "im_state.json",
+        )
+        state = bot.state_for(_msg("noop"))
+        # The default session for a project is the newest one the picker offers.
+        assert bot._default_session_id(str(proj)) in {"new-a", "new-b"}
+        bot._bind_session(state, str(proj), "new-a")
+
+        await bot.handle(_msg("/session"))
+        recent = ch.sent[-1][1]
+        assert "新问题 new-a" in recent and "新问题 new-b" in recent
+        assert "旧问题" not in recent and "归档的" not in recent
+        assert "另有 6 个较早/归档会话，发送 /session all 查看。" in recent
+        assert len(state.pending.options) == 2
+
+        await bot.handle(_msg("/session all"))
+        everything = ch.sent[-1][1]
+        assert "旧问题 0" in everything and "归档的" in everything and "(已归档)" in everything
+        assert "另有" not in everything
+        assert state.pending.scope == "all" and len(state.pending.options) == 8
+
     async def test_switch_pages_by_activity_disambiguates_and_picks_session(self, tmp_path):
         import os
+        import time
+
+        now = time.time()
 
         root = tmp_path / "codes"
         repo = root / "agentica"
@@ -1178,11 +1231,13 @@ class TestImBotControllerFlows:
         tlog = SessionLog(session_id="tmp-sess", work_dir=str(sys_tmp), user_id="default")
         tlog.append("user", "scratch")
         tlog.append("assistant", "ok")
+        tlog.set_source("cli")
 
         ex_log = SessionLog(session_id="ex-sess-1", work_dir=str(example), user_id="default")
         ex_log.append("user", "跑一下示例")
         ex_log.append("assistant", "好")
-        os.utime(ex_log.path, (1000, 1000))
+        ex_log.set_source("cli")
+        os.utime(ex_log.path, (now - 20000, now - 20000))
 
         # Fill 9 filler projects older than `repo` so `repo` must win by mtime,
         # and total projects exceed one page (WORKSPACE_PAGE_SIZE = 8).
@@ -1192,19 +1247,22 @@ class TestImBotControllerFlows:
             flog = SessionLog(session_id=f"old-sess-{i}", work_dir=str(d), user_id="default")
             flog.append("user", f"old {i}")
             flog.append("assistant", "done")
-            os.utime(flog.path, (2000 + i, 2000 + i))
+            flog.set_source("cli")
+            os.utime(flog.path, (now - 9000 + i, now - 9000 + i))
 
         r1 = SessionLog(session_id="repo-older", work_dir=str(repo), user_id="default")
         r1.set_name("修了网关")
         r1.append("user", "看下网关")
         r1.append("assistant", "好")
-        os.utime(r1.path, (5000, 5000))
+        r1.set_source("cli")
+        os.utime(r1.path, (now - 10000 + 5000, now - 10000 + 5000))
 
         r2 = SessionLog(session_id="repo-newer", work_dir=str(repo), user_id="default")
         r2.set_name("做标签统计")
         r2.append("user", "加几个标签")
         r2.append("assistant", "好")
-        os.utime(r2.path, (6000, 6000))
+        r2.set_source("cli")
+        os.utime(r2.path, (now - 10000 + 6000, now - 10000 + 6000))
 
         cur = root / "current"
         cur.mkdir()
@@ -1221,7 +1279,7 @@ class TestImBotControllerFlows:
         page1 = ch.sent[-1][1]
         assert "第 1 页" in page1 and "0. 下一页" in page1
         assert "sys_tmp" not in page1
-        assert "agentica · 最近：做标签统计（共 2 个会话）" in page1
+        assert "agentica · 最近：做标签统计（2 个近期会话）" in page1
 
         # Page 2 reaches the older nested `examples/basic` with its parent shown.
         await bot.handle(_msg("0"))
@@ -1234,7 +1292,7 @@ class TestImBotControllerFlows:
         idx_repo = state.pending.options.index(str(repo.resolve())) + 1
         await bot.handle(_msg(str(idx_repo)))
         pick_text = ch.sent[-1][1]
-        assert "共有 2 个会话" in pick_text
+        assert "选择要挂载的会话" in pick_text
         assert "做标签统计" in pick_text and "修了网关" in pick_text
         assert "在此项目新建会话" in pick_text
 

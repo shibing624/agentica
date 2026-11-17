@@ -18,7 +18,7 @@ from __future__ import annotations
 from agentica.live import send_message as send_peer_message
 
 from ...config import settings
-from ..agent_service import ChatResult, is_system_temp_path
+from ..agent_service import ChatResult
 from .attach import _AttachRpcClient, _read_attach_token
 from .commands import (
     ACK_DELAY_SECS,
@@ -68,7 +68,6 @@ __all__ = [
     "_read_attach_token",
     "_short_dir",
     "_workspace_labels",
-    "is_system_temp_path",
     "normalize_im_command_text",
     "parse_im_command",
     "send_peer_message",

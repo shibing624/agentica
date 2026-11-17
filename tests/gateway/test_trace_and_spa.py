@@ -10,6 +10,7 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, AsyncMock
 
+from agentica.session.catalog import Catalog
 from agentica.session.log import SessionLog
 
 
@@ -152,7 +153,9 @@ def test_session_search_can_be_scoped_to_one_session_with_a_higher_cap(tmp_path)
     svc = MagicMock()
     svc._ensure_initialized = AsyncMock()
     svc.session_log_for = MagicMock(side_effect=lambda sid, owner=None: SessionLog(session_id=sid, base_dir=str(tmp_path)))
-    svc.list_sessions = MagicMock(return_value=[{"session_id": "a"}, {"session_id": "b", "archived": True}])
+    svc.session_catalog = MagicMock(return_value=Catalog(rows=[
+        {"session_id": "a", "archived": False}, {"session_id": "b", "archived": True},
+    ]))
 
     with TestClient(app, raise_server_exceptions=False) as client:
         original = deps.agent_service

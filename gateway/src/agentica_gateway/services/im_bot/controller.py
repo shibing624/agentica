@@ -13,7 +13,6 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-from agentica.session.log import SessionLog
 from agentica.live import PeerInfo, list_live_peers
 from agentica.utils.log import logger
 
@@ -137,12 +136,8 @@ class ImBotController(ImMenusMixin, ImInteractionsMixin, ImTurnsMixin):
         for peer in list_live_peers():
             if peer.session_id and peer.cwd and os.path.realpath(peer.cwd) == os.path.realpath(work_dir):
                 return peer.session_id
-        sessions = SessionLog.list_sessions(work_dir=work_dir, user_id=self._user_id())
-        for entry in sessions:
-            sid = entry.get("session_id")
-            if sid and not str(sid).startswith("scheduled_"):
-                return str(sid)
-        return str(uuid.uuid4())
+        items, _hidden = self._collect_session_items(work_dir)
+        return items[0]["session_id"] if items else str(uuid.uuid4())
 
     def _bind_session(self, state: ImChatState, work_dir: str, session_id: str) -> None:
         real_dir = os.path.realpath(os.path.expanduser(work_dir))

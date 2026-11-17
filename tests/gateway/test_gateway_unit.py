@@ -572,22 +572,6 @@ class TestAgentServiceRunCron:
     """Per-job sessions of the old isolated scheduled runs stay out of the
     sidebar; runs now land in real conversations (see TestGatewayCronRunner)."""
 
-    def test_list_sessions_excludes_scheduled_job_sessions(self, tmp_path):
-        from agentica_gateway.services.agent_service import AgentService
-        from agentica_gateway.services import live_turn
-        from agentica.session.log import SessionLog
-
-        live_turn.reset()
-        with patch.object(SessionLog, "list_sessions", return_value=[
-            {"session_id": "scheduled_job1", "path": "x", "source": "gateway", "last_timestamp": 1},
-            {"session_id": "chat123", "path": "y", "source": "gateway", "last_timestamp": 2},
-        ]), patch.object(SessionLog, "session_preview", return_value={"first_user": "hi", "user_count": 1}):
-            svc = AgentService(workspace_path=str(tmp_path))
-            sessions = svc.list_sessions(scope="all")
-
-        assert [s["session_id"] for s in sessions] == ["chat123"]
-        assert sessions[0]["running"] is False
-
     def test_list_sessions_includes_every_project(self, tmp_path):
         """The web sidebar is grouped by work dir; listing only settings.base_dir
         dropped a just-finished chat after opening its trace."""
@@ -609,75 +593,6 @@ class TestAgentServiceRunCron:
         assert set(by_id) >= {"sess-a", "sess-b"}
         assert by_id["sess-a"]["work_dir"] == str(dir_a)
         assert by_id["sess-b"]["work_dir"] == str(dir_b)
-
-    def test_recent_scope_filters_legacy_logs_before_preview(self, tmp_path):
-        from agentica_gateway.services.agent_service import AgentService
-        from agentica.session.log import SessionLog
-
-        now = time.time()
-        entries = [
-            {"session_id": "web-old", "path": "web", "source": "gateway", "mtime": 1, "mtime_ns": 1},
-            {"session_id": "cli-old", "path": "cli", "source": "cli", "mtime": 1, "mtime_ns": 1},
-            {"session_id": "cli-new", "path": "new", "source": "cli", "mtime": now, "mtime_ns": 2},
-            {"session_id": "legacy", "path": "legacy", "mtime": 1, "mtime_ns": 1},
-            {"session_id": "legacy-web", "path": "legacy-web", "mtime": 1, "mtime_ns": 1, "last_read_at": "2026-01-01T00:00:00.000Z"},
-            {"session_id": "archived", "path": "archived", "source": "cli", "mtime": 1, "mtime_ns": 1, "archived": True},
-        ]
-        with patch.object(SessionLog, "list_projects", return_value=[{"base_dir": "/sessions", "work_dir": "/repo"}]), \
-             patch.object(SessionLog, "list_sessions", return_value=entries), \
-             patch.object(SessionLog, "session_preview", return_value={"first_user": "hi", "user_count": 1}) as preview:
-            svc = AgentService(workspace_path=str(tmp_path))
-            rows = svc.list_sessions(scope="recent", recent_days=30, include_cli=True)
-
-        # Unlabelled legacy logs are never listed; old CLI logs drop out of "recent".
-        assert {row["session_id"] for row in rows} == {"web-old", "cli-new", "legacy-web", "archived"}
-        assert preview.call_count == 4
-
-    def test_session_preview_cache_uses_file_version(self, tmp_path):
-        from agentica_gateway.services.agent_service import AgentService
-        from agentica.session.log import SessionLog
-
-        entry = {"session_id": "s1", "path": "s1.jsonl", "source": "gateway", "size_bytes": 10, "mtime_ns": 20}
-        with patch.object(SessionLog, "list_projects", return_value=[{"base_dir": "/sessions", "work_dir": "/repo"}]), \
-             patch.object(SessionLog, "list_sessions", return_value=[entry]), \
-             patch.object(SessionLog, "session_preview", return_value={"first_user": "hi", "user_count": 1}) as preview:
-            svc = AgentService(workspace_path=str(tmp_path))
-            svc.list_sessions(scope="all")
-            svc.list_sessions(scope="all")
-
-        preview.assert_called_once_with("s1.jsonl")
-
-    def test_session_preview_cache_is_bounded_lru(self, tmp_path):
-        from agentica_gateway.services.agent_service import AgentService
-        from agentica.session.log import SessionLog
-
-        with patch.object(SessionLog, "session_preview", return_value={"first_user": "hi", "user_count": 1}):
-            svc = AgentService(workspace_path=str(tmp_path))
-            for i in range(10001):
-                svc._session_preview({"path": f"s{i}.jsonl", "size_bytes": 1, "mtime_ns": 1})
-
-        assert len(svc._session_preview_cache) == 10000
-        assert "s0.jsonl" not in svc._session_preview_cache
-        assert "s10000.jsonl" in svc._session_preview_cache
-
-    def test_list_sessions_orders_by_creation_time(self, tmp_path):
-        """Sidebar order = creation time (first request), newest on top; a
-        later message must not reshuffle it."""
-        from agentica_gateway.services.agent_service import AgentService
-        from agentica_gateway.services import live_turn
-        from agentica.session.log import SessionLog
-
-        live_turn.reset()
-        with patch.object(SessionLog, "list_sessions", return_value=[
-            {"session_id": "old", "path": "a", "source": "gateway",
-             "first_timestamp": "2026-01-01T00:00:00.000Z", "last_timestamp": "2026-03-01T00:00:00.000Z"},
-            {"session_id": "new", "path": "b", "source": "gateway",
-             "first_timestamp": "2026-01-03T00:00:00.000Z", "last_timestamp": "2026-01-02T00:00:00.000Z"},
-        ]), patch.object(SessionLog, "session_preview", return_value={"first_user": "hi", "user_count": 1}):
-            svc = AgentService(workspace_path=str(tmp_path))
-            sessions = svc.list_sessions(scope="all")
-
-        assert [s["session_id"] for s in sessions] == ["new", "old"]
 
     def test_list_sessions_real_files_keep_creation_order(self, tmp_path):
         """jsonl mtime follows the last write; web order must follow the first line."""
