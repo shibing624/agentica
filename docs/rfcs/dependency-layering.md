@@ -8,7 +8,7 @@ Status: Deferred
 
 ## Current Decision
 
-Keep the current dependency set for v1.4.x. The CLI and `DeepAgent` must remain usable after a plain `pip install agentica`, and past attempts to move crawler dependencies into extras caused the default CLI path to crash.
+Keep the current dependency set for the 1.6.x line. The CLI and `DeepAgent` must remain usable after a plain `pip install agentica`, and past attempts to move crawler dependencies into extras caused the default CLI path to crash.
 
 ## Candidate Future Shape
 
@@ -39,4 +39,4 @@ agentica[tools-*]
 
 ## Recommendation
 
-Do not split packages in this PR. First finish API layering documentation, daily task failure visibility, and preset boundaries. Revisit this RFC when preparing a major version or when packaging telemetry shows dependency conflicts from light SDK users.
+Do not split packages in this PR. First finish API layering documentation and preset boundaries (daily task failure visibility has shipped). Revisit this RFC when preparing a major version or when packaging telemetry shows dependency conflicts from light SDK users.

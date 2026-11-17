@@ -107,7 +107,7 @@ Agent 内置了两个检索工具，分工明确：
 | **`search_memory`** | **跨会话**的长期记忆（`MEMORY.md` 下的记忆条目与近期对话归档） | 查找以前其他会话里记下的用户偏好、项目规范或历史结论 |
 
 **实用技巧：**
-- 想看本会话早期的某次工具输出：Agent 会调用 `search_session(query="关键词", role="tool")`，拿到带 8 位 `[uuid]` 的命中行后，再调 `search_session(uuid="...")` 取出那条记录的完整原文。`uuid` 也接受被淘汰工具结果占位符里的 tool-call id（精确匹配，取最新一条）。
+- 想看本会话早期的某次工具输出：Agent 会调用 `search_session(query="关键词", role="tool")`，拿到带 8 位 `[uuid]` 的命中行后，再调 `search_session(uuid="...")` 取出那条记录的完整原文。`uuid` 也接受被修剪工具结果中段标记里的 tool-call id（精确匹配，取最早一行——工具执行时写入的完整结果）。
 - **多次换窗时，旧的 `notes.md` 会丢吗？** 每次换窗重写 `notes.md` 时，都会把上一份 `notes.md` 一并交给模型修订——仍然成立的目标、约束和关键 ID 会保留下来，已经做完或作废的条目会被清理，避免笔记无限膨胀。如果某个早期细节没写进新笔记，原始对话和工具输出仍然完整保存在 `.jsonl` 里，随时可以用 `search_session` 搜出来。
 
 ---
@@ -134,7 +134,7 @@ agent = Agent(
 )
 ```
 
-> **提示**：触发线只有一个，用 `compact_token_limit` 调整；原来的 `AGENTICA_EVICT_THRESHOLD_RATIO` 已删除。
+> **提示**：触发线只有一个，用 `compact_token_limit` 调整；旧的双阈值淘汰配置已删除。
 
 ### 2. 检查某轮是否发生了换窗
 

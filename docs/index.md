@@ -112,6 +112,9 @@ print(result.content)
 - [架构与内部实现](introduction/architecture.md) — 执行循环、Prompt Cache 快照机制、压缩底层不变量、配置与审批内部实现
 - [内置工具设计判据](concepts/builtin-tool-bar.md) — 什么能力该放进内置工具、CLI 与 SDK 的工具边界
 - [外部进程协议：Shell Hooks](getting-started/shell-hooks.md) / [Notify Sink](getting-started/notify-sink.md) / [Attach Socket](getting-started/attach.md)
+- [Thin Gateway 通用后端 API](rfcs/thin-gateway-common-backend-api.md) — 会话事实归 core、Gateway 只做适配、Web 只做呈现
+- [Public API 稳定度合约](API.md) — Tier 分层与 `agentica.session.*` 内部读模型边界
+- [Daily Tasks](advanced/daily-tasks.md) — 定时任务规格、执行记录与失败可见性
 
 ---
 

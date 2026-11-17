@@ -160,7 +160,7 @@ await ws.write_memory_entry(
 hits = ws.search_memory("python 风格", limit=5)
 ```
 
-### 4. 导出与分析会话日志（`session_log`）
+### 4. 导出与分析会话日志（`agentica.session.log`）
 
 当设置了 `session_id` 时，可以在代码中导出完整 JSONL 或查看统计分析（与 CLI `/trace`、Web `/traces` 同源）：
 

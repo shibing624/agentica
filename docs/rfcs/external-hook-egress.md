@@ -85,7 +85,7 @@ settings:
 | `tool.completed` | a tool ends | the Runner's shared tool executor |
 | `session.started` | a CLI logical session becomes active | startup, `/new`, `/clear`, `/resume`, `/fork` |
 | `session.ended` | a CLI logical session stops being active | interactive exit / session switch |
-| `needs.approval` | a tool call is parked, waiting for the user | the `publish` hook of `make_approve` (`cli/approvals.py:270`) |
+| `needs.approval` | a tool call is parked, waiting for the user | the `publish` hook of `make_approve` (`agentica/cli/approvals.py`; implementation in `agentica/agent/approvals.py`) |
 | `needs.input` | `ask_user_question` is parked | the armed TUI input slot |
 | `needs.resolved` | a pending request is no longer actionable | the approval/question winner |
 | `UserPromptSubmit` | before each human turn's message is assembled (opt-in) | `get_messages_for_run`, beside built-in recall; Claude Code's wire (`shell_hooks/prompt.py`) |
@@ -139,7 +139,7 @@ Field rules that are decisions, not defaults:
   approval words is the same distinction the sink draws at `notify/approvals.py:46`.
 - **`options` is what the CLI actually offered**, i.e. `PendingApproval.options`
   (`agent/approvals.py:96`) after the CLI narrowed it via
-  `visible_approval_decisions` (`cli/approvals.py:46-51`). Send the subset, not
+  `visible_approval_decisions` (`agentica/agent/approvals.py:53`). Send the subset, not
   the four-word superset: a consumer that renders exactly what it is given cannot
   then show a button the terminal would reject.
 - Payload discipline is unchanged from the sink: metadata only (`question`,

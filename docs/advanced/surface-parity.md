@@ -17,7 +17,7 @@ runners call it with their surface-specific context:
 | Interactive CLI | `/worktree`, `--worktree`, model `worktree` tool | `build_product_tools(surface="cli", ...)` |
 | Web / Desktop | `/worktree` panel, model `worktree` tool | `build_product_tools(surface="gateway", ...)` via gateway |
 | IM | gateway-bound session and model `worktree` tool | `build_product_tools(surface="gateway", ...)` via gateway |
-| Headless / cron | model `worktree` tool; no human slash outlet | `build_product_tools(surface="headless"/"cron", ...)` |
+| Headless / cron | reuse the same tool catalogue via `create_agent` (no `ask_user_question`) | `build_product_tools(surface="cli", ...)` via `cron/cli_runner.py` |
 
 Every product surface gets `WorktreeTool`. Surface-specific callbacks (for
 example entering a CLI worktree, or binding a gateway session's `work_dir`) are

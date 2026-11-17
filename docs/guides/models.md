@@ -130,8 +130,8 @@ print(result.content)
 ```python
 from agentica import Agent, LitellmChat
 
-# 使用 Bedrock
-agent = Agent(model=LitellmChat(id="bedrock/anthropic.claude-v2"))
+# 使用兼容 LiteLLM 的模型标识
+agent = Agent(model=LitellmChat(id="provider/your-model-id"))
 
 # 使用 Azure OpenAI
 agent = Agent(model=LitellmChat(id="azure/gpt-4"))

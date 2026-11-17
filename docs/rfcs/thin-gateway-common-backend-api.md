@@ -1,6 +1,6 @@
 # RFC: Thin Gateway — 会话事实归 core，Gateway 只做适配，Web 只做呈现
 
-状态：已实施（分支 `wt/thin-gateway-refactor`）。本文替换此前的实习版草案；草案中被采纳、修正、拒绝的部分见 §6。
+状态：§1–§3 为 `2ee88d0c` 基线快照与契约；实施结果见 `CHANGELOG.md [Unreleased]`（`agentica.session`、`session.catalog`、Web 去业务化已落地）。本文替换此前的实习版草案；草案中被采纳、修正、拒绝的部分见 §6。
 
 ## 0. 目标与判据
 
@@ -40,8 +40,8 @@ agentica/session/            # 新包：会话 transcript 与会话事实（从 
   index.py                   # ← memory/session_index.py
   search.py                  # ← memory/session_search.py
   catalog.py                 # 新：唯一的会话目录读模型 + 可见性规则（Web/IM/CLI 共用）
-  prefs.py                   # ← cli/prefs.py（sidecar/project.json 的 cli 偏好，core 也要读）
 agentica/memory/             # 只剩跨会话记忆：models / summarizer / working / recall / intents / session_recall
+agentica/config/prefs.py    # ← cli/prefs.py（sidecar/project.json 的 cli 偏好，core 也要读）
 agentica/live/attach.py      # ← cli/attach.py（live session 的 attach 协议，CLI/cron/IM 共用）
 agentica/agent/approvals.py  # + visible_approval_decisions / approval_decision_from_key（从 cli/approvals 下沉）
 agentica/compression/context_usage.py   # ← cli/context_usage.py
@@ -74,7 +74,7 @@ Web：
 
 `Row` 由 `agentica.session.catalog` 产出（字段名沿用现有 Web 类型）：`session_id, name, preview, user_count, first_timestamp, last_timestamp, last_read_at, unread, size_bytes, archived, pinned, work_dir, running, background_jobs, source, origin, approval_mode`。
 
-可见性规则（`catalog.visible`，唯一实现）：
+可见性规则（落地为 `session.catalog.list_catalog` 内联，唯一实现）：
 
 1. 丢弃：旧版 `scheduled_` 会话；0 字节且不在跑的桩文件；`include_cli=False` 时来源为 CLI/legacy 且不在跑的会话；`hide_temp_dirs` 时系统临时目录里没有用户轮次也不是 cron 的会话。
 2. 在跑或有后台 job、pinned、archived（供归档页）→ 总是保留。
@@ -98,12 +98,12 @@ user 行：`row = {automated, steer, text, images, window, turn}`；`turn` 是�
 
 ## 4. 实施步骤（每步一个提交，每步后跑相关测试；全部完成后全量验证）
 
-1. **模块归位**（纯移动 + import 改写，无行为变化）：`git mv` 迁移 §2 列出的文件；`rg` 改写所有 import（agentica、gateway、tests、scripts、examples、docs）；`memory/__init__` 不再导出 `SessionLog`，由 `agentica.session` 导出，顶层 `agentica.SessionLog` 不变（如有）。验证：全量 pytest、`scripts/check_bare_ci_imports.py`。
-2. **图片标记与 tool 行归 `session.rows`**：`image_marker()`、`split_image_markers()`、`strip_image_markers()`、`tool_error_of()`、`tool_row_payload()`；`row_payload` 输出 `images` 且 `text` 去掉标记；删除 `session_log.strip_chat_image_markers` 和 `chat_images.strip_markers`；`trace.py`、`log.py` 的错误读取统一走 `tool_error_of`。测试：`tests/session/test_rows.py`。
-3. **transcript 页带 `turn`，round 带 `replyUuid`**：`with_row_views(entries, first_turn=...)`；`chat_turn_page` 用全局编号；`_build_rounds` 增加 `replyUuid`。测试钉值：编号与 `older_turns` 对齐；`replyUuid` 等于最后一条 assistant 行的 uuid。
-4. **`session.catalog` + Gateway/IM 改为薄调用**：`list_catalog()` 返回 `Catalog(rows, hidden)`；预览缓存移进 core；source/origin 推断（旧版 `agent:<id>:<channel>:` id）移进 core；`AgentService.list_sessions` 只组 `live` 并调用；IM 的项目计数、会话选择、默认会话全部走 catalog；新增 `/session all`。测试：同一份磁盘数据，Web 行数 == IM「显示 N」；旧的非归档会话不进 recent；pinned 旧会话仍在；`/session all` 列出全部；变异：去掉年龄过滤测试会红。
+1. **模块归位**（纯移动 + import 改写，无行为变化）：`git mv` 迁移 §2 列出的文件；`rg` 改写所有 import（agentica、gateway、tests、scripts、examples、docs）；`memory/__init__` 不再导出 `SessionLog`，由 `agentica.session` 导出；顶层 `agentica.SessionLog` 不存在。验证：全量 pytest、`scripts/check_bare_ci_imports.py`。
+2. **图片标记与 tool 行归 `session.rows`**：`image_marker()`、`split_image_markers()`、`strip_image_markers()`、`tool_error_of()`、`row_payload()`；`row_payload` 输出 `images` 且 `text` 去掉标记；删除 `session_log.strip_chat_image_markers` 和 `chat_images.strip_markers`；`trace.py`、`log.py` 的错误读取统一走 `tool_error_of`。测试：`tests/session/test_log_rows.py`。
+3. **transcript 页带 `turn`，round 带 `replyUuid`**：`with_row_views(entries, turns_before=...)`；`chat_turn_page` 用全局编号；`_build_rounds` 增加 `replyUuid`。测试钉值：编号与 `older_turns` 对齐；`replyUuid` 等于最后一条 assistant 行的 uuid。
+4. **`session.catalog` + Gateway/IM 改为薄调用**：`list_catalog()` 返回 `Catalog(rows, folded)`，`Catalog.hidden` 是 `len(folded) + archived`；预览缓存移进 core；source/origin 推断（旧版 `agent:<id>:<channel>:` id）移进 core；`AgentService.list_sessions` 只组 `live` 并调用；IM 的项目计数、会话选择、默认会话全部走 catalog；新增 `/session all`。测试：同一份磁盘数据，Web 行数 == IM「显示 N」；旧的非归档会话不进 recent；pinned 旧会话仍在；`/session all` 列出全部；变异：去掉年龄过滤测试会红。
 5. **Gateway 薄化收尾**：`LiveTurn.public()` 拆好图片；pulse 只返回 `ver`；SSE 回放切点修复。测试：`after` 落在合并区间中间，回放不重复。
-6. **Web 去业务化**：按 §2 删除解析逻辑，改读服务端字段；加静态边界测试 `tests/web/test_web_boundaries.py`，禁止 `web/src` 出现 `STEER_GUIDANCE_PREFIX`、`<context_window>`、`tool_call_error`、`roundOffset`、`[图片: ` 解析正则。验证：`npm test`、`npm run build`。
+6. **Web 去业务化**：按 §2 删除解析逻辑，改读服务端字段；静态边界测试见 `tests/web/test_web_boundaries.py` 的 `FORBIDDEN`。验证：`npm test`、`npm run build`。
 7. **文档与 CHANGELOG**：Unreleased 记 break change（新 import 路径、目录规则变化、IM 文案）。
 
 ## 5. 风险与回滚

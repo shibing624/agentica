@@ -66,7 +66,7 @@ https://github.com/user-attachments/assets/39fb961e-3979-4629-a87d-81dce9196597
 
 ### 2. 🤝 多窗口组队，一个人指挥一支队伍
 
-一个窗口不够用时，Agent 可以派生只读子任务查代码查资料；长命令用 `execute(background=True)` 在后台跑，并用 `/ps`、`wait` 查看或等待结果；多个终端同时改同一个仓库时用 `/worktree` 自动隔离分支。详见 [Subagent](https://shibing624.github.io/agentica/multi-agent/subagent)。
+一个窗口不够用时，Agent 可以派生只读子任务查代码查资料；`task` 返回 `run_id` / `child_session_id` / `transcript_path` 和工具输出定位符，后续用 `get_task_result(run_id)` 或 `read_file(output_path)` 按需取回，不会把整段轨迹塞回主上下文；长命令用 `execute(background=True)` 在后台跑，并用 `/ps`、`wait` 查看或等待结果；多个终端同时改同一个仓库时用 `/worktree` 自动隔离分支。详见 [Subagent](https://shibing624.github.io/agentica/multi-agent/subagent)。
 
 ### 3. 🧬 越用越懂你和你的项目
 
@@ -74,7 +74,7 @@ https://github.com/user-attachments/assets/39fb961e-3979-4629-a87d-81dce9196597
 
 ### 4. 🧠 长任务不掉链子，聊再久也不忘事
 
-命令输出太长会自动存盘按需读取，窗口快满时自动清理旧输出并做好进度交接，完整历史随时可查回。不会聊到一半报超长错误，也不会把你最早交代的目标丢掉。详见 [上下文管理](https://shibing624.github.io/agentica/advanced/compression)。
+命令输出太长会自动存盘按需读取；到 `min(compact_token_limit, 窗口 × 95%)` 这条换窗线时，先把旧工具结果修剪为头尾，能降到工作窗口 50% 以下才保留当前窗口，否则直接做进度交接并开新窗口。完整历史随时可查回。详见 [上下文管理](https://shibing624.github.io/agentica/advanced/compression)。
 
 ### 5. 📱 人离开电脑，手机微信接着管
 

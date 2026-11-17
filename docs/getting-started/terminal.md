@@ -123,7 +123,7 @@ settings:
 
 | 方式 | 适用场景 | 怎么触发 |
 |---|---|---|
-| **`task`（进程内子任务）** | 查代码、搜资料、读多个模块等**短平快的只读调查**（默认使用便宜的 `auxiliary_model`，支持一条消息并行跑多个） | Agent 自动调用，或你在话里说「用 subagent 帮我查一下…」 |
+| **`task`（进程内子任务）** | 查代码、搜资料、读多个模块等**短平快的只读调查**（默认使用便宜的 `auxiliary_model`，支持一条消息并行跑多个）；返回 `run_id` / `child_session_id` / `transcript_path`，工具输出与过大的最终回答通过 `output_path` / `<persisted-output>` 定位，后续可用 `get_task_result(run_id)` 或 `read_file` 取回 | Agent 自动调用，或你在话里说「用 subagent 帮我查一下…」 |
 | **后台独立进程** | 需要独立上下文窗口、换到另一个仓库目录、或要动手改文件的**大型独立任务** | 对 Agent 说「在后台起一个 `agentica --query` 进程做 service-a 的升级」，Agent 会用 `execute(background=True)` 启动；用 `/ps` 查看进度、`/stop <id>` 停止 |
 | **查看其它终端（`/list-agents`）** | 你自己开了多个终端窗口，想知道各自在哪个分支、改哪些文件 | 你敲 `/list-agents`（或 `/peers`） |
 
@@ -165,7 +165,7 @@ settings:
 | `--permissions` | `allow-all` | 初始权限档位：`read-only` / `auto` / `allow-all` |
 | `--sandbox` | `off` | 设为 `workspace-write` 开启系统级沙箱 |
 | `--compact-token-limit` | — | 设置当前会话的上下文压缩工作上限 |
-| `--no-evict` / `--no-auto-compact` | — | 关闭 80% 工具结果淘汰或 95% 自动换窗 |
+| `--no-evict` / `--no-auto-compact` | — | 关闭「到换窗线先修剪旧工具结果」/「修剪不够时空窗换窗」 |
 | `--tools` | — | 追加额外工具（如 `--tools duckduckgo arxiv wikipedia`） |
 | `--enable-diagnostics` | 开 | 编辑文件后自动运行 Pyright/LSP 语法诊断（`--no-enable-diagnostics` 关闭） |
 | `--debug` | `0` | 设为 `1` 打印详细调试日志 |

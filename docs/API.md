@@ -1,6 +1,6 @@
 # Agentica Public API（Tier 稳定度合约）
 
-> **适用版本**：v1.4.3 及之后
+> **适用版本**：v1.6.0 及之后（1.6.0 起会话 transcript 在 `agentica.session.*`，旧 `agentica.memory.session_log` 等路径已删除）
 > **维护原则**：每次发版前检查本文档与代码的一致性。未列出的符号均视为 Internal，不承诺稳定。
 
 ---
@@ -126,6 +126,8 @@ log.export("out.jsonl")          # kind="jsonl"（默认）| "analysis"
 ```
 
 CLI 对应：`/trace`、`/trace <n>`、`/export`（默认拷贝 jsonl）、`/status` 的 **Session log** 行。
+
+Web、IM 与 CLI 的会话目录由 `agentica.session.catalog.list_catalog` 统一产出；它是内部读模型，不列入稳定 API。
 
 ---
 
@@ -254,6 +256,7 @@ from agentica.compression import CompressionManager
 - `agentica.utils.markdown_converter.MarkdownConverter`（内部文档转换工具）
 - `agentica.runner.Runner`（Agent 的执行引擎，通过 Agent.run() 访问）
 - `agentica.compression.*`（内部压缩管道）
+- `agentica.session.*` 的读模型（`catalog` / `rows` / `trace` / `index` / `search`）属内部，不承诺稳定
 
 ---
 

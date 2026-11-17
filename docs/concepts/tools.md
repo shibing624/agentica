@@ -309,7 +309,8 @@ tools = get_builtin_tools(work_dir="./")
 | `fetch_url` | `BuiltinFetchUrlTool` | 抓取指定网页正文 |
 | `analyze_image` | `BuiltinVisionTool` | 查看并分析本地或指定路径的图片 |
 | `write_todos` | `BuiltinTodoTool` | 创建并更新多步骤任务清单 |
-| `task` | `BuiltinTaskTool` | 在同进程内启动只读 Subagent 处理子任务（默认使用便宜的 `auxiliary_model`） |
+| `task` | `BuiltinTaskTool` | 在同进程内启动只读 Subagent 处理子任务（默认使用便宜的 `auxiliary_model`）；返回 `run_id` / `child_session_id` / `transcript_path` 与 `output_path` 定位符 |
+| `get_task_result` | `BuiltinTaskTool` | 按 `run_id` 取回子任务结果、状态、工具摘要与轨迹定位符（按租户校验） |
 | `search_session` | `BuiltinContextTool` | 检索当前会话的完整 JSONL 历史（含换窗前的对话与工具结果，可用 `role="tool"` + `uuid` 取全文）及当前 `<session>.notes.md` |
 | `save_memory` / `search_memory` | `BuiltinMemoryTool` | 写入或检索跨会话的 Workspace 长期记忆 |
 

@@ -12,6 +12,7 @@ Agentica 采用自底向上的模块化分层设计：
 +-------------------------------------------------------------------+
 |                        编排层 (Orchestration)                      |
 |           Agent.as_tool()  ·  Subagent (task)                     |
+|           agentica.session: log / rows / trace / index / search / catalog |
 +-------------------------------------------------------------------+
 |                           代理层 (Agent)                           |
 |   Agent / DeepAgent  ·  Runner (Agentic Loop)  ·  PromptsMixin    |
@@ -52,7 +53,7 @@ Runner._run_impl()
     │       └── Volatile Zone:    冻结的 memory/experiences + YYYY-MM-DD 日期
     │
     ├─► 上下文压缩检查 (CompressMixin)
-    │       ├── 唯一触发线: compact_token_limit 或窗口 95%，线以下不改历史
+    │       ├── 唯一触发线: min(compact_token_limit, 窗口×95%)，线以下不改历史
     │       ├── Layer 1: prune_tool_results() — 旧工具结果保留头尾，能降到 50% 才应用
     │       └── Layer 2: CompressionManager.auto_compact() — 修剪不够时换空窗 + 重写 notes
     │
@@ -120,7 +121,7 @@ Layer 1 不改写任何工具调用参数，只修剪工具结果。历史参数
 
 ---
 
-## 配置解析与 CLI 装配内部链路 (`agentica/config/` & `agentica/cli/`)
+## 配置解析与多端装配内部链路 (`agentica/config/`、`agentica/tools/product.py`、`gateway/services/agent_service/builder.py`)
 
 - **核心读写函数（`agentica/config/profiles.py`）**：`global_config_path`、`load_global_config`、`save_global_config`、`get_profile`、`get_profiles`、`get_active_profile_name`、`set_active_profile`、`upsert_profile`、`delete_profile`、`resolve_active_profile_name`、`apply_global_config`。写操作使用 `ruamel.yaml` round-trip 保留注释。
 - **Profile 解析顺序**：`resolve_active_profile_name(work_dir)` 按 `项目级 override (project.json)` > `config.yaml active_profile` > `default` 解析。

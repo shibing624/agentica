@@ -8,7 +8,7 @@ Daily Tasks are the product-layer shape for recurring or scheduled agent work. T
 User intent
     |
     v
-DailyTaskSpec(name, prompt, schedule, workspace, permission_mode, work_dir)
+DailyTaskSpec(name, prompt, schedule, workspace, permission_mode, work_dir, timeout_seconds, max_retries, retry_delay_ms)
     |
     v
 CronJob storage and scheduler tick
@@ -20,7 +20,7 @@ AgentRunner.run(prompt, context)
 TaskRun(run_id, task_id, status, timing, error_type)
 ```
 
-`DailyTaskSpec` is the stable input shape for CLI/Gateway/product surfaces. `CronJob` remains the file-backed execution record. `TaskRun` is the append-only history item written after every execution attempt.
+`DailyTaskSpec` is the stable input shape for CLI/Gateway/product surfaces. `CronJob` remains the file-backed execution record. `TaskRun` is the append-only history item written after every execution attempt. A daily task does not set `target`; `create_job` defaults to `"new_once"` — the first run creates one named conversation and later runs reuse it.
 
 ## SDK Usage
 

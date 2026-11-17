@@ -66,7 +66,7 @@ Deeply tuned for open and frontier models alike — DeepSeek, OpenAI, Claude, Zh
 
 ### 2. 🤝 Coordinate multiple agents like a team
 
-An agent can spin up fast read-only subagents to search code; long commands run with `execute(background=True)` and are inspected or awaited with `/ps` and `wait`. `/worktree` isolates branches when several terminals edit the same repository — with nothing extra to deploy. See [Subagent](https://shibing624.github.io/agentica/multi-agent/subagent).
+An agent can spin up fast read-only subagents to search code. `task` returns `run_id`, `child_session_id`, `transcript_path` and tool-output locators; use `get_task_result(run_id)` or `read_file(output_path)` later instead of stuffing the whole child transcript back into the main context. Long commands run with `execute(background=True)` and are inspected or awaited with `/ps` and `wait`. `/worktree` isolates branches when several terminals edit the same repository — with nothing extra to deploy. See [Subagent](https://shibing624.github.io/agentica/multi-agent/subagent).
 
 ### 3. 🧬 Learns your habits and your codebase
 
@@ -74,7 +74,7 @@ Your preferences and project facts are saved to long-term memory, and proven wor
 
 ### 4. 🧠 Built for long sessions that never lose the plot
 
-Large outputs automatically spill to disk, old tool outputs are cleaned up when the window gets tight, and full windows roll over cleanly with handover notes while keeping the entire history searchable. See [Context Management](https://shibing624.github.io/agentica/advanced/compression).
+Large outputs automatically spill to disk. At the single trigger line `min(compact_token_limit, window × 95%)`, old tool results are pruned to head and tail; the current window is kept only if that drops usage below 50%, otherwise Agentica writes handover notes and opens a clean window. The full history stays searchable. See [Context Management](https://shibing624.github.io/agentica/advanced/compression).
 
 ### 5. 📱 Step away from your desk and keep directing from your phone
 

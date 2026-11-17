@@ -11,21 +11,20 @@
 
 ---
 
-## 先回答：它是不是 CLI-only
-
-这是第一道门，因为它不是策略，是物理限制。
+## 先回答：它是不是产品入口专属
 
 `Agent` 会被嵌入 gateway，而 gateway **一个进程服务多个 session**。
-凡是「要改进程级状态」或「要有人在这个键盘前」的能力，就不能进
-`get_builtin_tools()`，只能在 `cli/runtime.py` 里挂。
+凡是「要改进程级状态」或「要有人在这个键盘前」的能力，都不能只假设一个
+session；但也不等于各端可以各自拼工具表。现在产品层能力由
+`agentica.tools.product.build_product_tools()` 一处装配，各端只传 surface 专属回调。
 
-| 工具 | 为什么进不了 `get_builtin_tools` |
+| 判据 | 回答 |
 |---|---|
-| `worktree` | 仍只在 CLI 组装（`cli/runtime.py`）；工具本身不再改进程 cwd，隔离靠调用方传入 `work_dir` / `path` |
-| `self_manage` / `cronjob` | 改的是这套安装的 `config.yaml` / `.env` 与用户的 cron |
+| 能力依赖进程 cwd 或当前用户？ | 通过每次调用传 `work_dir` / `path` / `owner`，不把它写进工具本身 |
+| 能力需要人类交互出口？ | 由该 surface 的回调提供；没有出口时显式不挂 `ask_user_question` |
+| 能力要改安装级配置或 cron？ | 通过产品层工具暴露，不把 `agentica.cli` 当库反向 import 进 gateway |
 
-判据：**这个能力的正确性依赖「只有一个 session」吗？** 依赖就是 CLI-only。
-CLI-only 工具在 `agentica/cli/runtime.py:1098` 一带组装，从不进工厂。
+`tests/gateway/test_surface_parity.py` 对 CLI 与 gateway 的稳定前缀和工具 schema 做字节级比对；新增产品工具时要让两端同时拿到同一份 schema。
 
 ## 有没有一个装配期就能查的前提
 
@@ -129,32 +128,20 @@ OCR 没有单独暴露成 tool，因为「走哪条路」是这套安装的能�
 
 ---
 
-## 判据的实际后果：两种形态的工具面
+## 判据的实际后果：两端一致的工具面
 
-以下是实测结果（实际 `create_agent()` 两次后遍历 `agent.tools`，非数代码）。
-它是上面几条判据叠加后的产物，也是核对「我新加的工具挂在了该挂的地方」的基线。
+交互式 CLI 与 gateway 通过 `build_product_tools()` 拿到同一套产品工具
+（`worktree` / `self_manage` / `cronjob` 等），差异只在 surface 专属回调；
+`worktree` 不再因为「CLI-only」而缺席 Web / Desktop / IM。
 
-**交互式 CLI = 22 个**
+`--query` / cron 复用 `create_agent(surface="cli", ...)`，显式传
+`include_ask_user_question=False`；没有 `BackgroundProcessRegistry` 时不注册
+`wait`，`execute` 的 schema 里也不会保留 `background` 参数。**工具表是否一致
+以 `tests/gateway/test_surface_parity.py` 的字节比对为准，不靠手写工具数量。**
 
-```
-analyze_image, apply_patch, ask_user_question, cronjob, execute, fetch_url,
-forget_memory, get_skill_info, glob, grep, list_skills, read_file, save_memory,
-search_memory, search_session, self_manage, task, wait, web_search, worktree,
-write_file, write_todos
-```
-
-**`--query` / `--print` 一次性运行 = 19 个**（反向差集为空）
-
-配置了 COS 时两边都会多出 `publish_file` / `publish_html` / `publish_markdown`
-（`agent/deep.py:294`，前提是 `cos_configured()`），不影响差集。
-
-少的 3 个，每一个都对应上面的一条判据：
-
-| 工具 | 不挂载的位置 | 缺的那个前提 |
-|---|---|---|
-| `ask_user_question` | `tools/builtin/__init__.py:157`，由 `cli/main.py:280` 传 `False` | 没有 TUI，没人能回答 |
-| `worktree` | `cli/runtime.py:1105` | 没有 `WorktreeBinder` |
-| `wait` | `tools/builtin/execute_tool.py:431` | 没有 process registry，也就没有后台进程可等 |
+`BUILTIN_TOOLS`（`agentica/cli/runtime.py`）包含 `task` 与 `get_task_result`：
+后者是 `task` 定位符的只读回读工具；`tests/cli/test_builtin_tools_listing.py`
+会在展示清单漏掉工厂新增函数时失败。
 
 
 ## 下一步
