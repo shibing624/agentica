@@ -893,7 +893,7 @@ class TestImBotControllerFlows:
             assert channel == "wechat"
             assert automated is False
             svc.chat_calls.append((session_id, svc.get_session_work_dir(session_id, owner), message))
-            mid_turn_pulse.update(live_turn.pulse("default"))
+            mid_turn_pulse["ver"] = live_turn.pulse("default")
             active = live_turn.active(session_id, "default")
             assert active is not None
             mid_turn_public.update(active.public())
@@ -914,16 +914,15 @@ class TestImBotControllerFlows:
             state_file=tmp_path / "im_state.json",
         )
 
-        v0 = live_turn.pulse("default")["ver"]
+        v0 = live_turn.pulse("default")
         await bot.handle(_msg("帮我改一下 a.py"))
         state = bot.state_for(_msg("noop"))
         task = bot._turn_tasks.get(state.session_id)
         if task:
             await task
 
-        # 1. Mid-turn pulse had incremented ver and listed the session as active with user_message
+        # 1. Mid-turn pulse had incremented ver; the live turn carries the message
         assert mid_turn_pulse["ver"] == v0 + 1
-        assert state.session_id in mid_turn_pulse["active"]
         assert mid_turn_public["user_message"] == "帮我改一下 a.py"
 
         # 2. LiveTurn recorded thinking, tool_call, tool_result, content, and done events for Web SSE
@@ -936,10 +935,9 @@ class TestImBotControllerFlows:
         assert "content" in event_names
         assert "done" in event_names
 
-        # 3. Post-turn pulse incremented ver again and cleared active
-        after_pulse = live_turn.pulse("default")
-        assert after_pulse["ver"] == v0 + 2
-        assert after_pulse["active"] == []
+        # 3. Post-turn pulse incremented ver again; nothing is running
+        assert live_turn.pulse("default") == v0 + 2
+        assert live_turn.active(state.session_id, "default") is None
         assert "已改好 a.py" in ch.sent[-1][1]
 
     @pytest.mark.asyncio

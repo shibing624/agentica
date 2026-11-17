@@ -615,12 +615,13 @@ async def cancel_chat(
 
 @router.get("/api/sessions/pulse")
 async def sessions_pulse(request: Request):
-    """Lightweight pulse for detecting remote (IM / CLI / other tab) session & job activity."""
+    """A change counter: when ``ver`` moves, re-read the catalog. Nothing else.
+
+    Which sessions are running is a catalog field (``running``), not a second
+    copy here."""
     account = _account(request)
-    snap = live_turn.pulse(account)
-    stamp = read_activity_stamp_us(account)
-    snap["ver"] = (int(snap["ver"]) + stamp) % 4_000_000_000_000_000
-    return snap
+    ver = live_turn.pulse(account) + read_activity_stamp_us(account)
+    return {"ver": ver % 4_000_000_000_000_000}
 
 
 @router.get("/api/sessions")

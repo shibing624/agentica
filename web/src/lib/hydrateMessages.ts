@@ -79,10 +79,10 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
         else if (pendingTrigger === "") card.compact!.auto = true;
         pendingTrigger = null;
         if (bare) continue;
-        dropShadowedQuestion(msgs, card, splitImageMarkers(content).text);
+        dropShadowedQuestion(msgs, card, content);
       }
       if (row.steer) {
-        const clean = splitImageMarkers(content).text;
+        const clean = content;
         if (!clean) continue;
         if (!turnStartTs && explicitTs) turnStartTs = explicitTs;
         if (explicitTs > turnEndTs) turnEndTs = explicitTs;
@@ -92,8 +92,7 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
         continue;
       }
       closeAssistant();
-      const attached = splitImageMarkers(content);
-      content = attached.text;
+      const previews = row.images.map(imageUrl);
       const skill = parseSkillTurn(content);
       turnStartTs = explicitTs;
       turnEndTs = explicitTs;
@@ -103,7 +102,8 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
         ts: tsOf(e),
         ...(uuidOf(e) ? { uuid: uuidOf(e) } : {}),
         ...(skill ? { skill } : {}),
-        ...(attached.previews.length ? { previews: attached.previews } : {}),
+        ...(row.turn != null ? { turn: row.turn } : {}),
+        ...(previews.length ? { previews } : {}),
       });
       continue;
     }
@@ -149,55 +149,35 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
   return msgs;
 }
 
-const IMAGE_MARK_RE = /(?:^|\n\n)\[图片: ([0-9a-f]{64}\.(?:png|jpg|gif|webp))\]/g;
-export const STEER_GUIDANCE_PREFIX = "[User guidance received while you were working]";
-const FOLDED_STEER_RE = /(?:^|\n\n)\[User guidance received while you were working\]\n([\s\S]*?)(?=(?:\n\n\[User guidance received while you were working\]\n)|$)/g;
-
-/** What the gateway decided a user row is (`agentica.session.rows.row_payload`).
- *  The client draws from it and never parses `content` for these markers. */
+/** What the gateway decided a row is (`agentica.session.rows.row_payload`).
+ *  The client draws from it and never parses `content` for markers. */
 export type RowView = {
   automated: boolean;
   steer: boolean;
+  /** The prose, with the window preamble, steer prefix and image markers cut. */
   text: string;
+  /** Stored picture names sent with the turn. */
+  images: string[];
   window: { notes: string; notes_path: string } | null;
+  /** 1-based turn number from the start of the log, on rows a person's turn starts at. */
+  turn?: number;
 };
 
-function rowOf(e: Record<string, unknown>): RowView {
-  const row = e.row as RowView | undefined;
-  if (!row || typeof row.text !== "string") {
-    throw new Error(`user row ${String(e.uuid || "?")} has no server-side \`row\`; the gateway and web bundle are out of step`);
+/** A tool result row: the output, whether it failed, and steers folded behind it. */
+export type ToolRowView = { error: boolean; text: string; steers: string[] };
+
+export const imageUrl = (name: string) => `/api/chat-images/${name}`;
+
+function serverRow<T>(e: Record<string, unknown>): T {
+  const row = e.row as T | undefined;
+  if (!row || typeof (row as { text?: unknown }).text !== "string") {
+    throw new Error(`${String(e.type)} row ${String(e.uuid || "?")} has no server-side \`row\`; the gateway and web bundle are out of step`);
   }
   return row;
 }
 
-function splitFoldedSteer(result: string): { toolResult: string; steers: string[] } {
-  if (!result.includes(STEER_GUIDANCE_PREFIX)) return { toolResult: result, steers: [] };
-  const steers: string[] = [];
-  let cut = -1;
-  for (const m of result.matchAll(FOLDED_STEER_RE)) {
-    if (cut < 0) cut = m.index ?? 0;
-    const text = (m[1] || "").trim();
-    if (text) steers.push(text);
-  }
-  if (cut < 0) return { toolResult: result, steers: [] };
-  return { toolResult: result.slice(0, cut).replace(/\s+$/, ""), steers };
-}
-
-/**
- * A web turn with pictures is logged as `text` + `[图片: <file>]` markers
- * (+ the media model's description when the base model cannot see images).
- * Everything from the first marker on is machine-added: show the pictures again
- * and keep only what the user typed.
- */
-export function splitImageMarkers(content: string): { text: string; previews: string[] } {
-  const previews: string[] = [];
-  let cut = -1;
-  for (const m of content.matchAll(IMAGE_MARK_RE)) {
-    if (cut < 0) cut = m.index ?? 0;
-    previews.push(`/api/chat-images/${m[1]}`);
-  }
-  return cut < 0 ? { text: content, previews } : { text: content.slice(0, cut), previews };
-}
+const rowOf = (e: Record<string, unknown>) => serverRow<RowView>(e);
+const toolRowOf = (e: Record<string, unknown>) => serverRow<ToolRowView>(e);
 
 /** Put the `/compact` user bubble right before its card. */
 function insertCompactCommand(msgs: ChatMsg[], card: ChatMsg) {
@@ -220,8 +200,6 @@ function dropShadowedQuestion(msgs: ChatMsg[], card: ChatMsg, question: string) 
     msgs.splice(at - 1, 1);
   }
 }
-
-const WINDOW_OPEN = "<context_window>";
 
 function uuidOf(e: Record<string, unknown>): string {
   return typeof e.uuid === "string" ? e.uuid : "";
@@ -321,10 +299,9 @@ function applyToolResult(m: ChatMsg, e: Record<string, unknown>) {
   const callId = String(e.tool_call_id || "");
   const name = String(e.tool_name || "");
   const ts = tsOf(e);
-  let result = typeof e.content === "string" ? e.content : String(e.content ?? "");
-  const folded = splitFoldedSteer(result);
-  result = folded.toolResult;
-  if (e.is_error || e.tool_call_error) {
+  const view = toolRowOf(e);
+  let result = view.text;
+  if (view.error) {
     result = result.startsWith("Error: ") ? result : `Error: ${result}`;
   }
   const parts = m.parts || (m.parts = []);
@@ -345,7 +322,7 @@ function applyToolResult(m: ChatMsg, e: Record<string, unknown>) {
     if (diff) step.diff = diff;
     if (step.t0 != null) step.ms = Math.max(0, ts - step.t0);
   }
-  for (const steeredText of folded.steers) {
+  for (const steeredText of view.steers) {
     pushSteer(m, steeredText, ts);
   }
 }
@@ -437,7 +414,7 @@ const STEER_CACHE_KEY = "ag_steers_v1";
 const STEER_CACHE_MAX_SESSIONS = 40;
 
 function isValidSteerText(text: unknown): text is string {
-  return typeof text === "string" && Boolean(text.trim()) && !text.trimStart().startsWith(WINDOW_OPEN);
+  return typeof text === "string" && Boolean(text.trim());
 }
 
 function readSteerStore(): Record<string, ClientSteerAnchor[]> {
@@ -701,8 +678,7 @@ export function reconcileLiveTurnMsgs(
       });
     }
   } else if (run.user_message) {
-    const attached = splitImageMarkers(run.user_message);
-    const promptText = attached.text.trim();
+    const promptText = run.user_message.trim();
     let lastUser: ChatMsg | undefined;
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].role === "user" && !msgs[i].automated && !msgs[i].steer) {
@@ -713,10 +689,10 @@ export function reconcileLiveTurnMsgs(
     if (promptText && (!lastUser || lastUser.content.trim() !== promptText)) {
       msgs.push({
         role: "user",
-        content: attached.text,
+        content: run.user_message,
         ts: startedAt || Date.now(),
         files: [],
-        previews: attached.previews,
+        previews: (run.user_images || []).map(imageUrl),
       });
     }
   }

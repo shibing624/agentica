@@ -377,10 +377,10 @@ def test_generated_title_bumps_the_session_pulse(tmp_path):
              patch.object(AgentService, "side_task", AsyncMock(return_value="整理 CI 失败原因")), \
              patch.object(AgentService, "_owner", staticmethod(lambda owner=None: owner or "default")), \
              patch.object(svc_mod, "live_turn", live_turn, create=True):
-            before = live_turn.pulse("default")["ver"]
+            before = live_turn.pulse("default")
             svc._schedule_title("s1", "default", "帮我看下 CI", "已经整理")
             await asyncio.gather(*svc._title_tasks)
-            return before, live_turn.pulse("default")["ver"]
+            return before, live_turn.pulse("default")
 
     before, after = asyncio.run(go())
     assert log.get_name() == "整理 CI 失败原因"

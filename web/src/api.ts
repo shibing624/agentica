@@ -237,8 +237,25 @@ export const deleteProfileApi = (name: string) => request(`/api/profile/${encode
 export const fetchTraceAnalysis = (sessionId: string) => request(`/api/sessions/${sessionId}/trace/analysis?lite=true`);
 /** Round totals only (time, tokens, cost): what a reply's footer needs. The call
  *  lists are most of the payload on a long session and the chat never shows them. */
+export type TraceRound = {
+  /** uuid of the last log row of the reply bubble this round produced. */
+  replyUuid: string;
+  compaction?: boolean;
+  inFlight?: boolean;
+  durationMs: number;
+  llmMs: number;
+  requests?: number;
+  tokens: {
+    prompt: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite?: number;
+    cacheHitPercent: number | null;
+  };
+  costUsd: number | null;
+};
 export const fetchTraceRounds = (sessionId: string) =>
-  request(`/api/sessions/${sessionId}/trace/analysis?lite=true&calls=false`);
+  request<{ rounds: TraceRound[]; meta?: { model?: unknown } }>(`/api/sessions/${sessionId}/trace/analysis?lite=true&calls=false`);
 export const fetchTraceCallBody = (sessionId: string, index: number, signal?: AbortSignal) =>
   request(`/api/sessions/${sessionId}/trace/calls/${index}`, { signal });
 export const searchTraceCalls = (sessionId: string, q: string, signal?: AbortSignal) =>
@@ -330,7 +347,10 @@ export type ActiveRunInfo = {
   seq: number;
   first_seq?: number;
   started_at_ms?: number;
+  /** What the person typed (image markers already cut by the gateway). */
   user_message?: string;
+  /** Stored picture names sent with the turn. */
+  user_images?: string[];
   cron_job?: { id: string; name: string };
   automated_message?: string;
 };
@@ -341,7 +361,7 @@ export const fetchActiveRun = (sessionId: string) =>
   );
 
 export const fetchSessionsPulse = () =>
-  request<{ ver: number; active: string[] }>("/api/sessions/pulse");
+  request<{ ver: number }>("/api/sessions/pulse");
 
 export const cancelRunApi = (runId: string) =>
   postJson<{ status: string; cancelled: boolean; run_id?: string }>(

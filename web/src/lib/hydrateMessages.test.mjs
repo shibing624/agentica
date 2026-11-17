@@ -15,14 +15,21 @@ const {
 } = await vite.ssrLoadModule("/src/lib/hydrateMessages.ts");
 after(() => vite.close());
 
-// The gateway attaches `row` to every user row it serves
+// The gateway attaches `row` to every user and tool row it serves
 // (`agentica.session.rows.row_payload`); the client does not parse `content`
 // for markers. Rows here are plain unless a test gives `row` itself — what a
-// preamble or a steer prefix *means* is pinned in tests/memory/test_log_rows.py.
-const served = (e) => (e.type !== "user" || e.row ? e : {
-  ...e,
-  row: { automated: e.automated === true, steer: e.steer === true, text: String(e.content || ""), window: null },
-});
+// preamble, a steer prefix, an image marker or a folded steer *means* is
+// pinned in tests/session/test_log_rows.py.
+const served = (e) => {
+  if (e.row) return e;
+  if (e.type === "user") {
+    return { ...e, row: { automated: e.automated === true, steer: e.steer === true, text: String(e.content || ""), images: [], window: null } };
+  }
+  if (e.type === "tool" || e.type === "tool_audit") {
+    return { ...e, row: { error: e.is_error === true, text: String(e.content ?? ""), steers: [] } };
+  }
+  return e;
+};
 const eventsToChatMsgs = (events) => hydrate(events.map(served));
 // A user row that opened a new context window, with the question (if any) the
 // compaction kept behind it.
@@ -30,7 +37,7 @@ const windowRow = (rest = "", extra = {}) => ({
   type: "user",
   content: "<context_window>…</context_window>" + (rest ? "\n\n" + rest : ""),
   row: {
-    automated: false, steer: false, text: rest,
+    automated: false, steer: false, text: rest, images: [],
     window: { notes: "- goal: ship", notes_path: "/h/p/s1.notes.md", ...(extra.window || {}) },
   },
   ...(extra.event || {}),
@@ -64,18 +71,17 @@ function parts(m) {
   return m.parts || [];
 }
 
-test("a turn with pictures shows them again and hides the media description", () => {
+test("a turn's pictures come from row.images; the text is the server's", () => {
   const a = "a".repeat(64) + ".png";
   const b = "b".repeat(64) + ".jpg";
+  const user = (text, images, content) => ({
+    type: "user", content, row: { automated: false, steer: false, text, images, window: null },
+  });
   const msgs = eventsToChatMsgs([
-    {
-      type: "user",
-      content: `看下这个\n\n[图片: ${a}]\n\n[图片: ${b}]\n\n[图片内容]\n一张截图\n\n[图片内容]\n另一张`,
-      timestamp: "2026-08-28T01:00:00.000Z",
-    },
-    { type: "assistant", content: "ok", timestamp: "2026-08-28T01:00:02.000Z" },
-    { type: "user", content: `[图片: ${a}]\n\n[图片内容]\n只有图片`, timestamp: "2026-08-28T01:01:00.000Z" },
-    { type: "user", content: "文中提到 [图片: x] 不是附件", timestamp: "2026-08-28T01:02:00.000Z" },
+    user("看下这个", [a, b], "raw content the client must not read"),
+    { type: "assistant", content: "ok" },
+    user("", [a], "raw"),
+    user("文中提到 [图片: x] 不是附件", [], "文中提到 [图片: x] 不是附件"),
   ]);
   assert.equal(msgs[0].content, "看下这个");
   assert.deepEqual(msgs[0].previews, [`/api/chat-images/${a}`, `/api/chat-images/${b}`]);
@@ -83,6 +89,31 @@ test("a turn with pictures shows them again and hides the media description", ()
   assert.deepEqual(msgs[2].previews, [`/api/chat-images/${a}`]);
   assert.equal(msgs[3].content, "文中提到 [图片: x] 不是附件");
   assert.equal(msgs[3].previews, undefined);
+});
+
+test("a tool row's error flag and folded steers come from the server row", () => {
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "run it" },
+    {
+      type: "assistant",
+      content: "",
+      tool_calls: [{ id: "x", type: "function", function: { name: "execute", arguments: "{}" } }],
+    },
+    {
+      type: "tool", tool_call_id: "x", tool_name: "execute", content: "raw",
+      row: { error: true, text: "exit 1", steers: ["also check logs"] },
+    },
+  ]);
+  const ps = parts(msgs[1]);
+  assert.equal(ps.find((p) => p.kind === "tool").result, "Error: exit 1");
+  assert.deepEqual(ps.filter((p) => p.kind === "steer").map((p) => p.text), ["also check logs"]);
+});
+
+test("a logged question carries the server's turn number", () => {
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "q", row: { automated: false, steer: false, text: "q", images: [], window: null, turn: 7 } },
+  ]);
+  assert.equal(msgs[0].turn, 7);
 });
 
 test("plain user/assistant text still hydrates as two bubbles", () => {
@@ -428,6 +459,7 @@ test("mid-turn user steer rows and folded tool steers hydrate as steer parts ins
       tool_call_id: "tc2",
       tool_name: "read_file",
       content: "line 1\n\n[User guidance received while you were working]\n前面输入的效果是ok的。",
+      row: { error: false, text: "line 1", steers: ["前面输入的效果是ok的。"] },
       timestamp: "2026-11-08T04:16:12.000Z",
     },
     { type: "assistant", content: "all fixed", timestamp: "2026-11-08T04:16:15.000Z" },

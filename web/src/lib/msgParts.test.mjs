@@ -185,7 +185,7 @@ test("hydrated JSONL turn keeps Claude/GPT-5 intermediate content as replies", (
   const msgs = eventsToChatMsgs([
     {
       type: "user", content: "排查问题", timestamp: "2026-11-11T06:00:00Z",
-      row: { automated: false, steer: false, text: "排查问题", window: null },
+      row: { automated: false, steer: false, text: "排查问题", images: [], window: null },
     },
     {
       type: "assistant",
@@ -193,14 +193,14 @@ test("hydrated JSONL turn keeps Claude/GPT-5 intermediate content as replies", (
       tool_calls: [{ id: "tc1", function: { name: "execute", arguments: JSON.stringify({ command: "ls", description: "列出项目根目录" }) } }],
       timestamp: "2026-11-11T06:00:02Z",
     },
-    { type: "tool", tool_call_id: "tc1", tool_name: "execute", content: "web\nagentica\n[Exit code: 0]", timestamp: "2026-11-11T06:00:03Z" },
+    { type: "tool", tool_call_id: "tc1", tool_name: "execute", content: "web\nagentica\n[Exit code: 0]", timestamp: "2026-11-11T06:00:03Z", row: { error: false, text: "web\nagentica\n[Exit code: 0]", steers: [] } },
     {
       type: "assistant",
       content: "再读取 WorkGroup.tsx。",
       tool_calls: [{ id: "tc2", function: { name: "read_file", arguments: JSON.stringify({ file_path: "web/src/components/WorkGroup.tsx" }) } }],
       timestamp: "2026-11-11T06:00:05Z",
     },
-    { type: "tool", tool_call_id: "tc2", tool_name: "read_file", content: "", timestamp: "2026-11-11T06:00:06Z" },
+    { type: "tool", tool_call_id: "tc2", tool_name: "read_file", content: "", timestamp: "2026-11-11T06:00:06Z", row: { error: false, text: "", steers: [] } },
     {
       type: "assistant",
       content: "根因已定位并修复完成。",
