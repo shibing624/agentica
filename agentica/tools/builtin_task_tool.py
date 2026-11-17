@@ -18,8 +18,12 @@ import re
 from textwrap import dedent
 from typing import Optional, Dict, Any, TYPE_CHECKING
 
-from agentica.compression.tool_result_storage import DEFAULT_MAX_RESULT_SIZE_CHARS, maybe_persist_result
-from agentica.tools.base import Tool
+from agentica.compression.tool_result_storage import (
+    DEFAULT_MAX_RESULT_SIZE_CHARS,
+    can_recover_spill,
+    maybe_persist_result,
+)
+from agentica.tools.base import Function, Tool
 
 if TYPE_CHECKING:
     from agentica.agent import Agent
@@ -149,6 +153,27 @@ class BuiltinTaskTool(Tool):
         """Bind to the parent agent so ``task()`` can spawn through the registry."""
         self._parent_agent = agent
 
+    def _can_recover_spill(self) -> bool:
+        """Whether this session actually has a tool that can read a spilled file.
+
+        ``maybe_persist_result`` writes ``Use read_file ... for the rest`` only
+        when the caller says it is recoverable. Hard-coding True told an IM or
+        otherwise tool-restricted session to read a file it cannot open.
+        """
+        parent = self._parent_agent
+        functions = getattr(getattr(parent, "model", None), "functions", None) or {}
+        names = set(functions)
+        for tool in getattr(parent, "tools", None) or []:
+            if isinstance(tool, Tool):
+                names.update(tool.functions)
+            elif isinstance(tool, Function):
+                names.add(tool.name)
+            else:
+                name = getattr(tool, "name", None)
+                if isinstance(name, str):
+                    names.add(name)
+        return can_recover_spill(names)
+
     async def get_task_result(self, run_id: str) -> str:
         """Fetch a prior subagent run by run_id.
 
@@ -162,16 +187,33 @@ class BuiltinTaskTool(Tool):
         """
         from agentica.subagents import SubagentRegistry
 
-        run = SubagentRegistry().get(run_id)
+        parent = self._parent_agent
+        owner_user_id = getattr(parent, "user_id", None)
+        run = SubagentRegistry().get_for_owner(run_id, owner_user_id)
         if run is None:
             return json.dumps({"found": False, "run_id": run_id}, ensure_ascii=False, indent=2)
+
+        result = run.result or ""
+        if len(result) > DEFAULT_MAX_RESULT_SIZE_CHARS:
+            # Same size bound as a freshly completed task: get_task_result must
+            # not become a back door that pours a large answer back into the
+            # context window after the original result was spilled away.
+            result = maybe_persist_result(
+                "get_task_result",
+                f"{run.run_id}-result",
+                result,
+                session_id=getattr(parent, "session_id", None) or "default",
+                cwd=getattr(parent, "work_dir", None),
+                user_id=owner_user_id,
+                recoverable=self._can_recover_spill(),
+            )
         return json.dumps({
             "found": True,
             "run_id": run.run_id,
             "status": run.status,
             "subagent_type": run.subagent_type,
             "task": run.task_description,
-            "result": run.result or "",
+            "result": result,
             "tool_calls_summary": run.tool_calls_summary or [],
             "child_session_id": run.child_session_id or "",
             "transcript_path": run.transcript_path or "",
@@ -294,10 +336,10 @@ class BuiltinTaskTool(Tool):
                     "task",
                     f"{result.get('run_id') or 'subagent'}-result",
                     result_content,
-                    session_id=parent.session_id,
+                    session_id=parent.session_id or "default",
                     cwd=parent.work_dir,
                     user_id=parent.user_id,
-                    recoverable=True,
+                    recoverable=self._can_recover_spill(),
                 )
             payload: Dict[str, Any] = {
                 "success": True,

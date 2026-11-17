@@ -16,6 +16,8 @@ import copy
 import functools
 import inspect
 import json
+import re
+import shutil
 import time
 import uuid
 
@@ -36,7 +38,10 @@ from datetime import datetime
 
 from agentica.subagents.handoff import default_handoff_mapper
 from agentica.run.response import AgentCancelledError
-from agentica.compression.tool_result_storage import get_tool_result_path
+from agentica.compression.tool_result_storage import (
+    get_tool_result_path,
+    safe_user_segment,
+)
 from agentica.security.redact import redact_sensitive_text
 from agentica.tools.base import Function, ModelTool, Tool
 from agentica.tools.safety import is_read_only_command
@@ -178,6 +183,11 @@ class SubagentRun:
     child_session_id: Optional[str] = None
     transcript_path: Optional[str] = None
 
+    # Tenant that spawned this run. The registry lives in one process shared by
+    # every gateway user, and run_id is model-visible: without this, a looked-up
+    # run_id can disclose another user's task text, answer and file paths.
+    owner_user_id: Optional[str] = None
+
 
 class SubagentRegistry:
     """
@@ -207,16 +217,38 @@ class SubagentRegistry:
     
     def register(self, run: SubagentRun) -> None:
         """Register a new subagent run. Auto-cleans old completed runs when exceeding threshold."""
-        # Auto-cleanup when accumulated runs exceed threshold
+        # Auto-cleanup when accumulated runs exceed threshold. The in-memory
+        # record and its on-disk evidence share one lifetime: purging files at
+        # 600s would delete a transcript the parent can still legitimately ask
+        # for by run_id, so both use the artifact retention window.
         if len(self._runs) > 100:
-            self.cleanup_completed(max_age_seconds=600)
+            self.cleanup_completed(
+                max_age_seconds=self.ARTIFACT_RETENTION_SECONDS, purge_files=True
+            )
         self._runs[run.run_id] = run
         logger.debug(f"Registered subagent run: {run.run_id} ({run.subagent_type})")
     
     def get(self, run_id: str) -> Optional[SubagentRun]:
-        """Get a subagent run by ID."""
+        """Get a subagent run by ID (internal / SDK use, no tenant check)."""
         return self._runs.get(run_id)
-    
+
+    def get_for_owner(self, run_id: str, user_id: Optional[str]) -> Optional[SubagentRun]:
+        """Get a run only if it belongs to this tenant.
+
+        ``run_id`` is visible to the model (it is returned by ``task`` and
+        accepted by ``get_task_result`` / ``resume_from_run_id``), and a gateway
+        process serves several users from one registry. Comparing the owning
+        ``user_id`` keeps one user's answer, task text and file locators from
+        being read by another. ``None`` and ``"default"`` are the same tenant;
+        both are normalized through the same helper the spill paths use.
+        """
+        run = self._runs.get(run_id)
+        if run is None:
+            return None
+        if safe_user_segment(run.owner_user_id) != safe_user_segment(user_id):
+            return None
+        return run
+
     def get_for_parent(self, parent_agent_id: str) -> List[SubagentRun]:
         """Get all subagent runs spawned by a parent agent."""
         return [
@@ -261,28 +293,75 @@ class SubagentRegistry:
         if token_usage is not None:
             run.token_usage = token_usage
     
-    def cleanup_completed(self, max_age_seconds: int = 3600) -> int:
-        """Remove completed/cancelled runs older than max_age_seconds."""
+    # Child transcripts and per-tool output files are evidence the parent may
+    # still want to read, so they outlive nothing: keep them exactly as long as
+    # the in-memory run record and remove both together.
+    ARTIFACT_RETENTION_SECONDS = 24 * 3600
+
+    def cleanup_completed(self, max_age_seconds: int = 3600, *, purge_files: bool = False) -> int:
+        """Remove completed/cancelled runs older than max_age_seconds.
+
+        With ``purge_files`` also removes that run's transcript and its
+        per-tool output directory. Both are keyed by ``.subagent.`` in their
+        name and confined to the session's own project directory; anything
+        else (a hand-made path, a test stub) is left alone. A delete failure is
+        logged and never fails the cleanup.
+        """
         now = datetime.now()
         to_remove = []
-        
+
         for run_id, run in self._runs.items():
             if run.status in ("completed", "error", "cancelled") and run.ended_at:
                 age = (now - run.ended_at).total_seconds()
                 if age > max_age_seconds:
                     to_remove.append(run_id)
-        
+
         for run_id in to_remove:
-            del self._runs[run_id]
-        
+            run = self._runs.pop(run_id, None)
+            if run is not None and purge_files:
+                self._purge_run_files(run)
+
         if to_remove:
             logger.debug(f"Cleaned up {len(to_remove)} old subagent runs")
 
         return len(to_remove)
 
     @staticmethod
+    def _purge_run_files(run: SubagentRun) -> None:
+        """Delete one run's on-disk evidence, if it is unmistakably ours."""
+        transcript = Path(run.transcript_path or "")
+        child_id = run.child_session_id or ""
+        marker = ".subagent."
+        targets: List[Path] = []
+        if (
+            marker in transcript.name
+            and transcript.parent.name == "subagents"
+            and transcript.suffix == ".jsonl"
+        ):
+            targets.append(transcript)
+            targets.append(transcript.with_suffix(".meta.json"))
+            # tool-results live in <project>/<child_session_id>/tool-results/,
+            # a sibling of the "subagents" directory.
+            if marker in child_id and "/" not in child_id and "\\" not in child_id:
+                targets.append(transcript.parent.parent / child_id / "tool-results")
+        for target in targets:
+            try:
+                if target.is_dir():
+                    shutil.rmtree(target)
+                elif target.is_file():
+                    target.unlink()
+            except OSError as e:
+                logger.warning(f"Could not remove subagent artifact {target}: {e}")
+
+    @staticmethod
     def _child_session_id(parent_session_id: Optional[str], run_id: str) -> str:
-        prefix = parent_session_id or "subagent"
+        # The parent session id is client-controlled on the gateway and becomes
+        # both a filename and a directory name. Keep it to one safe segment so
+        # a value like ``../../evil`` cannot escape the project directory.
+        prefix = re.sub(r"[^A-Za-z0-9._-]", "_", parent_session_id or "subagent")
+        prefix = prefix.strip("._") or "subagent"
+        if len(prefix) > 80:
+            prefix = prefix[:80]
         return f"{prefix}.subagent.{run_id}"
 
     @staticmethod
@@ -303,11 +382,39 @@ class SubagentRegistry:
         cwd: Optional[str],
         user_id: Optional[str],
     ) -> str:
+        """Persist one child tool output for later recovery.
+
+        Returns the path, or ``""`` when the copy could not be written. This is
+        best-effort evidence: a full disk, a permission error or an over-long
+        filename must not turn an otherwise successful subagent run into an
+        error (the previous version let the exception escape ``run_stream``).
+        """
+        # The child model may already have spilled this result. In that case
+        # the text here is only a preview that points at the full copy made by
+        # the child, so reuse that path instead of persisting a preview of a
+        # preview and making the parent hop through two locators.
+        if "<persisted-output>" in content:
+            match = re.search(r"Full output saved to:\s*\n([^\n]+)", content)
+            if match:
+                existing = match.group(1).strip()
+                if existing and Path(existing).is_file():
+                    return existing
+            # An INCOMPLETE copy (killed at the capture cap) or an unparseable
+            # preview has no reliable full text. Do not hand the parent a
+            # locator for it: the summary still carries the short info line.
+            return ""
+        if "<truncated-output>" in content:
+            # No full copy exists; a nested preview would claim otherwise.
+            return ""
         file_id = f"{run_id}-{tool_call_id or tool_name}"
-        path = Path(get_tool_result_path(file_id, cwd=cwd, session_id=child_session_id, user_id=user_id))
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(redact_sensitive_text(content), encoding="utf-8")
-        return str(path)
+        try:
+            path = Path(get_tool_result_path(file_id, cwd=cwd, session_id=child_session_id, user_id=user_id))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(redact_sensitive_text(content) or "", encoding="utf-8")
+            return str(path)
+        except (OSError, ValueError, TypeError) as e:
+            logger.warning(f"Could not persist subagent tool output ({tool_name}): {e}")
+            return ""
 
     # ================================================================
     # Execution methods (spawn isolated subagents and run to completion)
@@ -641,7 +748,7 @@ class SubagentRegistry:
                             if idx is not None:
                                 tool_calls_log[idx]["info"] = brief
                                 if isinstance(content, str) and content:
-                                    tool_calls_log[idx]["output_path"] = self._write_child_tool_output(
+                                    output_path = self._write_child_tool_output(
                                         run_id=run_id or "subagent",
                                         child_session_id=child_session_id,
                                         tool_call_id=call_id,
@@ -650,6 +757,8 @@ class SubagentRegistry:
                                         cwd=parent_agent.work_dir,
                                         user_id=parent_agent.user_id,
                                     )
+                                    if output_path:
+                                        tool_calls_log[idx]["output_path"] = output_path
                                 _mirror_to_sink()
                         if cb is not None:
                             elapsed_t = (tool_info.get("metrics") or {}).get("time")
@@ -679,10 +788,14 @@ class SubagentRegistry:
             "content": final_content,
             "tool_calls_summary": [
                 {
-                    "name": tc["name"],
-                    "info": tc.get("info", ""),
-                    "input": tc.get("input", ""),
-                    "output_path": tc.get("output_path", ""),
+                    k: v
+                    for k, v in {
+                        "name": tc["name"],
+                        "info": tc.get("info", ""),
+                        "input": tc.get("input", ""),
+                        "output_path": tc.get("output_path"),
+                    }.items()
+                    if v
                 }
                 for tc in tool_calls_log
             ],
@@ -798,7 +911,9 @@ class SubagentRegistry:
         # This is the missing piece that lets the parent Agent iterate on a
         # timed-out / truncated task instead of having to restart from zero.
         if resume_from_run_id:
-            prev = self.get(resume_from_run_id)
+            # Same tenant boundary as get_task_result: a resume stitches the
+            # previous run's answer and tool outputs into this agent's prompt.
+            prev = self.get_for_owner(resume_from_run_id, getattr(parent_agent, "user_id", None))
             if prev is None:
                 return {
                     "status": "error",
@@ -865,6 +980,7 @@ class SubagentRegistry:
             started_at=datetime.now(),
             status="running",
             child_session_id=self._child_session_id(parent_agent.session_id, run_id),
+            owner_user_id=getattr(parent_agent, "user_id", None),
         )
         self.register(run)
 

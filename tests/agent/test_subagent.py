@@ -5,6 +5,7 @@ import inspect
 import json
 import re
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -724,6 +725,10 @@ def test_builtin_task_tool_spills_large_completed_result_and_keeps_locators(tmp_
         session_id="parent-session",
         work_dir=str(tmp_path),
         user_id="u1",
+        # A real session always carries the file tools, which is what makes a
+        # spilled copy recoverable at all.
+        model=SimpleNamespace(functions={"read_file": None, "execute": None}),
+        tools=[Function(name="read_file", entrypoint=lambda: None)],
     )
     tool._parent_agent = parent
 
@@ -785,6 +790,243 @@ def test_builtin_task_tool_get_task_result_returns_registry_record():
         "child_session_id": "parent.subagent.run-lookup",
         "transcript_path": "/tmp/run-lookup.jsonl",
     }
+
+
+# ---------------------------------------------------------------------------
+# Locator hardening: tenant isolation, best-effort persistence, spill reuse,
+# safe session ids, artifact retention, and a bounded get_task_result.
+# ---------------------------------------------------------------------------
+
+
+def _run_record(run_id, owner, **kw):
+    from agentica.subagents import SubagentRun
+
+    kw.setdefault("result", "private answer")
+    kw.setdefault("ended_at", datetime.now())
+    return SubagentRun(
+        run_id=run_id,
+        subagent_type="explore",
+        parent_agent_id="parent-1",
+        task_label="probe",
+        task_description="private task",
+        started_at=datetime.now(),
+        status="completed",
+        owner_user_id=owner,
+        **kw,
+    )
+
+
+def test_get_task_result_does_not_disclose_another_tenant_run():
+    """run_id is model-visible and the registry is process-wide in a gateway."""
+    from agentica.tools.builtin_task_tool import BuiltinTaskTool
+
+    registry = SubagentRegistry()
+    registry._runs["run-tenant-A"] = _run_record("run-tenant-A", "tenant-A")
+    tool = BuiltinTaskTool()
+    tool._parent_agent = SimpleNamespace(user_id="tenant-B", session_id="s", work_dir=None)
+
+    denied = json.loads(asyncio.run(tool.get_task_result("run-tenant-A")))
+    assert denied == {"found": False, "run_id": "run-tenant-A"}
+
+    tool._parent_agent.user_id = "tenant-A"
+    allowed = json.loads(asyncio.run(tool.get_task_result("run-tenant-A")))
+    assert allowed["found"] is True
+    assert allowed["result"] == "private answer"
+
+
+def test_get_for_owner_normalizes_none_and_default():
+    registry = SubagentRegistry()
+    registry._runs["run-default"] = _run_record("run-default", None)
+    assert registry.get_for_owner("run-default", "default") is not None
+    assert registry.get_for_owner("run-default", None) is not None
+    assert registry.get_for_owner("run-default", "someone-else") is None
+    assert registry.get("run-default") is not None  # SDK/internal path unchanged
+
+
+def test_resume_rejects_another_tenant_run():
+    registry = SubagentRegistry()
+    _RUNTIME_SUBAGENT_CONFIGS["worker"] = SubagentConfig(
+        type="worker", name="worker", description="worker", system_prompt="system prompt",
+    )
+    registry._runs["run-resume-A"] = _run_record("run-resume-A", "tenant-A")
+    parent = _make_parent_agent()
+    parent.user_id = "tenant-B"
+    result = asyncio.run(
+        registry.spawn(
+            parent_agent=parent,
+            task="continue",
+            agent_type="worker",
+            resume_from_run_id="run-resume-A",
+        )
+    )
+    assert result["status"] == "error"
+    assert "not found in registry" in result["error"]
+
+
+def test_child_tool_output_write_failure_does_not_fail_the_run(tmp_path, monkeypatch):
+    """Persisting evidence is best-effort; a full disk is not a task failure."""
+    registry = SubagentRegistry()
+    _RUNTIME_SUBAGENT_CONFIGS["worker"] = SubagentConfig(
+        type="worker", name="worker", description="worker", system_prompt="system prompt",
+    )
+    parent = _make_parent_agent()
+    parent.session_id = "parent-session"
+    parent.work_dir = str(tmp_path)
+    parent.user_id = "u1"
+
+    class _ToolOutputAgent(RecordingAgent):
+        async def run_stream(self, task, config=None):
+            tool = {"tool_name": "read_file", "tool_call_id": "call-1", "tool_args": {}}
+            yield SimpleNamespace(event="ToolCallStarted", content=None, tools=[tool])
+            done = dict(tool)
+            done["content"] = "evidence"
+            done["metrics"] = {"time": 0.1}
+            yield SimpleNamespace(event="ToolCallCompleted", content=None, tools=[done])
+            yield SimpleNamespace(event="RunResponse", content="summary", tools=None)
+
+    # The guard lives inside _write_child_tool_output, so make the real disk
+    # write fail rather than replacing the whole helper.
+    monkeypatch.setattr(
+        Path, "write_text",
+        lambda self, *a, **kw: (_ for _ in ()).throw(OSError("disk full")),
+    )
+    with patch("agentica.agent.Agent", _ToolOutputAgent), patch(
+        "agentica.agent.config.ToolConfig", FakeToolConfig
+    ):
+        result = asyncio.run(
+            registry.spawn(parent_agent=parent, task="inspect", agent_type="worker")
+        )
+
+    assert result["status"] == "completed"
+    assert result["content"] == "summary"
+    assert "output_path" not in result["tool_calls_summary"][0]
+
+
+def test_spilled_child_output_reuses_the_full_copy_path(tmp_path):
+    """A preview of a preview makes the parent hop twice; point at the full file."""
+    from agentica.compression.tool_result_storage import maybe_persist_result
+
+    full = tmp_path / "full.txt"
+    full.write_text("X" * 25000, encoding="utf-8")
+    preview = (
+        f"<persisted-output>\nFull output saved to:\n{full}\n\n"
+        "Use read_file for the rest.\n</persisted-output>"
+    )
+    path = SubagentRegistry._write_child_tool_output(
+        run_id="run-1", child_session_id="s.subagent.run-1",
+        tool_call_id="call-1", tool_name="execute", content=preview,
+        cwd=str(tmp_path), user_id="u1",
+    )
+    assert path == str(full)
+    # No second copy was written next to the preview.
+    assert not (tmp_path / "s.subagent.run-1").exists()
+
+
+def test_truncated_child_output_gets_no_locator(tmp_path):
+    path = SubagentRegistry._write_child_tool_output(
+        run_id="run-1", child_session_id="s.subagent.run-1",
+        tool_call_id="call-1", tool_name="execute",
+        content="<truncated-output>no full copy exists</truncated-output>",
+        cwd=str(tmp_path), user_id="u1",
+    )
+    assert path == ""
+
+
+def test_incomplete_spill_gets_no_misleading_locator(tmp_path):
+    """A killed-at-cap copy is not the full output; never point at it."""
+    partial = tmp_path / "partial.txt"
+    partial.write_text("first bytes only", encoding="utf-8")
+    preview = (
+        f"<persisted-output>\nINCOMPLETE copy saved to:\n{partial}\n\n"
+        "The command was killed at the capture cap.\n</persisted-output>"
+    )
+    path = SubagentRegistry._write_child_tool_output(
+        run_id="run-1", child_session_id="s.subagent.run-1",
+        tool_call_id="call-1", tool_name="execute", content=preview,
+        cwd=str(tmp_path), user_id="u1",
+    )
+    assert path == ""
+    assert not (tmp_path / "s.subagent.run-1").exists()
+
+
+def test_child_session_id_cannot_escape_the_project_dir():
+    from agentica.compression.tool_result_storage import get_project_dir, get_tool_result_path
+
+    child_id = SubagentRegistry._child_session_id("../../evil", "run-1")
+    assert "/" not in child_id and "\\" not in child_id and ".." not in child_id
+    path = get_tool_result_path("f", cwd="/tmp/x", session_id=child_id, user_id="u")
+    project_dir = get_project_dir("/tmp/x", user_id="u")
+    # The generated path must stay inside this user's project directory.
+    assert Path(path).resolve().is_relative_to(Path(project_dir).resolve())
+    assert "tool-results" in path
+
+
+def test_cleanup_purges_only_this_runs_artifacts(tmp_path):
+    registry = SubagentRegistry()
+    subagents = tmp_path / "subagents"
+    subagents.mkdir()
+    transcript = subagents / "parent.subagent.run-1.jsonl"
+    transcript.write_text("[]", encoding="utf-8")
+    meta = subagents / "parent.subagent.run-1.meta.json"
+    meta.write_text("{}", encoding="utf-8")
+    tool_dir = tmp_path / "parent.subagent.run-1" / "tool-results"
+    tool_dir.mkdir(parents=True)
+    (tool_dir / "out.txt").write_text("evidence", encoding="utf-8")
+    keep = subagents / "unrelated.jsonl"
+    keep.write_text("[]", encoding="utf-8")
+
+    registry._runs["run-1"] = _run_record(
+        "run-1", "u1", ended_at=datetime.now() - timedelta(hours=48),
+        child_session_id="parent.subagent.run-1", transcript_path=str(transcript),
+    )
+    removed = registry.cleanup_completed(max_age_seconds=3600, purge_files=True)
+    assert removed == 1
+    assert not transcript.exists() and not meta.exists() and not tool_dir.exists()
+    assert keep.exists()
+
+
+def test_cleanup_ignores_hand_made_paths(tmp_path):
+    """A foreign path must never be deleted just because a run named it."""
+    registry = SubagentRegistry()
+    foreign = tmp_path / "precious.jsonl"
+    foreign.write_text("keep me", encoding="utf-8")
+    registry._runs["run-2"] = _run_record(
+        "run-2", "u1", ended_at=datetime.now() - timedelta(hours=48),
+        child_session_id="parent.subagent.run-2", transcript_path=str(foreign),
+    )
+    registry.cleanup_completed(max_age_seconds=3600, purge_files=True)
+    assert foreign.exists()
+
+
+def test_get_task_result_bounds_a_large_answer(tmp_path, monkeypatch):
+    from agentica.tools.builtin_task_tool import BuiltinTaskTool
+
+    monkeypatch.setenv("AGENTICA_PROJECTS_DIR", str(tmp_path / "projects"))
+    registry = SubagentRegistry()
+    registry._runs["run-big"] = _run_record(
+        "run-big", "u1", result="A" * 60000,
+    )
+    tool = BuiltinTaskTool()
+    tool._parent_agent = SimpleNamespace(
+        user_id="u1", session_id="s", work_dir=str(tmp_path),
+        model=SimpleNamespace(functions={"read_file": None}), tools=[],
+    )
+    payload = json.loads(asyncio.run(tool.get_task_result("run-big")))
+    assert "<persisted-output>" in payload["result"]
+    assert len(payload["result"]) < 60000
+
+
+def test_recoverable_is_false_without_a_read_tool(tmp_path, monkeypatch):
+    from agentica.tools.builtin_task_tool import BuiltinTaskTool
+
+    monkeypatch.setenv("AGENTICA_PROJECTS_DIR", str(tmp_path / "projects"))
+    tool = BuiltinTaskTool()
+    tool._parent_agent = SimpleNamespace(
+        user_id="u1", session_id="s", work_dir=str(tmp_path),
+        model=SimpleNamespace(functions={"task": None}),
+        tools=[Function(name="task", entrypoint=lambda: None)],
+    )
+    assert tool._can_recover_spill() is False
 
 
 # ---------------------------------------------------------------------------
