@@ -14,6 +14,7 @@ from uuid import uuid4
 from agentica.utils.log import logger
 from agentica.model.message import Message
 from agentica.session.log import iso_timestamp
+from agentica.session.rows import STEER_GUIDANCE_PREFIX
 
 if TYPE_CHECKING:
     from agentica.agent import Agent
@@ -57,7 +58,7 @@ class SteerMixin:
                 parts.append(item.text)
             elif item.text:
                 parts.append(
-                    f"[User guidance received while you were working]\n{item.text}"
+                    f"{STEER_GUIDANCE_PREFIX}\n{item.text}"
                 )
             elif item.images:
                 parts.append("[User attached image(s) while you were working]")

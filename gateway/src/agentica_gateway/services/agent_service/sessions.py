@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from agentica.config.prefs import normalize_cli_prefs
 from agentica.session.log import SessionLog, is_session_unread, iso_timestamp
+from agentica.session.rows import strip_image_markers
 from agentica.run.context import RunSource
 from agentica.tools.background_processes import (
     BackgroundProcess,
@@ -44,7 +45,6 @@ from agentica.tools.background_processes import (
 from agentica.utils.log import logger
 
 from ...config import settings
-from .. import chat_images
 from .types import (
     CRON_SESSION_PREFIX,
     IM_SESSION_SOURCES,
@@ -176,7 +176,7 @@ class AgentSessionsMixin:
             ):
                 continue
             preview = self._session_preview(entry)
-            first_user = chat_images.strip_markers(preview.get("first_user", "") or "")
+            first_user = strip_image_markers(preview.get("first_user", "") or "")
             cron_title = str(preview.get("cron_job_name") or "").strip()
             display_title = SessionLog.display_title(
                 name=entry.get("name"),
@@ -220,7 +220,7 @@ class AgentSessionsMixin:
             )
             live_title = SessionLog.display_title(
                 name=live_log.get_name(),
-                first_user=chat_images.strip_markers(turn.user_message or ""),
+                first_user=strip_image_markers(turn.user_message or ""),
                 cron_job_name=((turn.cron_job or {}).get("name") or ""),
             )
             out.append({
@@ -594,7 +594,7 @@ class AgentSessionsMixin:
         branch.set_source(RunSource.gateway.value)
         title = SessionLog.display_title(
             name=log.get_name(),
-            first_user=chat_images.strip_markers(log.first_user_message() or ""),
+            first_user=strip_image_markers(log.first_user_message() or ""),
         )
         SessionLog.rename_session(new_id, f"{title} (fork)", base_dir=str(log.base_dir))
         if log._cwd:
@@ -639,7 +639,7 @@ class AgentSessionsMixin:
 
     async def _write_title(self, log: SessionLog, question: str, answer: str, owner: str) -> None:
         prompt = (
-            f"User:\n{chat_images.strip_markers(question)[:2000]}\n\n"
+            f"User:\n{strip_image_markers(question)[:2000]}\n\n"
             f"Assistant:\n{answer[:2000]}"
         )
         try:

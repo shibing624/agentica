@@ -337,6 +337,14 @@ class TestRoundView:
             _e("2026-01-01T00:00:07.300Z", type="assistant", content="670 files."),
         ]
 
+    def test_round_names_the_reply_bubble_it_belongs_to(self):
+        entries = self._turn()
+        for i, e in enumerate(entries):
+            e["uuid"] = f"u{i}"
+        rd = analyze_entries(entries)["rounds"][0]
+        # The chat bubble ends at the last assistant row and carries its uuid.
+        assert rd["replyUuid"] == entries[-1]["uuid"] == f"u{len(entries) - 1}"
+
     def test_the_question_leads_the_round_it_caused(self):
         out = analyze_entries(self._turn())
         assert len(out["rounds"]) == 1
@@ -1072,3 +1080,17 @@ def test_analyze_marks_in_flight_round_until_terminal_row():
     settled = analyze_entries(done)
     assert not settled["rounds"][1].get("inFlight")
     assert last_completed_round(done)["title"] == "q2"
+
+
+def test_search_numbers_turns_the_way_the_page_does():
+    """A bare window preamble is chrome: neither counts it as a turn."""
+    entries = [
+        {"type": "user", "content": "first question"},
+        {"type": "assistant", "content": "ok"},
+        {"type": "user", "content": "<context_window>\nCurrent context window 2.\n</context_window>"},
+        {"type": "user", "content": "needle here"},
+    ]
+    from agentica.session.trace import with_row_views
+    page_turn = with_row_views(entries)[3]["row"]["turn"]
+    hits = search_conversation(entries, "needle")
+    assert [h["turn"] for h in hits] == [page_turn] == [2]

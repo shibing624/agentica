@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from agentica.config.profiles import get_profiles
+from agentica.session.rows import image_marker
 from agentica.session.trace import last_completed_round, search_conversation
 from agentica.tools.background_processes import read_activity_stamp_us
 
@@ -211,7 +212,7 @@ def _message_and_media(body: "ChatRequest | SteerRequest") -> tuple[str, Optiona
         return body.message, None
     media = _images_to_media(body.images)
     names = [chat_images.save(m.data, m.mime) for m in media]
-    return body.message + chat_images.marker(names), media or None
+    return body.message + image_marker(names), media or None
 
 
 @router.get("/api/chat-images/{name}")

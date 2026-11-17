@@ -27,12 +27,24 @@ Two kinds of marker are read here, and nowhere else:
 """
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from agentica.compression.token_budget import WINDOW_CONTINUATION_MARK
 
 RELAYED_MARKER = "__RELAYED__"
 STEER_GUIDANCE_PREFIX = "[User guidance received while you were working]"
+
+# A picture sent with a turn is stored by content hash and named in the row as
+# ``\n\n[图片: <sha256>.<ext>]``; a media model's description may follow. The
+# gateway writes it (``image_marker``) and everything else reads it here.
+IMAGE_MARK_PREFIX = "[图片: "
+_IMAGE_MARK = re.compile(r"(?:^|\n\n)\[图片: ([0-9a-f]{64}\.(?:png|jpg|gif|webp))\]")
+_IMAGE_CUT = re.compile(r"(?:^|\n\n)\[图片: [0-9a-f]")
+# A steer that arrived while a tool ran is folded into that tool's result.
+_FOLDED_STEER = re.compile(
+    r"(?:^|\n\n)\[User guidance received while you were working\]\n([\s\S]*?)"
+    r"(?=\n\n\[User guidance received while you were working\]\n|$)"
+)
 
 _WINDOW_OPEN = "<context_window>"
 _WINDOW_CLOSE = "</context_window>"
@@ -173,6 +185,49 @@ def strip_window_preamble(content: str) -> str:
     return content if pre is None else pre.rest
 
 
+def image_marker(names: Iterable[str]) -> str:
+    """The text appended to a turn for the pictures stored under ``names``."""
+    return "".join(f"\n\n{IMAGE_MARK_PREFIX}{n}]" for n in names)
+
+
+def split_image_markers(text: str) -> Tuple[str, List[str]]:
+    """``(what the person typed, stored image names)``.
+
+    Everything from the first marker on is machine-added (the markers and any
+    media description), so the prose is cut there.
+    """
+    text = text or ""
+    names = _IMAGE_MARK.findall(text)
+    cut = _IMAGE_CUT.search(text)
+    return (text[:cut.start()] if cut else text), names
+
+
+def strip_image_markers(text: str) -> str:
+    return split_image_markers(text)[0]
+
+
+def tool_error_of(entry: Mapping[str, Any]) -> bool:
+    """Did this tool row fail? The writer stores ``is_error``; rows replayed
+    through ``append_post_compact_messages`` carry the message field
+    ``tool_call_error``. Either one set means the call failed."""
+    return bool(entry.get("is_error") or entry.get("tool_call_error"))
+
+
+def split_folded_steers(result: str) -> Tuple[str, List[str]]:
+    """``(tool output, steers folded behind it)`` for a tool result row."""
+    cut = -1
+    steers: List[str] = []
+    for m in _FOLDED_STEER.finditer(result):
+        if cut < 0:
+            cut = m.start()
+        text = m.group(1).strip()
+        if text:
+            steers.append(text)
+    if cut < 0:
+        return result, []
+    return result[:cut].rstrip(), steers
+
+
 def is_steer_text(content: str) -> bool:
     """Is this prose a steer by what the runtime folded into it?
 
@@ -210,18 +265,32 @@ def starts_turn(entry: Mapping[str, Any]) -> bool:
 
 
 def row_payload(entry: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
-    """The wire form of ``classify_user`` for a user row, ``None`` for any other.
+    """The wire form of a user or tool row, ``None`` for any other.
 
-    The gateway attaches this to each user row it serves; the Web client reads
-    it instead of parsing ``content`` itself.
+    The gateway attaches this to each row it serves; the Web client reads it
+    instead of parsing ``content`` itself.
+
+    * user: ``automated`` / ``steer`` / ``window`` from ``classify_user``;
+      ``text`` is the prose with image markers cut off, ``images`` the stored
+      picture names.
+    * tool: ``error`` from ``tool_error_of``; ``text`` the tool output with
+      any folded steers cut off, ``steers`` those steers in order.
     """
-    if entry.get("type") != "user":
+    kind = entry.get("type")
+    if kind in ("tool", "tool_audit"):
+        content = entry.get("content")
+        content = content if isinstance(content, str) else ("" if content is None else str(content))
+        text, steers = split_folded_steers(content)
+        return {"error": tool_error_of(entry), "text": text, "steers": steers}
+    if kind != "user":
         return None
     view = classify_user(entry)
+    text, images = (view.text, []) if view.automated else split_image_markers(view.text)
     return {
         "automated": view.automated,
         "steer": view.steer,
-        "text": view.text,
+        "text": text,
+        "images": images,
         "window": None if view.window is None else {
             "notes": view.window.notes,
             "notes_path": view.window.notes_path,

@@ -24,7 +24,6 @@ import glob
 import hashlib
 import json
 import os
-import re
 import shutil
 import threading
 import time
@@ -38,7 +37,7 @@ from agentica.compression.token_budget import (
     CONTEXT_WINDOW_OPEN,
     WINDOW_CONTINUATION_MARK,
 )
-from agentica.session.rows import classify_user
+from agentica.session.rows import STEER_GUIDANCE_PREFIX, classify_user, strip_image_markers, tool_error_of
 from agentica.utils.log import logger
 from agentica.utils.skill_invocation import invocation_label
 from agentica.utils.tokens import count_text_tokens
@@ -138,15 +137,6 @@ def iso_timestamp(epoch: Optional[float] = None) -> str:
         else datetime.now(timezone.utc)
     )
     return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
-
-
-_CHAT_IMAGE_MARK_RE = re.compile(r"(?:^|\n\n)\[图片: [0-9a-f]")
-
-
-def strip_chat_image_markers(text: str) -> str:
-    """Drop the gateway's machine-added image markers and captions."""
-    match = _CHAT_IMAGE_MARK_RE.search(text or "")
-    return text[:match.start()] if match else text
 
 
 def _parse_iso_timestamp(value: Any) -> Optional[float]:
@@ -1383,10 +1373,10 @@ class SessionLog:
                     continue
                 if entry.get("automated"):
                     marker = raw_text
-                elif raw_text.startswith("[User guidance received while you were working]\n"):
+                elif raw_text.startswith(f"{STEER_GUIDANCE_PREFIX}\n"):
                     marker = raw_text
                 else:
-                    marker = f"[User guidance received while you were working]\n{raw_text}"
+                    marker = f"{STEER_GUIDANCE_PREFIX}\n{raw_text}"
                 if messages and messages[-1].get("role") == "tool":
                     existing = str(messages[-1].get("content") or "").rstrip()
                     messages[-1]["content"] = f"{existing}\n\n{marker}" if existing else marker
@@ -1409,9 +1399,7 @@ class SessionLog:
                     if key in entry and entry[key] is not None:
                         msg[key] = entry[key]
                 if entry_type == "tool":
-                    msg["tool_call_error"] = bool(
-                        entry.get("is_error", entry.get("tool_call_error", False))
-                    )
+                    msg["tool_call_error"] = tool_error_of(entry)
                 messages.append(msg)
             elif entry_type == "provider_checkpoint" and messages:
                 checkpoint = entry.get("checkpoint")
@@ -1649,7 +1637,7 @@ class SessionLog:
                     stats["tool_calls"] += 1
                 else:
                     stats["tool_audit_entries"] += 1
-                if entry.get("is_error", entry.get("tool_call_error", False)):
+                if tool_error_of(entry):
                     stats["tool_errors"] += 1
                 name = entry.get("tool_name") or "unknown"
                 tools_by_name[name] = tools_by_name.get(name, 0) + 1
@@ -1910,7 +1898,7 @@ class SessionLog:
             "first_user": first_user,
             "display_title": cls.display_title(
                 name=cls._read_meta_name(Path(path).with_suffix(".meta.json")),
-                first_user=strip_chat_image_markers(first_user),
+                first_user=strip_image_markers(first_user),
                 cron_job_name=cron_job_name,
                 fallback="Chat",
             ),
@@ -1951,7 +1939,7 @@ class SessionLog:
         name = (name or "").strip()
         if name:
             return name[:60]
-        first = strip_chat_image_markers(first_user or "").strip()
+        first = strip_image_markers(first_user or "").strip()
         if first:
             return " ".join(first.split())[:max_chars]
         cron = (cron_job_name or "").strip()
