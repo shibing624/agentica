@@ -106,7 +106,7 @@ class TestModelToolOrigin(unittest.TestCase):
 
 class TestSessionLogPersistsOrigin(unittest.TestCase):
     def test_session_log_append_stores_origin_meta(self):
-        from agentica.memory.session_log import SessionLog
+        from agentica.session.log import SessionLog
         import json
 
         with tempfile.TemporaryDirectory() as td:

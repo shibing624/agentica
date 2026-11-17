@@ -10,7 +10,7 @@ import tempfile
 from agentica.agent import Agent
 from agentica.agent.base import SteerItem
 from agentica.cli.commands.session import _qa_blocks_for_display, hydrate_resumed_session
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 from agentica.model.message import Message
 from agentica.model.openai import OpenAIChat
 from agentica.model.response import ModelResponse
@@ -150,7 +150,7 @@ def test_parked_automated_steer_keeps_its_provenance():
 
 def test_mid_run_steer_persists_to_session_log_and_roundtrips_cleanly(tmp_path):
     import json
-    from agentica.memory.session_log import SessionLog, assert_trajectory_equivalent
+    from agentica.session.log import SessionLog, assert_trajectory_equivalent
 
     slog = SessionLog("s_steer_test", base_dir=str(tmp_path))
     slog.begin_turn()

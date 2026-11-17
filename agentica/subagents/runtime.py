@@ -40,7 +40,9 @@ from agentica.subagents.handoff import default_handoff_mapper
 from agentica.run.response import AgentCancelledError
 from agentica.compression.tool_result_storage import (
     get_tool_result_path,
+    is_shrunk,
     safe_user_segment,
+    spilled_full_copy,
 )
 from agentica.security.redact import redact_sensitive_text
 from agentica.tools.base import Function, ModelTool, Tool
@@ -389,23 +391,13 @@ class SubagentRegistry:
         filename must not turn an otherwise successful subagent run into an
         error (the previous version let the exception escape ``run_stream``).
         """
-        # The child model may already have spilled this result. In that case
-        # the text here is only a preview that points at the full copy made by
-        # the child, so reuse that path instead of persisting a preview of a
-        # preview and making the parent hop through two locators.
-        if "<persisted-output>" in content:
-            match = re.search(r"Full output saved to:\s*\n([^\n]+)", content)
-            if match:
-                existing = match.group(1).strip()
-                if existing and Path(existing).is_file():
-                    return existing
-            # An INCOMPLETE copy (killed at the capture cap) or an unparseable
-            # preview has no reliable full text. Do not hand the parent a
-            # locator for it: the summary still carries the short info line.
-            return ""
-        if "<truncated-output>" in content:
-            # No full copy exists; a nested preview would claim otherwise.
-            return ""
+        # The child model may already have shrunk this result. A complete spill
+        # is reused as-is instead of persisting a preview of a preview; a
+        # truncation or an INCOMPLETE copy has no reliable full text, so the
+        # parent gets no locator (the summary keeps the short info line).
+        if is_shrunk(content):
+            full = spilled_full_copy(content)
+            return full if full and Path(full).is_file() else ""
         file_id = f"{run_id}-{tool_call_id or tool_name}"
         try:
             path = Path(get_tool_result_path(file_id, cwd=cwd, session_id=child_session_id, user_id=user_id))
@@ -913,7 +905,7 @@ class SubagentRegistry:
         if resume_from_run_id:
             # Same tenant boundary as get_task_result: a resume stitches the
             # previous run's answer and tool outputs into this agent's prompt.
-            prev = self.get_for_owner(resume_from_run_id, getattr(parent_agent, "user_id", None))
+            prev = self.get_for_owner(resume_from_run_id, parent_agent.user_id)
             if prev is None:
                 return {
                     "status": "error",
@@ -980,7 +972,7 @@ class SubagentRegistry:
             started_at=datetime.now(),
             status="running",
             child_session_id=self._child_session_id(parent_agent.session_id, run_id),
-            owner_user_id=getattr(parent_agent, "user_id", None),
+            owner_user_id=parent_agent.user_id,
         )
         self.register(run)
 

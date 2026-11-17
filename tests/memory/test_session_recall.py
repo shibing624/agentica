@@ -15,8 +15,8 @@ from agentica.agent import Agent
 from agentica.agent.config import WorkspaceMemoryConfig
 from agentica.agent.hooks import IntentTrackHooks
 from agentica.memory.intents import parse_update, process_pending_intents
-from agentica.memory.session_index import SessionIndex, index_terms
-from agentica.memory.session_log import SessionLog
+from agentica.session.index import SessionIndex, index_terms
+from agentica.session.log import SessionLog
 from agentica.memory.recall import RecallBreaker, build_recall
 from agentica.memory.session_recall import (
     RECALL_MAX_CHARS,

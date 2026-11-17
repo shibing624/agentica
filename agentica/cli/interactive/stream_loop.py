@@ -15,7 +15,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Optional
 
-from agentica.cli.context_usage import measure_context
+from agentica.compression.context_usage import measure_context
 from agentica.cli.rewind import extract_rewrite_paths, get_turn_checkpointer
 from agentica.cli.display import (
     StreamDisplayManager,
@@ -24,7 +24,7 @@ from agentica.cli.display import (
     resumable_session_id,
 )
 from agentica.cli.runtime import get_console
-from agentica.cli.usage_display import ProviderUsageSummary
+from agentica.model.usage_summary import ProviderUsageSummary
 from agentica.run.display import RunDisplayEventKind, classify_run_response
 from agentica.run.response import AgentCancelledError
 from agentica.utils.async_utils import run_sync

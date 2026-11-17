@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from agentica.config.profiles import get_active_profile_name, get_profiles
-from agentica.memory.session_log import SessionLog, local_turn_stamp
+from agentica.session.catalog import Catalog, LiveState, is_system_temp_path, list_catalog
+from agentica.session.log import SessionLog, local_turn_stamp
 from agentica.live import PeerInfo, list_live_peers
 from agentica.tools.background_processes import (
     count_running_session_jobs,
@@ -77,7 +78,7 @@ class ImMenusMixin:
                 return ""
             return self._render_bound_banner(state, prefix="🆕 已新建并绑定会话")
         if cmd.kind == "session":
-            return self._open_session_picker(state, page=0)
+            return self._open_session_picker(state, page=0, scope="all" if cmd.arg.strip().lower() == "all" else "recent")
         if cmd.kind == "model":
             if cmd.arg:
                 return await self._apply_model_choice(state, cmd.arg)
@@ -90,6 +91,29 @@ class ImMenusMixin:
         uid = self._user_id()
         log = SessionLog(session_id=session_id, work_dir=work_dir, user_id=uid)
         return SessionLog.display_title(path=str(log.path), fallback=f"会话 {session_id[:8]}")
+
+    def _catalog(self, work_dir: str = "", scope: str = "recent") -> Catalog:
+        """This IM user's sessions, one project when ``work_dir`` is given.
+
+        Same list and same default view as the Web sidebar
+        (``agentica.session.catalog``); CLI sessions are included because a
+        phone also drives terminal sessions. An attached terminal counts as
+        live work, so its session is always offered.
+        """
+        uid = self._user_id()
+        live = self._agent_service.live_state(uid) if self._agent_service is not None else LiveState()
+        peers = {peer.session_id for peer in list_live_peers() if peer.session_id}
+        return list_catalog(
+            user_id=uid,
+            work_dir=work_dir or None,
+            scope=scope,
+            include_cli=True,
+            live=LiveState(
+                running=set(live.running) | peers,
+                registries=live.registries,
+                approval_modes=live.approval_modes,
+            ),
+        )
 
     def _is_busy(self, session_id: str) -> bool:
         peer = self.find_live_cli_peer(session_id)
@@ -239,10 +263,7 @@ class ImMenusMixin:
         base_real = os.path.realpath(os.path.expanduser(base_raw)) if base_raw else ""
 
         live_by_dir: Dict[str, PeerInfo] = {}
-        live_ids: set = set()
         for peer in list_live_peers():
-            if peer.session_id:
-                live_ids.add(peer.session_id)
             if peer.cwd:
                 p_real = os.path.realpath(os.path.expanduser(peer.cwd))
                 if Path(p_real).is_dir() and p_real not in live_by_dir:
@@ -259,6 +280,7 @@ class ImMenusMixin:
                     "work_dir": real,
                     "mtime": 0.0,
                     "session_count": 0,
+                    "hidden_count": 0,
                     "latest_sid": "",
                     "latest_name": "",
                 }
@@ -270,35 +292,30 @@ class ImMenusMixin:
             _ensure(p_real)
         _ensure(base_real)
 
-        for proj in SessionLog.list_projects(user_id=uid):
-            wd = proj.get("work_dir") or ""
-            if not wd:
-                continue
-            real = os.path.realpath(os.path.expanduser(wd))
-            if not Path(real).is_dir():
-                continue
-            counted = []
-            for entry in SessionLog.list_sessions(base_dir=proj.get("base_dir"), work_dir=real, user_id=uid):
-                sid = str(entry.get("session_id") or "")
-                if not sid or sid.startswith("scheduled_"):
-                    continue
-                if int(entry.get("size_bytes") or 0) <= 0 and sid not in live_ids:
-                    continue
-                counted.append(entry)
-            pinned = real == cur_real or real == base_real or real in live_by_dir
-            if not pinned and _pkg().is_system_temp_path(real):
+        catalog = self._catalog(scope="recent")
+        by_project: Dict[str, List[Dict[str, Any]]] = {}
+        for row in catalog.active:
+            if row.get("work_dir"):
+                by_project.setdefault(os.path.realpath(os.path.expanduser(row["work_dir"])), []).append(row)
+        folded: Dict[str, List[float]] = {}
+        for entry in catalog.folded:
+            if entry.get("work_dir"):
+                folded.setdefault(os.path.realpath(os.path.expanduser(entry["work_dir"])), []).append(entry["mtime"])
+        for real in set(by_project) | set(folded):
+            keep = real == cur_real or real == base_real or real in live_by_dir
+            if not keep and is_system_temp_path(real):
                 continue
             item = _ensure(real)
             if item is None:
                 continue
-            for entry in counted:
-                sid = str(entry.get("session_id") or "")
-                item["session_count"] += 1
-                mtime = float(entry.get("mtime") or 0.0)
-                if mtime >= item["mtime"]:
-                    item["mtime"] = mtime
-                    item["latest_sid"] = sid
-                    item["latest_name"] = str(entry.get("name") or "")
+            rows = by_project.get(real, [])
+            item["session_count"] = len(rows)
+            item["hidden_count"] = len(folded.get(real, []))
+            item["mtime"] = max([r["mtime"] for r in rows] + folded.get(real, []))
+            if rows:
+                latest = max(rows, key=lambda r: r["mtime"])
+                item["latest_sid"] = latest["session_id"]
+                item["latest_name"] = latest["name"]
 
         items = list(by_dir.values())
         items.sort(
@@ -339,13 +356,15 @@ class ImMenusMixin:
             peer: Optional[PeerInfo] = item.get("live_peer")
             live_tag = f" 🟢终端:{peer.name}" if peer else ""
             count = int(item.get("session_count") or 0)
+            hidden = int(item.get("hidden_count") or 0)
             latest_sid = str(item.get("latest_sid") or "")
+            tally = f"（{count} 个近期会话）" if count > 1 else ""
             if peer and peer.session_id:
-                recent = peer.task or self._session_title(path, peer.session_id)
-                meta = f" · 最近：{recent[:28]}" + (f"（共 {count} 个会话）" if count > 1 else "")
+                meta = f" · 最近：{(peer.task or self._session_title(path, peer.session_id))[:28]}{tally}"
             elif latest_sid:
-                recent = item.get("latest_name") or self._session_title(path, latest_sid)
-                meta = f" · 最近：{recent[:28]}" + (f"（共 {count} 个会话）" if count > 1 else "")
+                meta = f" · 最近：{str(item.get('latest_name') or '')[:28]}{tally}"
+            elif hidden:
+                meta = f" · {hidden} 个较早会话"
             else:
                 meta = ""
             # One line per choice. WeChat renders Markdown: an indented second
@@ -366,12 +385,12 @@ class ImMenusMixin:
 
     def _enter_workspace(self, state: ImChatState, work_dir: str) -> str:
         real_dir = os.path.realpath(os.path.expanduser(work_dir))
-        sessions = self._collect_session_items(real_dir)
+        sessions, hidden = self._collect_session_items(real_dir)
         if not sessions:
-            sid = str(uuid.uuid4())
-            self._bind_session(state, real_dir, sid)
-            return self._render_bound_banner(state, prefix="✅ 已切换项目")
-        if len(sessions) == 1:
+            self._bind_session(state, real_dir, str(uuid.uuid4()))
+            banner = self._render_bound_banner(state, prefix="✅ 已切换项目")
+            return banner + (f"\n另有 {hidden} 个较早/归档会话，发送 /session all 查看。" if hidden else "")
+        if len(sessions) == 1 and not hidden:
             self._bind_session(state, real_dir, sessions[0]["session_id"])
             return self._render_bound_banner(state, prefix="✅ 已切换项目")
         self._bind_session(state, real_dir, sessions[0]["session_id"])
@@ -379,50 +398,34 @@ class ImMenusMixin:
             state,
             page=0,
             include_new=True,
-            heading=f"✅ 已切换到项目 [{_short_dir(real_dir)}]，共有 {len(sessions)} 个会话，请选择要挂载的一个",
+            heading=f"✅ 已切换到项目 [{_short_dir(real_dir)}]，选择要挂载的会话",
         )
 
-    def _collect_session_items(self, work_dir: str) -> List[Dict[str, Any]]:
-        uid = self._user_id()
+    def _collect_session_items(self, work_dir: str, scope: str = "recent") -> Tuple[List[Dict[str, Any]], int]:
+        """``(picker items, sessions the default view leaves out)`` for one project.
+
+        ``scope="recent"``: the catalog's default view (no archived, nothing
+        older than its window unless live or pinned). ``scope="all"``: every
+        listed session, archived included.
+        """
         real_dir = os.path.realpath(os.path.expanduser(work_dir)) if work_dir else ""
-        live_map: Dict[str, PeerInfo] = {}
+        catalog = self._catalog(real_dir, scope=scope)
+        rows = catalog.rows if scope == "all" else catalog.active
+        peers = {peer.session_id: peer for peer in list_live_peers() if peer.session_id}
         items: List[Dict[str, Any]] = []
-        seen_ids = set()
-
-        for peer in list_live_peers():
-            if peer.session_id:
-                live_map[peer.session_id] = peer
-                if peer.cwd and os.path.realpath(os.path.expanduser(peer.cwd)) == real_dir:
-                    seen_ids.add(peer.session_id)
-                    items.append({
-                        "session_id": peer.session_id,
-                        "work_dir": real_dir,
-                        "title": peer.task or self._session_title(real_dir, peer.session_id),
-                        "stamp": "终端在线",
-                        "source": "cli",
-                        "live_peer": peer,
-                    })
-
-        for entry in SessionLog.list_sessions(work_dir=real_dir, user_id=uid):
-            sid = str(entry.get("session_id") or "")
-            if not sid or sid.startswith("scheduled_") or sid in seen_ids:
-                continue
-            if int(entry.get("size_bytes") or 0) <= 0 and sid not in live_map:
-                continue
-            seen_ids.add(sid)
-            peer = live_map.get(sid)
-            title = entry.get("name") or self._session_title(real_dir, sid)
-            stamp = local_turn_stamp(entry.get("last_timestamp") or entry.get("mtime"))
-            src = str(entry.get("source") or ("cli" if entry.get("cli") else ""))
+        for row in sorted(rows, key=lambda r: (r["session_id"] in peers, r["pinned"], r["mtime"]), reverse=True):
+            sid = row["session_id"]
+            peer = peers.get(sid)
             items.append({
                 "session_id": sid,
                 "work_dir": real_dir,
-                "title": title,
-                "stamp": stamp,
-                "source": src,
+                "title": (peer.task if peer is not None and peer.task else row["name"]),
+                "stamp": "已归档" if row["archived"] else local_turn_stamp(row["last_timestamp"] or row["mtime"]),
+                "source": row["source"],
                 "live_peer": peer,
+                "background_jobs": row["background_jobs"],
             })
-        return items
+        return items, (0 if scope == "all" else catalog.hidden)
 
     def _open_session_picker(
         self,
@@ -431,10 +434,13 @@ class ImMenusMixin:
         *,
         include_new: bool = False,
         heading: str = "",
+        scope: str = "recent",
     ) -> str:
-        all_items = self._collect_session_items(state.work_dir)
+        all_items, hidden = self._collect_session_items(state.work_dir, scope=scope)
+        more_note = f"另有 {hidden} 个较早/归档会话，发送 /session all 查看。" if hidden else ""
         if not all_items:
-            return f"当前项目 [{_short_dir(state.work_dir)}] 暂无历史会话。发送 /new 可新建会话。"
+            empty = f"当前项目 [{_short_dir(state.work_dir)}] 暂无近期会话。发送 /new 可新建会话。"
+            return empty + (f"\n{more_note}" if more_note else "")
         if include_new:
             all_items = all_items + [{"new_session": True, "work_dir": state.work_dir}]
         start = page * SESSION_PAGE_SIZE
@@ -455,7 +461,7 @@ class ImMenusMixin:
             src_label = _SOURCE_LABELS.get(str(item.get("source") or ""))
             src_tag = f" [{src_label}]" if src_label else ""
             peer: Optional[PeerInfo] = item.get("live_peer")
-            bg_n = self._running_bg_count(sid, str(item.get("work_dir") or state.work_dir))
+            bg_n = int(item.get("background_jobs") or 0)
             if peer is not None:
                 badge = "⏳终端运行中" if peer.busy else f"🟢终端:{peer.name}"
                 if bg_n:
@@ -470,12 +476,15 @@ class ImMenusMixin:
             lines.append(f"  {idx}. {item['title']}{src_tag}{cur}{badge_str} [{sid[:6]}]")
         if has_more:
             lines.append("  0. 下一页")
+        if more_note:
+            lines.append(more_note)
         state.set_pending(
             PendingAction(
                 kind="session_with_new" if include_new else "session",
                 options=page_items,
                 page=page,
                 has_more=has_more,
+                scope=scope,
             )
         )
         return "\n".join(lines)
@@ -529,6 +538,7 @@ class ImMenusMixin:
                     state,
                     page=pending.page + 1,
                     include_new=(pending.kind == "session_with_new"),
+                    scope=pending.scope,
                 )
             if pending.kind == "bg_detail":
                 state.clear_pending()

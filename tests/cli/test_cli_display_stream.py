@@ -25,7 +25,7 @@ from agentica.cli import (
 from agentica.cli import commands as cli_commands
 from agentica.cli import setup as cli_setup
 from agentica.agent.goals import CONTINUATION_PROMPT_PREFIX
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 
 
 
@@ -522,7 +522,7 @@ class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
         self.assertNotIn("+<", out)
         self.assertNotIn("$0.0000", out)
     def test_finalize_rule_shows_provider_usage_breakdown_when_provided(self):
-        from agentica.cli.usage_display import ProviderUsageSummary
+        from agentica.model.usage_summary import ProviderUsageSummary
 
         def render(mgr):
             mgr.stream_response("ok")

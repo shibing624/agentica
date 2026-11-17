@@ -20,7 +20,7 @@ type Tokens = {
   cacheHitPercent: number | null;
 };
 
-/** One row of the call list (see `_round_calls` in agentica/memory/trace.py).
+/** One row of the call list (see `_round_calls` in agentica/session/trace.py).
  *  The body is not in the page payload; it is fetched per call. */
 type Call = {
   kind: string;

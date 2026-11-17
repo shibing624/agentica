@@ -106,9 +106,11 @@ function snippetAround(text: string, needle: string, before = 24, after = 56): s
   return (start > 0 ? "…" : "") + flat.slice(start, end) + (end < flat.length ? "…" : "");
 }
 
-/** Search user queries and assistant answers inside a hydrated `msgs` list. */
+/** Search the messages still in memory that the gateway search cannot see yet.
+ *  Turn numbers are the server's (``row.turn``); ``olderTurns`` is only the
+ *  starting point for a list that holds none. */
 export function searchMsgsConversation(
-  msgs: Array<{ role: string; content: string; steer?: boolean; automated?: boolean; compact?: unknown; parts?: Array<{ kind: string; text?: string }> }>,
+  msgs: Array<{ role: string; content: string; steer?: boolean; automated?: boolean; turn?: number; compact?: unknown; parts?: Array<{ kind: string; text?: string }> }>,
   olderTurns: number,
   query: string,
   maxHits = 12,
@@ -122,7 +124,9 @@ export function searchMsgsConversation(
     if (m.compact) continue;
     if (m.role === "user") {
       if (m.automated) continue;
-      if (!m.steer) turn += 1;
+      // A logged question carries the server's number; one still in flight
+      // (not read back yet) is the next after the last numbered one.
+      if (!m.steer) turn = m.turn ?? turn + 1;
       const clean = (m.content || "").trim();
       if (!clean) continue;
       const key = `${Math.max(1, turn)}:user`;

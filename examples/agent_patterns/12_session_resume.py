@@ -19,7 +19,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from agentica import Agent
 from agentica.model.openai import OpenAIChat
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 
 
 def demo_basic_session():

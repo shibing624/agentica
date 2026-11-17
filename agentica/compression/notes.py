@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
 from agentica.compression.evict import carries_tool_results, tool_result_blocks
-from agentica.memory.log_rows import strip_window_preamble
+from agentica.session.rows import strip_window_preamble
 from agentica.model.message import Message
 
 

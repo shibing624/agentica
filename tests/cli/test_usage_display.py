@@ -6,7 +6,7 @@ from rich.console import Console
 
 from agentica.cli.commands.context import CommandContext
 from agentica.cli.commands import model_config
-from agentica.cli.usage_display import (
+from agentica.model.usage_summary import (
     ProviderUsageSummary,
     format_cache_hit,
     format_cost_usd,
@@ -322,7 +322,7 @@ def test_turn_usage_summary_omits_leading_zero_for_full_cache_turn():
 
 
 def test_context_breakdown_lists_token_counts_without_percent_or_bar(monkeypatch):
-    from agentica.cli.context_usage import ContextBreakdown
+    from agentica.compression.context_usage import ContextBreakdown
 
     breakdown = ContextBreakdown(
         sections=[("System prompt", 1800), ("Conversation", 5800)],
@@ -356,7 +356,7 @@ def test_context_breakdown_names_the_working_cap_and_the_model_limit(monkeypatch
     512,000"). A breakdown that prints only the provider limit says a capped
     session is at 61% when it is 119% of the budget actually in force.
     """
-    from agentica.cli.context_usage import ContextBreakdown
+    from agentica.compression.context_usage import ContextBreakdown
 
     breakdown = ContextBreakdown(
         sections=[("System prompt", 1800), ("Conversation", 610_008)],
@@ -381,7 +381,7 @@ def test_context_breakdown_names_the_working_cap_and_the_model_limit(monkeypatch
 
 def test_context_breakdown_collapses_to_one_line_without_a_cap(monkeypatch):
     """No cap means one budget; showing it twice would be noise."""
-    from agentica.cli.context_usage import ContextBreakdown
+    from agentica.compression.context_usage import ContextBreakdown
 
     breakdown = ContextBreakdown(
         sections=[("System prompt", 1800)],
@@ -404,7 +404,7 @@ def test_context_breakdown_collapses_to_one_line_without_a_cap(monkeypatch):
 
 
 def _breakdown_with_history(*, turns, messages, window=128_000, provider_window=128_000):
-    from agentica.cli.context_usage import ContextBreakdown
+    from agentica.compression.context_usage import ContextBreakdown
 
     return ContextBreakdown(
         sections=[("Conversation", 1000)],

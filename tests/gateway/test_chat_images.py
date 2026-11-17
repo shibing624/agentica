@@ -25,11 +25,3 @@ def test_save_is_content_addressed_and_resolvable():
 @pytest.mark.parametrize("name", ["../x.png", "a" * 64 + ".svg", "a" * 63 + ".png", "", "a" * 64 + ".png"])
 def test_resolve_rejects_malformed_or_missing_names(name):
     assert chat_images.resolve(name) is None
-
-
-def test_strip_markers_cuts_marker_and_description_only():
-    name = chat_images.save(PNG)
-    text = "看下这个" + chat_images.marker([name]) + "\n\n[图片内容]\n一张猫"
-    assert chat_images.strip_markers(text) == "看下这个"
-    assert chat_images.strip_markers(chat_images.marker([name]).lstrip()) == ""
-    assert chat_images.strip_markers("提到 [图片: x] 的文字") == "提到 [图片: x] 的文字"

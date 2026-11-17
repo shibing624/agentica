@@ -17,12 +17,12 @@ os.environ.setdefault("OPENAI_API_KEY", "test-key-not-real")
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica.cli import prefs as cli_prefs
+from agentica.config import prefs as cli_prefs
 from agentica.cli.commands import model_config as cli_model_config
 from agentica.cli.commands import tools_skills as cli_tools_skills
 from agentica.cli.commands.context import CommandContext
 from agentica.cli.interactive.app import _resume_session_cli_prefs
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 from agentica.config.project import project_base_dir, read_project_file
 
 

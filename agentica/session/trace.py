@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from agentica.model.cost import CostTracker
-from agentica.memory.log_rows import classify_user, row_payload
+from agentica.session.rows import classify_user, row_payload, strip_image_markers, tool_error_of
 from agentica.model.usage import cache_hit_percent
 from agentica.utils.string import format_file_size
 from agentica.utils.tokens import count_text_tokens
@@ -562,11 +562,11 @@ def search_conversation(
             view = classify_user(e)
             if view.automated:
                 continue
-            clean = view.text.strip()
-            if not view.steer:
-                if not clean:
-                    continue
+            clean = strip_image_markers(view.text).strip()
+            if view.starts_turn:
                 turn += 1
+            if not clean:
+                continue
             if needle in " ".join(clean.lower().split()) and (turn, "user") not in seen_turn_role:
                 seen_turn_role.add((turn, "user"))
                 hits.append({
@@ -621,15 +621,26 @@ def _include_shadowed_question(entries: List[Dict[str, Any]], start: int) -> int
     return start - 1
 
 
-def with_row_views(entries: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Copies of ``entries`` whose user rows carry ``row`` (see ``log_rows.row_payload``).
+def with_row_views(entries: Iterable[Dict[str, Any]], turns_before: int = 0) -> List[Dict[str, Any]]:
+    """Copies of ``entries`` whose user and tool rows carry ``row`` (``rows.row_payload``).
+
+    A user row a person's turn starts at also gets ``row["turn"]``: its 1-based
+    number from the start of the log, given ``turns_before`` turns precede
+    ``entries``. Search hits and "jump to turn" use the same number.
 
     The Web client draws from ``row`` and never parses ``content`` itself.
     """
     out: List[Dict[str, Any]] = []
+    turn = turns_before
     for e in entries:
         payload = row_payload(e) if isinstance(e, dict) else None
-        out.append(e if payload is None else {**e, "row": payload})
+        if payload is None:
+            out.append(e)
+            continue
+        if e.get("type") == "user" and classify_user(e).starts_turn:
+            turn += 1
+            payload["turn"] = turn
+        out.append({**e, "row": payload})
     return out
 
 
@@ -692,7 +703,7 @@ def chat_turn_page(
         "offset": start,
         "limit": end - start,
         "total": total,
-        "events": with_row_views(chat_entries[start:end]),
+        "events": with_row_views(chat_entries[start:end], older_turns),
         "has_more": start > 0,
         "next_before": start,
         "older_turns": older_turns,
@@ -1033,7 +1044,7 @@ def _entry_row(
         row["kind"] = "tool_result"
         row["toolName"] = entry.get("tool_name") or ""
         row["toolCallId"] = entry.get("tool_call_id") or ""
-        row["isError"] = bool(entry.get("is_error"))
+        row["isError"] = tool_error_of(entry)
         row["summary"] = _clip(content, SUMMARY_CHAR_CAP)
         row["detail"] = _detail(content)
         if row["toolName"] == "task":
@@ -1144,7 +1155,7 @@ def _build_rounds(
         tool_results = [
             messages[mi] for mi in indices if messages[mi].get("type") == "tool"
         ]
-        tool_errors = sum(1 for r in tool_results if r.get("is_error"))
+        tool_errors = sum(1 for r in tool_results if tool_error_of(r))
         tokens = task["tokens"]
         title = next((e["summary"] for e in entries if e["kind"] == "user"), "")
         automated = not title and any(e["kind"] == "automated" for e in entries)
@@ -1155,8 +1166,19 @@ def _build_rounds(
 
         llm_ms = task["llmMs"]
         spans_by_id = {s["toolCallId"]: s for s in tool_spans if s["taskIndex"] == ti}
+        # The reply bubble the chat draws for this round ends at its last
+        # assistant / tool row and carries that row's uuid: the footer is
+        # matched by it, not by counting bubbles.
+        reply_uuid = next(
+            (
+                str(messages[mi]["uuid"]) for mi in reversed(indices)
+                if messages[mi].get("type") in ("assistant", "tool", "tool_audit") and messages[mi].get("uuid")
+            ),
+            "",
+        )
         rounds.append({
             "taskIndex": ti,
+            "replyUuid": reply_uuid,
             "title": title,
             "automated": automated,
             "compaction": bool(task.get("compaction")),

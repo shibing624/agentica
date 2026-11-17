@@ -13,7 +13,7 @@ os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
 from agentica.cli.commands.context import CommandContext
 from agentica.cli.commands.session import _cmd_compact
-from agentica.cli.context_usage import measure_context
+from agentica.compression.context_usage import measure_context
 from agentica.memory.models import AgentRun
 from agentica.memory.working import WorkingMemory
 from agentica.model.message import Message

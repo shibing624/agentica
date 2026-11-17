@@ -8,7 +8,6 @@ from __future__ import annotations
 import inspect
 import os
 import sys
-import tempfile
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -105,65 +104,11 @@ def _profile_model_config(name: str, profile: Dict[str, Any]) -> Dict[str, Any]:
 # Timeout in seconds for building a new Agent instance (guards against SDK hangs)
 _AGENT_BUILD_TIMEOUT_S = 30
 
-# Session-id prefix of the per-job sessions scheduled runs used to write before
-# runs were delivered into conversations. Their logs are still on disk; they
-# were never conversations, so the sidebar keeps leaving them out.
-CRON_SESSION_PREFIX = "scheduled_"
-
-# IM channel values stored in SessionLog sidecar ``source`` so Web and Desktop
-# list IM conversations alongside web chats and badge them by channel
-# (WeChat / Feishu / WeCom / Telegram / DingTalk / QQ / Discord / Slack).
-IM_SESSION_SOURCES = frozenset({
-    "wechat",
-    "feishu",
-    "wecom",
-    "telegram",
-    "dingtalk",
-    "qq",
-    "discord",
-    "slack",
-})
-
-
-def _infer_im_source_from_session_id(session_id: str) -> Optional[str]:
-    """Extract the channel slug from legacy ``agent:<id>:<channel>:<chat_id>`` ids."""
-    if not session_id or not session_id.startswith("agent:"):
-        return None
-    parts = session_id.split(":", 3)
-    if len(parts) >= 3 and parts[2] in IM_SESSION_SOURCES:
-        return parts[2]
-    return None
-
-
 _TITLE_PROMPT = (
     "Name this conversation for a sidebar list. Reply with ONLY the title: "
     "at most 8 words (or 16 CJK characters), in the user's language, no quotes, "
     "no trailing punctuation."
 )
-
-_SYSTEM_TEMP_ROOTS = ("/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp", "/var/folders", "/private/var/folders")
-
-
-def is_system_temp_path(path: str) -> bool:
-    """Whether ``path`` is inside the OS temp dir (``/tmp``, ``/var/folders``, ``$TMPDIR``).
-
-    ``$AGENTICA_HOME`` is never temp, even when it lives under one (tests, a
-    throwaway home): the web's own "temporary workspace" is
-    ``$AGENTICA_HOME/tmp/web-chats``, a place the user chose to chat in.
-    """
-    if not path:
-        return False
-    try:
-        real = os.path.realpath(os.path.expanduser(path))
-        home = os.path.realpath(os.path.expanduser(os.getenv("AGENTICA_HOME", "~/.agentica")))
-        roots = {os.path.realpath(r) for r in _SYSTEM_TEMP_ROOTS}
-        roots.add(os.path.realpath(tempfile.gettempdir()))
-    except (OSError, ValueError):
-        return False
-    if real == home or real.startswith(home + os.sep):
-        return False
-    return any(real == r or real.startswith(r + os.sep) for r in roots)
-
 
 # Agent cache, run lock, work_dir and approval mode are partitioned by
 # owner. ``session_id`` is client-supplied; a bare key lets one account

@@ -15,7 +15,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from agentica.config.profiles import get_profiles
-from agentica.memory.trace import last_completed_round, search_conversation
+from agentica.session.rows import image_marker
+from agentica.session.trace import last_completed_round, search_conversation
 from agentica.tools.background_processes import read_activity_stamp_us
 
 from .. import deps
@@ -211,7 +212,7 @@ def _message_and_media(body: "ChatRequest | SteerRequest") -> tuple[str, Optiona
         return body.message, None
     media = _images_to_media(body.images)
     names = [chat_images.save(m.data, m.mime) for m in media]
-    return body.message + chat_images.marker(names), media or None
+    return body.message + image_marker(names), media or None
 
 
 @router.get("/api/chat-images/{name}")
@@ -614,12 +615,13 @@ async def cancel_chat(
 
 @router.get("/api/sessions/pulse")
 async def sessions_pulse(request: Request):
-    """Lightweight pulse for detecting remote (IM / CLI / other tab) session & job activity."""
+    """A change counter: when ``ver`` moves, re-read the catalog. Nothing else.
+
+    Which sessions are running is a catalog field (``running``), not a second
+    copy here."""
     account = _account(request)
-    snap = live_turn.pulse(account)
-    stamp = read_activity_stamp_us(account)
-    snap["ver"] = (int(snap["ver"]) + stamp) % 4_000_000_000_000_000
-    return snap
+    ver = live_turn.pulse(account) + read_activity_stamp_us(account)
+    return {"ver": ver % 4_000_000_000_000_000}
 
 
 @router.get("/api/sessions")
@@ -630,19 +632,20 @@ async def list_sessions(
     svc: AgentService = Depends(deps.get_agent_service),
 ):
     account = _account(request)
-    rows = await asyncio.to_thread(
-        svc.list_sessions,
-        owner=account,
+    catalog = await asyncio.to_thread(
+        svc.session_catalog,
+        account,
         scope=scope,
         recent_days=recent_days,
         include_cli=show_cli_sessions_pref(account),
         hide_temp_dirs=True,
     )
     return {
-        "sessions": rows,
+        "sessions": catalog.rows,
         "scope": scope,
         "recent_days": recent_days,
-        "count": len(rows),
+        "count": len(catalog.rows),
+        "hidden": catalog.hidden,
     }
 
 
@@ -672,11 +675,11 @@ async def search_sessions(
         if session_id:
             sids = [session_id]
         else:
-            rows = svc.list_sessions(
-                owner=account, scope=scope, recent_days=recent_days,
+            catalog = svc.session_catalog(
+                account, scope=scope, recent_days=recent_days,
                 include_cli=include_cli, hide_temp_dirs=True,
             )
-            sids = [r["session_id"] for r in rows if r.get("session_id") and not r.get("archived")]
+            sids = [r["session_id"] for r in catalog.active]
         out: dict = {}
         for sid in sids:
             log = svc.session_log_for(sid, owner=account)

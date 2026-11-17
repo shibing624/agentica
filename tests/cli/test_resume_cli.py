@@ -25,7 +25,7 @@ from agentica.cli.session_resume import prepare_startup_resume
 # re-exported by `agentica.cli` on Python 3.10; patch the module object instead.
 cli_main = importlib.import_module("agentica.cli.main")
 from agentica.memory.models import AgentRun
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 from agentica.memory.working import WorkingMemory
 from agentica.model.message import Message
 from agentica.model.usage import Usage

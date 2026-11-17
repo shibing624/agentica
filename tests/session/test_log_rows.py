@@ -7,16 +7,20 @@ fragment folded after a question, a steer, a relayed row, a job report.
 """
 import tempfile
 
-from agentica.memory.log_rows import (
+from agentica.session.rows import (
     RELAYED_MARKER,
     STEER_GUIDANCE_PREFIX,
     classify_user,
+    image_marker,
     row_payload,
+    split_image_markers,
+    strip_image_markers,
+    tool_error_of,
     split_window_preamble,
     strip_window_preamble,
 )
-from agentica.memory.session_log import SessionLog
-from agentica.memory.trace import chat_turn_page, with_row_views
+from agentica.session.log import SessionLog
+from agentica.session.trace import chat_turn_page, with_row_views
 
 CONT = "New context window started. Continue from session notes and search_session."
 LEGACY_CONT = "New context window started without a conversation summary. Use search_session."
@@ -126,18 +130,66 @@ class TestWire:
             "automated": False,
             "steer": False,
             "text": "q",
+            "images": [],
             "window": {"notes": "- goal: ship", "notes_path": "/h/p/s.notes.md"},
         }
 
     def test_other_rows_carry_no_payload(self):
         assert row_payload({"type": "assistant", "content": "x"}) is None
 
-    def test_with_row_views_marks_only_user_rows_and_leaves_the_log_rows_alone(self):
-        entries = [_row("hi"), {"type": "assistant", "content": "yo"}]
+    def test_with_row_views_marks_only_user_and_tool_rows_and_leaves_the_log_rows_alone(self):
+        entries = [_row("hi"), {"type": "assistant", "content": "yo"}, {"type": "tool", "content": "ok"}]
         out = with_row_views(entries)
         assert out[0]["row"]["text"] == "hi"
         assert "row" not in out[1]
+        assert out[2]["row"] == {"error": False, "text": "ok", "steers": []}
         assert "row" not in entries[0]
+
+    def test_turn_numbers_count_from_the_start_of_the_log(self):
+        entries = [
+            _row("q1"),
+            _row("steer", steer=True),
+            _row("report", automated=True),
+            _row(f"{_window()}\n\n{_notes()}\n\n{CONT}"),
+            _row("q2"),
+        ]
+        out = with_row_views(entries, turns_before=4)
+        assert [e["row"].get("turn") for e in out] == [5, None, None, None, 6]
+
+
+IMG = "a" * 64 + ".png"
+
+
+class TestImagesAndTools:
+    def test_image_markers_split_into_prose_and_names(self):
+        content = "看下这个" + image_marker([IMG, "b" * 64 + ".jpg"]) + "\n\n[图片内容]\n一张猫"
+        assert split_image_markers(content) == ("看下这个", [IMG, "b" * 64 + ".jpg"])
+        assert strip_image_markers(image_marker([IMG]).lstrip()) == ""
+        assert strip_image_markers("提到 [图片: x] 的文字") == "提到 [图片: x] 的文字"
+
+    def test_user_payload_carries_images_not_markers(self):
+        payload = row_payload(_row("hi" + image_marker([IMG])))
+        assert (payload["text"], payload["images"]) == ("hi", [IMG])
+
+    def test_automated_rows_are_shown_as_logged(self):
+        content = "report" + image_marker([IMG])
+        payload = row_payload(_row(content, automated=True))
+        assert (payload["text"], payload["images"]) == (content, [])
+
+    def test_tool_error_reads_either_spelling(self):
+        assert tool_error_of({"is_error": True}) is True
+        assert tool_error_of({"tool_call_error": True}) is True
+        assert tool_error_of({"is_error": False, "tool_call_error": True}) is True
+        assert tool_error_of({}) is False
+
+    def test_tool_payload_splits_folded_steers(self):
+        content = f"out\n\n{STEER_GUIDANCE_PREFIX}\nfoo\n\n{STEER_GUIDANCE_PREFIX}\nbar"
+        payload = row_payload({"type": "tool", "content": content, "tool_call_error": True})
+        assert payload == {"error": True, "text": "out", "steers": ["foo", "bar"]}
+
+    def test_tool_payload_without_steers_keeps_output_whole(self):
+        payload = row_payload({"type": "tool_audit", "content": "a\n\nb"})
+        assert payload == {"error": False, "text": "a\n\nb", "steers": []}
 
     def test_chat_page_serves_row_on_every_user_event(self):
         entries = [

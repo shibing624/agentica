@@ -28,7 +28,7 @@ from agentica.cli.runtime import (
 )
 from agentica.agent.goals import GoalManager
 from agentica.memory.models import AgentRun
-from agentica.memory.session_log import local_turn_stamp
+from agentica.session.log import local_turn_stamp
 from agentica.model.message import Message
 from agentica.run.config import RunConfig
 from agentica.run.response import RunResponse

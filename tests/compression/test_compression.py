@@ -338,7 +338,7 @@ class TestSessionLogToolCallHandle(unittest.TestCase):
     """The handle in a pruned result's marker must resolve to the full result."""
 
     def test_find_entries_resolves_a_tool_call_id(self):
-        from agentica.memory.session_log import SessionLog
+        from agentica.session.log import SessionLog
 
         with tempfile.TemporaryDirectory() as tmp:
             log = SessionLog("s-handle", base_dir=tmp)
@@ -352,7 +352,7 @@ class TestSessionLogToolCallHandle(unittest.TestCase):
         self.assertIn("FULL-OUTPUT-XYZ", hits[0]["content"])
 
     def test_a_relogged_tool_row_is_not_ambiguous(self):
-        from agentica.memory.session_log import SessionLog
+        from agentica.session.log import SessionLog
 
         with tempfile.TemporaryDirectory() as tmp:
             log = SessionLog("s-handle2", base_dir=tmp)
@@ -362,7 +362,7 @@ class TestSessionLogToolCallHandle(unittest.TestCase):
             self.assertEqual(len(log.find_entries("call_h2")), 1)
 
     def test_handle_survives_a_compact_that_shadows_the_original_row(self):
-        from agentica.memory.session_log import SessionLog
+        from agentica.session.log import SessionLog
 
         with tempfile.TemporaryDirectory() as tmp:
             log = SessionLog("s-handle3", base_dir=tmp)

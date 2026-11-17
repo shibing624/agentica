@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
-from agentica.memory.trace import chat_turn_page, with_row_views
+from agentica.session.trace import chat_turn_page, with_row_views
 
 from .. import deps
 from ..services.agent_service import AgentService

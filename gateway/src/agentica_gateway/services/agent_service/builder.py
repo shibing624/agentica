@@ -22,7 +22,7 @@ from agentica.agent.permissions import (
     validate_permission_mode,
     validate_sandbox_mode,
 )
-from agentica.cli.prefs import normalize_cli_prefs
+from agentica.config.prefs import normalize_cli_prefs
 from agentica.compression.manager import parse_compact_token_limit
 from agentica.config.profiles import get_setting, human_wait_timeout
 from agentica.run.config import RunConfig

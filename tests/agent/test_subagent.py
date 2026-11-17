@@ -171,7 +171,7 @@ def test_spawn_persists_child_transcript_and_returns_locator(tmp_path):
     """A completed subagent must leave a readable transcript, not only a short
     parent-facing summary. The locator is the recovery path when the summary is
     insufficient."""
-    from agentica.memory.session_log import SessionLog
+    from agentica.session.log import SessionLog
 
     registry = SubagentRegistry()
     _RUNTIME_SUBAGENT_CONFIGS["worker"] = SubagentConfig(
@@ -773,7 +773,10 @@ def test_builtin_task_tool_get_task_result_returns_registry_record():
         transcript_path="/tmp/run-lookup.jsonl",
     )
 
-    payload = json.loads(asyncio.run(BuiltinTaskTool().get_task_result("run-lookup")))
+    tool = BuiltinTaskTool()
+    tool.set_parent_agent(SimpleNamespace(user_id=None, session_id="s", work_dir=None,
+                                          model=SimpleNamespace(functions={"read_file": None})))
+    payload = json.loads(asyncio.run(tool.get_task_result("run-lookup")))
     assert payload == {
         "found": True,
         "run_id": "run-lookup",
@@ -906,20 +909,22 @@ def test_spilled_child_output_reuses_the_full_copy_path(tmp_path):
     """A preview of a preview makes the parent hop twice; point at the full file."""
     from agentica.compression.tool_result_storage import maybe_persist_result
 
-    full = tmp_path / "full.txt"
-    full.write_text("X" * 25000, encoding="utf-8")
-    preview = (
-        f"<persisted-output>\nFull output saved to:\n{full}\n\n"
-        "Use read_file for the rest.\n</persisted-output>"
+    # The child's own spill, written by the real writer, so this pins the
+    # format the reader parses rather than a hand-copied imitation of it.
+    preview = maybe_persist_result(
+        "execute", "child-call", "X" * 60000, session_id="child",
+        cwd=str(tmp_path), user_id="u1", recoverable=True,
     )
+    full = Path(preview.split("Full output saved to:\n", 1)[1].split("\n", 1)[0])
+    assert full.read_text(encoding="utf-8") == "X" * 60000
     path = SubagentRegistry._write_child_tool_output(
         run_id="run-1", child_session_id="s.subagent.run-1",
         tool_call_id="call-1", tool_name="execute", content=preview,
         cwd=str(tmp_path), user_id="u1",
     )
     assert path == str(full)
-    # No second copy was written next to the preview.
-    assert not (tmp_path / "s.subagent.run-1").exists()
+    # No second copy was written for the parent.
+    assert not any(p.name.startswith("run-1-") for p in tmp_path.rglob("*.txt"))
 
 
 def test_truncated_child_output_gets_no_locator(tmp_path):
@@ -1799,3 +1804,14 @@ def test_task_timeout_can_raise_the_wall_clock_but_not_cut_it():
         assert captured["timeout_override"] is None
         asyncio.run(tool.task("a", "b", subagent_type="explore", timeout=default + 60))
         assert captured["timeout_override"] == default + 60
+
+
+def test_spilled_full_copy_reads_only_a_complete_spill():
+    from agentica.compression.tool_result_storage import (
+        _build_persisted_message, _build_truncated_message, spilled_full_copy,
+    )
+
+    assert spilled_full_copy(_build_persisted_message("/p/full.txt", "x" * 10)) == "/p/full.txt"
+    assert spilled_full_copy(_build_persisted_message("/p/part.txt", "x", incomplete=True)) is None
+    assert spilled_full_copy(_build_truncated_message("x" * 10)) is None
+    assert spilled_full_copy("plain text mentioning Full output saved to:\n/etc/passwd") is None

@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from agentica.agent.approvals import ApprovalDecision, ApprovalRegistry, PendingApproval
+from agentica.session.rows import split_image_markers
 
 if TYPE_CHECKING:
     from .agent_service import AgentService
@@ -241,11 +242,14 @@ class LiveTurn:
             "status": self.status,
             "kind": self.kind,
             "seq": self.seq,
-            "first_seq": self.events[0]["seq"] if self.events else 1,
+            "first_seq": (self.events[0].get("cuts") or [(self.events[0]["seq"], 0)])[0][0] if self.events else 1,
             "started_at_ms": int(self.started_wall * 1000),
         }
         if self.user_message:
-            out["user_message"] = self.user_message
+            text, images = split_image_markers(self.user_message)
+            out["user_message"] = text
+            if images:
+                out["user_images"] = images
         if self.cron_job:
             out["cron_job"] = self.cron_job
         if self.automated_message:
@@ -275,7 +279,13 @@ class LiveTurn:
             and isinstance(wrapped.get("data"), str)
             and isinstance(last.get("data"), str)
         ):
+            # Adjacent text deltas share one buffered event so a long reply
+            # does not exhaust MAX_BUFFER_EVENTS. ``cuts`` remembers where each
+            # merged delta started, so a client that already holds a prefix of
+            # this event is replayed only what it has not seen.
             self._buffer_chars -= _event_chars(last)
+            cuts = last.setdefault("cuts", [(last["seq"], 0)])
+            cuts.append((wrapped["seq"], len(last["data"])))
             last["data"] += wrapped["data"]
             last["seq"] = wrapped["seq"]
             self._buffer_chars += _event_chars(last)
@@ -301,7 +311,22 @@ class LiveTurn:
             self._buffer_chars -= _event_chars(dropped)
 
     def replay(self, after: int = 0) -> list[dict]:
-        return [ev for ev in self.events if ev["seq"] > after]
+        """Events with ``seq > after``, as the client would have received them.
+
+        A coalesced event whose merged deltas straddle ``after`` is cut: only
+        the text of the deltas past ``after`` is sent, under the event's seq.
+        """
+        out: list[dict] = []
+        for ev in self.events:
+            if ev["seq"] <= after:
+                continue
+            cuts = ev.get("cuts")
+            if not cuts or after < cuts[0][0]:
+                out.append({"seq": ev["seq"], "event": ev["event"], "data": ev["data"]})
+                continue
+            start = next(at for seq, at in cuts if seq > after)
+            out.append({"seq": ev["seq"], "event": ev["event"], "data": ev["data"][start:]})
+        return out
 
     def finish(self, status: str) -> None:
         if self.done:
@@ -359,14 +384,9 @@ def bump_pulse(owner: str) -> int:
     return v
 
 
-def pulse(owner: str) -> Dict[str, Any]:
-    """Zero-I/O in-memory snapshot of session activity for ``owner``."""
-    gc()
-    active_ids = [t.session_id for t in _by_run.values() if t.owner == owner and not t.done]
-    return {
-        "ver": _pulse_ver.get(owner, 0),
-        "active": active_ids,
-    }
+def pulse(owner: str) -> int:
+    """This process's change counter for ``owner``: moves when a run starts or ends."""
+    return _pulse_ver.get(owner, 0)
 
 
 def _skey(session_id: str, owner: str) -> _SessionKey:

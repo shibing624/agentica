@@ -9,7 +9,7 @@ long bubble back; this test pins them.
 import re
 from pathlib import Path
 
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 from agentica.skills.skill import Skill
 
 

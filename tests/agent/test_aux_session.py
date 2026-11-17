@@ -4,7 +4,7 @@ import asyncio
 
 from agentica.agent.aux_session import AuxSession
 from agentica.agent.goals import GoalManager, judge_goal
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 
 
 class _FakeJudgeModel:

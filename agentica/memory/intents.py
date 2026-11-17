@@ -24,7 +24,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional, Set
 
-from agentica.memory.session_index import INTENT_STATUSES, SessionIndex, clip_both_ends
+from agentica.session.index import INTENT_STATUSES, SessionIndex, clip_both_ends
 from agentica.model.message import Message
 from agentica.prompts.memory import INTENT_UPDATE_PROMPT
 from agentica.utils.log import logger

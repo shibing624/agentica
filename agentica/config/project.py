@@ -139,7 +139,7 @@ def clear_project_active_profile(base_dir: Any) -> bool:
 # bar, debug logging, permission tier) live in ``project.json``'s ``cli``
 # block, next to ``active_profile``: they are "how I work in this directory",
 # so a new CLI here inherits them. Shape is validated by
-# ``agentica.cli.prefs.normalize_cli_prefs``; this layer only round-trips JSON.
+# ``agentica.config.prefs.normalize_cli_prefs``; this layer only round-trips JSON.
 
 
 def get_project_cli_prefs(base_dir: Any) -> Dict[str, Any]:

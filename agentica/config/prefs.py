@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: CLI preferences that outlive one process.
+@description: Session / project preferences that outlive one process (CLI, gateway and IM read the same ones).
 
 ``/reasoning``, ``/statusbar``, ``/debug``, ``/peername``, ``/permissions`` and ``/tools add``
 used to live only in the process that set them: the change was gone at the next
@@ -34,6 +34,7 @@ import os
 from typing import Any, Dict, Optional
 
 from agentica.agent.permissions import PERMISSION_MODES, migrate_permission_mode
+from agentica.tools.registry import TOOL_REGISTRY
 from agentica.utils.log import logger
 
 # Read/written as a group: the CLI settings that are not model config. Adding a
@@ -55,15 +56,6 @@ _DEFAULTS: Dict[str, Any] = {
     "statusbar_visible": True,
     "debug": False,
 }
-
-
-def TOOL_REGISTRY_NAMES() -> tuple:
-    """Names accepted by ``--tools`` / ``/tools add`` (lazy: the registry
-    imports every provider module, which must not happen at ``prefs`` import
-    time)."""
-    from agentica.cli.runtime import TOOL_REGISTRY
-
-    return tuple(TOOL_REGISTRY)
 
 
 def normalize_cli_prefs(raw: Any) -> Dict[str, Any]:
@@ -114,7 +106,7 @@ def normalize_cli_prefs(raw: Any) -> Dict[str, Any]:
                 # from a file. `add` already refuses names outside
                 # TOOL_REGISTRY, and this second filter keeps a hand-edited
                 # project.json from smuggling an arbitrary module path back in.
-                names = [n for n in value if isinstance(n, str) and n in TOOL_REGISTRY_NAMES()]
+                names = [n for n in value if isinstance(n, str) and n in TOOL_REGISTRY]
                 if value and not names:
                     # Every name was unknown — a hand-edit, or a tool this
                     # version no longer ships. Drop the key rather than reading

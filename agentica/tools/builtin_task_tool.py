@@ -23,7 +23,7 @@ from agentica.compression.tool_result_storage import (
     can_recover_spill,
     maybe_persist_result,
 )
-from agentica.tools.base import Function, Tool
+from agentica.tools.base import Tool
 
 if TYPE_CHECKING:
     from agentica.agent import Agent
@@ -154,25 +154,13 @@ class BuiltinTaskTool(Tool):
         self._parent_agent = agent
 
     def _can_recover_spill(self) -> bool:
-        """Whether this session actually has a tool that can read a spilled file.
+        """Whether this session has a tool that can read a spilled file back.
 
         ``maybe_persist_result`` writes ``Use read_file ... for the rest`` only
-        when the caller says it is recoverable. Hard-coding True told an IM or
-        otherwise tool-restricted session to read a file it cannot open.
+        when the caller says it is recoverable; an IM or otherwise
+        tool-restricted session must get a truncation instead.
         """
-        parent = self._parent_agent
-        functions = getattr(getattr(parent, "model", None), "functions", None) or {}
-        names = set(functions)
-        for tool in getattr(parent, "tools", None) or []:
-            if isinstance(tool, Tool):
-                names.update(tool.functions)
-            elif isinstance(tool, Function):
-                names.add(tool.name)
-            else:
-                name = getattr(tool, "name", None)
-                if isinstance(name, str):
-                    names.add(name)
-        return can_recover_spill(names)
+        return can_recover_spill(self._parent_agent.model.functions or {})
 
     async def get_task_result(self, run_id: str) -> str:
         """Fetch a prior subagent run by run_id.
@@ -188,8 +176,7 @@ class BuiltinTaskTool(Tool):
         from agentica.subagents import SubagentRegistry
 
         parent = self._parent_agent
-        owner_user_id = getattr(parent, "user_id", None)
-        run = SubagentRegistry().get_for_owner(run_id, owner_user_id)
+        run = SubagentRegistry().get_for_owner(run_id, parent.user_id)
         if run is None:
             return json.dumps({"found": False, "run_id": run_id}, ensure_ascii=False, indent=2)
 
@@ -202,9 +189,9 @@ class BuiltinTaskTool(Tool):
                 "get_task_result",
                 f"{run.run_id}-result",
                 result,
-                session_id=getattr(parent, "session_id", None) or "default",
-                cwd=getattr(parent, "work_dir", None),
-                user_id=owner_user_id,
+                session_id=parent.session_id or "default",
+                cwd=parent.work_dir,
+                user_id=parent.user_id,
                 recoverable=self._can_recover_spill(),
             )
         return json.dumps({

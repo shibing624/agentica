@@ -2,7 +2,7 @@
 """A turn's entry point (RunConfig.source / .channel) is what the session sidecar records."""
 from types import SimpleNamespace
 
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 from agentica.run.context import RunSource
 from agentica.runner.persist import PersistMixin
 

@@ -24,7 +24,6 @@ import glob
 import hashlib
 import json
 import os
-import re
 import shutil
 import threading
 import time
@@ -38,7 +37,7 @@ from agentica.compression.token_budget import (
     CONTEXT_WINDOW_OPEN,
     WINDOW_CONTINUATION_MARK,
 )
-from agentica.memory.log_rows import classify_user
+from agentica.session.rows import STEER_GUIDANCE_PREFIX, classify_user, strip_image_markers, tool_error_of
 from agentica.utils.log import logger
 from agentica.utils.skill_invocation import invocation_label
 from agentica.utils.tokens import count_text_tokens
@@ -138,15 +137,6 @@ def iso_timestamp(epoch: Optional[float] = None) -> str:
         else datetime.now(timezone.utc)
     )
     return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
-
-
-_CHAT_IMAGE_MARK_RE = re.compile(r"(?:^|\n\n)\[图片: [0-9a-f]")
-
-
-def strip_chat_image_markers(text: str) -> str:
-    """Drop the gateway's machine-added image markers and captions."""
-    match = _CHAT_IMAGE_MARK_RE.search(text or "")
-    return text[:match.start()] if match else text
 
 
 def _parse_iso_timestamp(value: Any) -> Optional[float]:
@@ -1050,7 +1040,7 @@ class SessionLog:
         return entries[:last_boundary_idx] if last_boundary_idx >= 0 else entries
 
     def _conversation_rows(self) -> List[Dict[str, Any]]:
-        from agentica.memory.session_search import drop_shadowed_by_boundary
+        from agentica.session.search import drop_shadowed_by_boundary
 
         # Keep compact_boundary in this pass: it is what tells
         # ``drop_shadowed_by_boundary`` where a preserved tail begins, and the
@@ -1081,7 +1071,7 @@ class SessionLog:
         compact_boundary rows are not hits. Empty query returns no keyword
         hits — use ``list_user_questions`` for the user-question index.
         """
-        from agentica.memory.session_search import normalize_role, rank_entries
+        from agentica.session.search import normalize_role, rank_entries
 
         q = (query or "").strip()
         if not q:
@@ -1108,7 +1098,7 @@ class SessionLog:
         uuid-prefix match is returned so the caller can tell "none" from
         "ambiguous" instead of this layer picking one.
         """
-        from agentica.memory.session_search import _prose
+        from agentica.session.search import _prose
 
         original = next(
             (
@@ -1134,7 +1124,7 @@ class SessionLog:
 
     def list_user_questions(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Newest user turns across compact_boundary, preamble skipped."""
-        from agentica.memory.session_search import list_user_questions
+        from agentica.session.search import list_user_questions
 
         return list_user_questions(self._conversation_rows(), limit=limit)
 
@@ -1383,10 +1373,10 @@ class SessionLog:
                     continue
                 if entry.get("automated"):
                     marker = raw_text
-                elif raw_text.startswith("[User guidance received while you were working]\n"):
+                elif raw_text.startswith(f"{STEER_GUIDANCE_PREFIX}\n"):
                     marker = raw_text
                 else:
-                    marker = f"[User guidance received while you were working]\n{raw_text}"
+                    marker = f"{STEER_GUIDANCE_PREFIX}\n{raw_text}"
                 if messages and messages[-1].get("role") == "tool":
                     existing = str(messages[-1].get("content") or "").rstrip()
                     messages[-1]["content"] = f"{existing}\n\n{marker}" if existing else marker
@@ -1409,9 +1399,7 @@ class SessionLog:
                     if key in entry and entry[key] is not None:
                         msg[key] = entry[key]
                 if entry_type == "tool":
-                    msg["tool_call_error"] = bool(
-                        entry.get("is_error", entry.get("tool_call_error", False))
-                    )
+                    msg["tool_call_error"] = tool_error_of(entry)
                 messages.append(msg)
             elif entry_type == "provider_checkpoint" and messages:
                 checkpoint = entry.get("checkpoint")
@@ -1649,7 +1637,7 @@ class SessionLog:
                     stats["tool_calls"] += 1
                 else:
                     stats["tool_audit_entries"] += 1
-                if entry.get("is_error", entry.get("tool_call_error", False)):
+                if tool_error_of(entry):
                     stats["tool_errors"] += 1
                 name = entry.get("tool_name") or "unknown"
                 tools_by_name[name] = tools_by_name.get(name, 0) + 1
@@ -1910,7 +1898,7 @@ class SessionLog:
             "first_user": first_user,
             "display_title": cls.display_title(
                 name=cls._read_meta_name(Path(path).with_suffix(".meta.json")),
-                first_user=strip_chat_image_markers(first_user),
+                first_user=strip_image_markers(first_user),
                 cron_job_name=cron_job_name,
                 fallback="Chat",
             ),
@@ -1951,7 +1939,7 @@ class SessionLog:
         name = (name or "").strip()
         if name:
             return name[:60]
-        first = strip_chat_image_markers(first_user or "").strip()
+        first = strip_image_markers(first_user or "").strip()
         if first:
             return " ".join(first.split())[:max_chars]
         cron = (cron_job_name or "").strip()
@@ -2039,7 +2027,7 @@ class SessionLog:
     def _meta_cli(data: Dict[str, Any]) -> Dict[str, Any]:
         """Return the sidecar's ``cli`` block (saved CLI toggles), or ``{}``.
 
-        Shape is validated by :func:`agentica.cli.prefs.normalize_cli_prefs`,
+        Shape is validated by :func:`agentica.config.prefs.normalize_cli_prefs`,
         deliberately not here: the sidecar is a plain JSON blob and
         ``session_log`` must not grow a dependency on the CLI package. What
         this method guarantees is only that callers get a dict, never a
@@ -2202,7 +2190,7 @@ class SessionLog:
         Imported lazily: ``session_index`` imports ``session_search``, which
         imports this module.
         """
-        from agentica.memory.session_index import INDEX_FILENAME, SessionIndex
+        from agentica.session.index import INDEX_FILENAME, SessionIndex
 
         attached = self._search_index
         if isinstance(attached, SessionIndex):
@@ -2602,7 +2590,7 @@ class SessionLog:
         it.** Concurrent callers wait for one scan instead of each running
         their own.
         """
-        from agentica.memory.trace import analyze_entries
+        from agentica.session.trace import analyze_entries
 
         try:
             stat = self.path.stat()
@@ -2628,13 +2616,13 @@ class SessionLog:
 
     def trace_call_body(self, index: int) -> Optional[Dict[str, Any]]:
         """Body of the call at log line ``index`` (arguments, result, thinking, reply), or None."""
-        from agentica.memory.trace import call_body_in
+        from agentica.session.trace import call_body_in
 
         return call_body_in(self._full_analysis(), index)
 
     def trace_search(self, query: str, limit: int = 500) -> List[int]:
         """Log-line indices of the calls whose text contains ``query``."""
-        from agentica.memory.trace import search_calls_in
+        from agentica.session.trace import search_calls_in
 
         return search_calls_in(self._full_analysis(), query, limit)
 
@@ -2643,11 +2631,11 @@ class SessionLog:
 
         Does not write. Empty or missing files still return a valid analysis
         dict with ``hasTimeline=False``. ``lite`` leaves the bodies out (see
-        :func:`agentica.memory.trace.analyze_entries`) and is served from the
+        :func:`agentica.session.trace.analyze_entries`) and is served from the
         shared scan of the file; ``calls=False`` (with ``lite``) also leaves out
         each round's call list, for a reader that only needs the round totals.
         """
-        from agentica.memory.trace import analyze_entries, lite_view
+        from agentica.session.trace import analyze_entries, lite_view
 
         if lite:
             analysis = lite_view(self._full_analysis(), calls=calls)
@@ -2672,7 +2660,7 @@ class SessionLog:
 
     def format_trace(self, *, round_n: Optional[int] = None) -> str:
         """Plain-text Trace report (overview, or 1-based ``round_n`` detail)."""
-        from agentica.memory.trace import format_trace_text
+        from agentica.session.trace import format_trace_text
 
         return format_trace_text(self.analyze(), round_n=round_n)
 

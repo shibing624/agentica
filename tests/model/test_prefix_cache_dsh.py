@@ -21,8 +21,8 @@ from openai.types.completion_usage import CompletionUsage
 from agentica import Agent, OpenAIChat, RunConfig
 from agentica.agent.config import PromptConfig, ToolConfig
 from agentica.compression.manager import CompressionManager
-from agentica.memory.session_log import SessionLog, tool_policy_key
-from agentica.memory.trace import analyze_entries
+from agentica.session.log import SessionLog, tool_policy_key
+from agentica.session.trace import analyze_entries
 from agentica.model.anthropic.claude import Claude
 from agentica.model.message import Message, VOLATILE_SYSTEM_MARKER
 from agentica.model.metrics import Metrics

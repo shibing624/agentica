@@ -21,7 +21,7 @@ from agentica.memory.recall import (
     render_recall_block,
     surfaced_memory_files,
 )
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 from agentica.model.message import Message
 from agentica.model.openai import OpenAIChat
 from agentica.model.response import ModelResponse

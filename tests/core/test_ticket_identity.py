@@ -18,7 +18,7 @@ import types
 
 import pytest
 
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 from agentica.tools.background_processes import BackgroundProcessRegistry
 from agentica.ticket import (
     TICKET_ENV,

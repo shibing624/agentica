@@ -55,6 +55,21 @@ def test_content_deltas_coalesce_in_buffer():
     assert replay[0]["data"] == "ab"
 
 
+def test_reconnect_inside_a_coalesced_run_gets_only_the_unseen_text():
+    """A client that saw seq 1 ("a") and reconnects with after=1 used to get
+    the merged "abc" under seq 3 and show "aabc"."""
+    turn = live_turn.start("s1", owner="default")
+    for text in ("a", "b", "c"):
+        turn.publish({"event": "content", "data": text})
+    turn.publish({"event": "tool_call", "data": {"name": "x"}})
+    assert [(e["seq"], e["data"]) for e in turn.replay(after=0)][0] == (3, "abc")
+    assert [(e["seq"], e["data"]) for e in turn.replay(after=1)][0] == (3, "bc")
+    assert [(e["seq"], e["data"]) for e in turn.replay(after=2)][0] == (3, "c")
+    assert [e["seq"] for e in turn.replay(after=3)] == [4]
+    # The buffered event itself is untouched by a replay.
+    assert turn.replay(after=0)[0]["data"] == "abc"
+
+
 def test_unsubscribe_does_not_cancel_and_late_subscriber_replays():
     turn = live_turn.start("s1", owner="default")
     q1 = turn.subscribe()
@@ -245,3 +260,12 @@ def test_public_exposes_first_seq_started_at_and_seq_after_tool(monkeypatch):
     assert turn.public()["first_seq"] == 3
     assert turn.seq_after_tool("t1") == 0
     assert turn.seq_after_tool("t2") == 4
+
+
+def test_public_hands_out_the_typed_text_and_image_names_not_markers():
+    from agentica.session.rows import image_marker
+
+    name = "a" * 64 + ".png"
+    turn = live_turn.start("s_img", owner="default", user_message="看图" + image_marker([name]) + "\n\n[图片内容]\n猫")
+    pub = turn.public()
+    assert (pub["user_message"], pub["user_images"]) == ("看图", [name])

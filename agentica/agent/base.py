@@ -53,8 +53,8 @@ from agentica.run.response import RunResponse, AgentCancelledError
 from agentica.run.config import RunConfig
 from agentica.run.context import RunContext, TaskAnchor
 from agentica.memory import WorkingMemory
-from agentica.memory.session_log import SessionLog, tool_policy_key
-from agentica.memory.session_index import SessionIndex
+from agentica.session.log import SessionLog, tool_policy_key
+from agentica.session.index import SessionIndex
 from agentica.memory.recall import RecallBreaker
 from agentica.compression import CompressionManager
 from agentica.config import LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY, AGENTICA_NUM_HISTORY_TURNS

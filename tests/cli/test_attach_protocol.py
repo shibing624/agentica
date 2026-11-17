@@ -16,8 +16,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentica.cli import attach as attach_mod
-from agentica.cli.attach import (
+from agentica.live import attach as attach_mod
+from agentica.live.attach import (
     ERR_INVALID_PARAMS,
     ERR_METHOD_NOT_FOUND,
     ERR_PARSE,

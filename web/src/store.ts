@@ -73,6 +73,8 @@ export type ChatMsg = {
   errorTs?: number;
   /** Mid-run interrupt (CLI steer), not a new turn. */
   steer?: boolean;
+  /** Turn number from the start of the log (server ``row.turn``); unset until logged. */
+  turn?: number;
   /** Identity of the steer this row echoes, so a refused one can be withdrawn. */
   steerId?: string;
   /** A turn no person wrote: a background command's

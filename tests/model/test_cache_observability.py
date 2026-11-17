@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 from agentica.model.message import Message
 from agentica.model.usage import RequestUsage, TokenDetails, Usage
 from agentica.runner.compress import _prefix_digests, _first_prefix_break, CompressMixin

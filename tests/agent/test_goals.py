@@ -28,7 +28,7 @@ from agentica.agent.goals import (
     _parse_judge_response,
     judge_goal,
 )
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 from agentica.model.response import ModelResponse
 
 
@@ -964,7 +964,7 @@ def test_runner_loads_persisted_goal_into_task_anchor(tmp_path, monkeypatch):
     """
     from unittest.mock import MagicMock, AsyncMock
     from agentica.agent import Agent
-    from agentica.memory.session_log import SessionLog
+    from agentica.session.log import SessionLog
     from agentica.run.context import TaskAnchor
 
     # Set up a real SessionLog with an active goal.

@@ -187,7 +187,8 @@ def _line_count(content: str) -> int:
     return content.count("\n") + (0 if content.endswith("\n") else 1)
 
 
-def _already_shrunk(content: str) -> bool:
+def is_shrunk(content: str) -> bool:
+    """Whether ``content`` is already a spill / truncation message from this module."""
     return "<persisted-output>" in content or "<truncated-output>" in content
 
 
@@ -218,7 +219,7 @@ def _build_persisted_message(
         )
     else:
         where = (
-            f"Full output saved to:\n"
+            f"{_FULL_COPY_HEAD}"
             f"{file_path}\n\n"
             f"Use read_file (tail or offset/limit) or grep on that path for the rest.\n\n"
         )
@@ -230,6 +231,27 @@ def _build_persisted_message(
         f"{_preview(content)}"
         f"\n</persisted-output>"
     )
+
+
+_FULL_COPY_HEAD = "Full output saved to:\n"
+
+
+def spilled_full_copy(content: str) -> Optional[str]:
+    """The path of the complete copy a ``<persisted-output>`` message points at.
+
+    ``None`` for anything else: a result that was not spilled, a
+    ``<truncated-output>`` (nothing was written), or an INCOMPLETE copy
+    (killed at the capture cap, so the file is not the full output). The
+    reader of the format lives next to its writer, ``_build_persisted_message``.
+    """
+    if not content.startswith("<persisted-output>\n"):
+        return None
+    at = content.find(_FULL_COPY_HEAD)
+    if at < 0:
+        return None
+    start = at + len(_FULL_COPY_HEAD)
+    end = content.find("\n", start)
+    return content[start:end if end >= 0 else len(content)].strip() or None
 
 
 def _build_truncated_message(content: str) -> str:
@@ -321,7 +343,7 @@ def maybe_persist_result(
     """
     if max_result_size_chars is None:
         return content
-    if _already_shrunk(content):
+    if is_shrunk(content):
         return content
     try:
         return _maybe_persist_result_inner(
@@ -426,7 +448,7 @@ def enforce_tool_batch_budget(
     sizes = []
     for msg in tool_results:
         content = msg.content if isinstance(msg.content, str) else str(msg.content or "")
-        already_shrunk = _already_shrunk(content)
+        already_shrunk = is_shrunk(content)
         sizes.append((count_text_tokens(content, model_id), already_shrunk))
 
     total = sum(t for t, _ in sizes)

@@ -77,7 +77,7 @@ class GatewayCronRunner:
             # socket the IM path uses, which also hands the answer back — the
             # mailbox handoff this replaces could only report that the prompt
             # had been handed over, so the automation record was always empty.
-            from agentica.cli.attach import prompt_live_session
+            from agentica.live.attach import prompt_live_session
             from agentica.cron.cli_runner import ATTACH_PROMPT_TIMEOUT
 
             result = await asyncio.to_thread(

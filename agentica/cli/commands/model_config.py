@@ -41,12 +41,12 @@ from agentica.utils.log import (
     suppress_console_logging,
 )
 from agentica.cli import self_manage
-from agentica.cli.context_usage import measure_context
-from agentica.cli.usage_display import ProviderUsageSummary, format_cost_usd
+from agentica.compression.context_usage import measure_context
+from agentica.model.usage_summary import ProviderUsageSummary, format_cost_usd
 from agentica.config.project import project_base_dir
 
 from agentica.cli.commands.context import CommandContext
-from agentica.cli.prefs import record_cli_prefs
+from agentica.config.prefs import record_cli_prefs
 from agentica.tools.base import Tool
 from agentica.cli.commands.helpers import (
     _count_enabled_skills,

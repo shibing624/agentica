@@ -47,7 +47,7 @@ from agentica.cli.display import (
     parse_file_mentions,
     print_header,
 )
-from agentica.cli.prefs import apply_session_cli_prefs, sync_view_prefs_to_tui
+from agentica.config.prefs import apply_session_cli_prefs, sync_view_prefs_to_tui
 from agentica.cli.runtime import (
     configure_tools,
     create_agent,
@@ -156,7 +156,7 @@ def _resume_session_cli_prefs(agent_config: dict) -> dict:
     session_id = agent_config.get("session_id")
     if not session_id or not agent_config.get("_resume_requested"):
         return {}
-    from agentica.memory.session_log import SessionLog
+    from agentica.session.log import SessionLog
 
     log = SessionLog(
         str(session_id),
@@ -1569,7 +1569,7 @@ def run_interactive(
     # point.
     attach_server = None
     try:
-        from agentica.cli.attach import AttachServer, attach_enabled
+        from agentica.live.attach import AttachServer, attach_enabled
 
         # No config dict passed: this is a global settings toggle, read the same
         # way the CLI's other toggles are (see _maybe_start_cron above).

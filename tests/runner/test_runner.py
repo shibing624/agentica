@@ -184,7 +184,7 @@ class TestRunnerInterruptedTurnPersistence(unittest.TestCase):
     def test_interrupted_turn_log_row_separates_marker_from_display(self):
         """The log row keeps the marker for the model and the partial for UIs."""
         import tempfile
-        from agentica.memory.session_log import SessionLog
+        from agentica.session.log import SessionLog
 
         agent = _make_agent()
         with tempfile.TemporaryDirectory() as tmp:
@@ -982,7 +982,7 @@ class TestSessionLogInTurnPersistence(unittest.TestCase):
         self.assertEqual(entries[2]["tool_call_id"], "call_1")
         self.assertIn("echo:hi", entries[2]["content"])
 
-        from agentica.memory.session_log import assert_trajectory_equivalent
+        from agentica.session.log import assert_trajectory_equivalent
 
         derived = agent._session_log.derive_messages()
         self.assertEqual(
@@ -1244,7 +1244,7 @@ class TestSessionLogInTurnPersistence(unittest.TestCase):
         from unittest.mock import MagicMock
         from agentica.agent import Agent
         from agentica.model.anthropic.claude import Claude
-        from agentica.memory.session_log import assert_trajectory_equivalent
+        from agentica.session.log import assert_trajectory_equivalent
         from anthropic.types import TextBlock, ToolUseBlock
         from anthropic.lib.streaming._types import (
             ParsedContentBlockStopEvent,

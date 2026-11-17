@@ -115,6 +115,7 @@ class PendingAction:
     options: List[Any] = field(default_factory=list)
     page: int = 0
     has_more: bool = False
+    scope: str = "recent"  # session pickers: "recent" or "all" (``/session all``)
     interaction_kind: str = ""  # "ask" | "approval"
     request_id: str = ""
     session_id: str = ""
@@ -233,7 +234,7 @@ def _fmt_elapsed(seconds: float) -> str:
 # (command, Chinese alias, what it does)
 IM_COMMANDS: List[Tuple[str, str, str]] = [
     ("/menu", "菜单", "打开快捷控制菜单"),
-    ("/session", "会话", "查看并切换当前项目的会话（含正在运行的终端）"),
+    ("/session", "会话", "查看并切换当前项目的近期会话（含正在运行的终端）；/session all 含较早和归档的"),
     ("/new", "新建", "在当前目录新建会话"),
     ("/project", "项目", "切换本机项目工作区（多会话时继续选择会话）"),
     ("/model", "", "切换当前会话模型"),

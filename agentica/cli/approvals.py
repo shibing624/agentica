@@ -14,6 +14,8 @@ from typing import Any, Callable, Dict, Optional, Sequence, Tuple
 from uuid import uuid4
 
 from agentica.agent.approvals import (
+    approval_decision_from_key,
+    visible_approval_decisions,
     EXECUTE_TOOLS,
     FILE_TOOLS,
     ApprovalDecision,
@@ -30,51 +32,6 @@ from agentica.utils.log import logger
 
 #: How often the parked approval re-checks that its wait still exists.
 _APPROVAL_IDLE_TICK_SECONDS = 1.0
-
-
-_DECISION_ORDER: Tuple[ApprovalDecision, ...] = (
-    "allow",
-    "allow_prefix",
-    "deny",
-    "deny_prefix",
-)
-
-_LETTER_TO_DECISION: Dict[str, ApprovalDecision] = {
-    "y": "allow",
-    "yes": "allow",
-    "p": "allow_prefix",
-    "n": "deny",
-    "no": "deny",
-    "esc": "deny",
-    "escape": "deny",
-    "x": "deny_prefix",
-}
-
-
-def visible_approval_decisions(
-    options: Optional[Sequence[str]] = None,
-) -> Tuple[ApprovalDecision, ...]:
-    """Stable allow → allow-similar → deny → deny-similar, omitting hidden ones."""
-    offered = set(options) if options is not None else set(_DECISION_ORDER)
-    return tuple(d for d in _DECISION_ORDER if d in offered)
-
-
-def approval_decision_from_key(
-    key: str,
-    options: Optional[Sequence[str]] = None,
-) -> Optional[ApprovalDecision]:
-    """Map y / p / esc / x / 1..N to a decision among the visible options."""
-    k = (key or "").strip().lower()
-    visible = visible_approval_decisions(options)
-    if k.isdigit():
-        idx = int(k) - 1
-        if 0 <= idx < len(visible):
-            return visible[idx]
-        return None
-    decision = _LETTER_TO_DECISION.get(k)
-    if decision is None or decision not in visible:
-        return None
-    return decision
 
 
 def is_approval_request(req: Any) -> bool:

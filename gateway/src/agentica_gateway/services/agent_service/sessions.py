@@ -16,8 +16,16 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from agentica.cli.prefs import normalize_cli_prefs
-from agentica.memory.session_log import SessionLog, is_session_unread, iso_timestamp
+from agentica.session.catalog import (
+    DEFAULT_RECENT_DAYS,
+    Catalog,
+    LiveState,
+    forget_preview,
+    im_source_of_session_id,
+    list_catalog,
+)
+from agentica.session.log import SessionLog, iso_timestamp
+from agentica.session.rows import strip_image_markers
 from agentica.run.context import RunSource
 from agentica.tools.background_processes import (
     BackgroundProcess,
@@ -28,7 +36,6 @@ from agentica.tools.background_processes import (
     background_result_for_agent,
     claim_job_delivery,
     completed_from_record,
-    count_running_session_jobs,
     delivery_owner,
     load_session_job_views,
     mark_job_delivered,
@@ -44,12 +51,8 @@ from agentica.tools.background_processes import (
 from agentica.utils.log import logger
 
 from ...config import settings
-from .. import chat_images
 from .types import (
-    CRON_SESSION_PREFIX,
-    IM_SESSION_SOURCES,
     _TITLE_PROMPT,
-    _infer_im_source_from_session_id,
     _log_report_failure,
 )
 
@@ -66,181 +69,86 @@ BACKGROUND_IDLE_POLL_SECONDS = 1.0
 class AgentSessionsMixin:
     """Session discovery, fork/feedback/rename/archive/delete, and background processes."""
 
-    def _session_preview(self, entry: Dict[str, Any]) -> Dict[str, Any]:
-        path = str(entry["path"])
-        version = (
-            int(entry.get("size_bytes") or 0),
-            int(entry.get("mtime_ns") or 0),
+    def live_state(self, owner: Optional[str] = None) -> LiveState:
+        """What this process knows about the owner's sessions and the disk does not."""
+        uid = self._owner(owner)
+        prefix = self._sk("", uid)
+        running = {turn.session_id for turn in _pkg().live_turn.iter_owner(uid) if not turn.done}
+        running |= {
+            key[len(prefix):] for key, lock in self._session_locks.items()
+            if key.startswith(prefix) and lock.locked()
+        }
+        return LiveState(
+            running=running,
+            registries={k[len(prefix):]: v for k, v in self._session_background.items() if k.startswith(prefix)},
+            approval_modes={k[len(prefix):]: v for k, v in self._session_approval_modes.items() if k.startswith(prefix)},
         )
-        with self._session_preview_lock:
-            cached = self._session_preview_cache.get(path)
-            if cached is not None and cached[0] == version:
-                self._session_preview_cache.move_to_end(path)
-                return cached[1]
-        preview = SessionLog.session_preview(path)
-        with self._session_preview_lock:
-            self._session_preview_cache[path] = (version, preview)
-            self._session_preview_cache.move_to_end(path)
-            while len(self._session_preview_cache) > 10000:
-                self._session_preview_cache.popitem(last=False)
-        return preview
 
-    def list_sessions(
+    def session_catalog(
         self,
         owner: Optional[str] = None,
+        *,
+        work_dir: Optional[str] = None,
         scope: str = "recent",
-        recent_days: int = 30,
+        recent_days: int = DEFAULT_RECENT_DAYS,
         include_cli: bool = False,
         hide_temp_dirs: bool = False,
-    ) -> List[Dict[str, Any]]:
-        """List lightweight session summaries across the owner's projects."""
-        if scope not in ("all", "recent"):
-            raise ValueError(f"Unknown session scope: {scope}")
-        if recent_days < 1:
-            raise ValueError("recent_days must be positive")
-        pkg = _pkg()
+    ) -> Catalog:
+        """The owner's session list (``agentica.session.catalog``) with this process's live state."""
+        catalog = list_catalog(
+            user_id=self._owner(owner),
+            work_dir=work_dir,
+            scope=scope,
+            recent_days=recent_days,
+            include_cli=include_cli,
+            hide_temp_dirs=hide_temp_dirs,
+            workspace_dir=str(settings.base_dir),
+            live=self.live_state(owner),
+            fallback_base_dir=self._session_base_dir(str(settings.base_dir), owner),
+        )
+        self._add_unlogged_live_rows(catalog, owner, work_dir)
+        return catalog
+
+    def list_sessions(self, owner: Optional[str] = None, **kwargs: Any) -> List[Dict[str, Any]]:
+        return self.session_catalog(owner, **kwargs).rows
+
+    def _add_unlogged_live_rows(self, catalog: Catalog, owner: Optional[str], work_dir: Optional[str]) -> None:
+        """A run started a moment ago has a LiveTurn and no log line yet: list it now."""
         uid = self._owner(owner)
-        projects = SessionLog.list_projects(user_id=uid)
-        if not projects:
-            projects = [{
-                "base_dir": self._session_base_dir(str(settings.base_dir), owner),
-                "work_dir": str(settings.base_dir),
-            }]
-        candidates: Dict[str, tuple[Dict[str, Any], str]] = {}
-        for project in projects:
-            base_dir = project["base_dir"]
-            work_dir = project.get("work_dir") or ""
-            for entry in SessionLog.list_sessions(base_dir=base_dir, work_dir=work_dir or None):
-                sid = entry["session_id"]
-                if sid.startswith(CRON_SESSION_PREFIX):
-                    continue
-                previous = candidates.get(sid)
-                if previous is None or int(entry.get("size_bytes") or 0) > int(previous[0].get("size_bytes") or 0):
-                    candidates[sid] = (entry, work_dir)
-
-        cutoff = time.time() - recent_days * 86400
-        gateway_dir = os.path.realpath(str(settings.base_dir))
-
-        def _hidden_temp(work_dir: str) -> bool:
-            if not pkg.is_system_temp_path(work_dir):
-                return False
-            real = os.path.realpath(work_dir)
-            return not (real == gateway_dir or real.startswith(gateway_dir + os.sep))
-
-        out: List[Dict[str, Any]] = []
-        for entry, project_work_dir in candidates.values():
-            sid = entry["session_id"]
-            running = (
-                self.is_session_active(sid, owner=uid)
-                or pkg.live_turn.active(sid, owner=uid) is not None
-            )
-            source = entry.get("source")
-            im_from_sid = _infer_im_source_from_session_id(sid)
-            if not source:
-                if im_from_sid:
-                    source = im_from_sid
-                elif entry.get("cli"):
-                    source = "cli"
-                elif entry.get("last_read_at"):
-                    source = "gateway"
-                else:
-                    source = "legacy"
-            bg_dir = Path(entry["path"]).parent / sid / "background"
-            bg_running = count_running_session_jobs(
-                bg_dir, self._session_background.get(self._sk(sid, uid)),
-            )
-            has_live_work = running or bg_running > 0
-            origin = im_from_sid or entry.get("origin") or source
-            is_gateway_or_im = any(
-                s in ("gateway", "cron") or s in IM_SESSION_SOURCES for s in (source, origin)
-            )
-            archived = bool(entry.get("archived"))
-            pinned = bool(entry.get("pinned"))
-            if not has_live_work and not (is_gateway_or_im or (include_cli and source == "cli")):
+        seen = {row["session_id"] for row in catalog.rows}
+        real_dir = os.path.realpath(work_dir) if work_dir else ""
+        for turn in _pkg().live_turn.iter_owner(uid):
+            if turn.done or turn.session_id in seen:
                 continue
-            if (
-                not has_live_work
-                and hide_temp_dirs
-                and _hidden_temp(entry.get("work_dir") or project_work_dir)
-                and not self._session_preview(entry).get("user_count")
-                and not self._session_preview(entry).get("cron_job_name")
-            ):
-                continue
-            if (
-                scope == "recent"
-                and not is_gateway_or_im
-                and not has_live_work
-                and not archived
-                and not pinned
-                and float(entry.get("mtime") or 0) < cutoff
-            ):
-                continue
-            preview = self._session_preview(entry)
-            first_user = chat_images.strip_markers(preview.get("first_user", "") or "")
-            cron_title = str(preview.get("cron_job_name") or "").strip()
-            display_title = SessionLog.display_title(
-                name=entry.get("name"),
-                first_user=first_user,
-                cron_job_name=cron_title,
-            )
-            first_ts = entry.get("first_timestamp")
-            if not first_ts and entry.get("mtime"):
-                first_ts = iso_timestamp(entry["mtime"])
-            last_ts = entry.get("last_timestamp")
-            last_read_at = entry.get("last_read_at")
-            out.append({
-                "session_id": sid,
-                "name": display_title,
-                "preview": first_user or cron_title,
-                "user_count": preview.get("user_count", 0),
-                "first_timestamp": first_ts,
-                "last_timestamp": last_ts,
-                "last_read_at": last_read_at,
-                "unread": (not running) and is_session_unread(last_ts, last_read_at),
-                "size_bytes": entry.get("size_bytes", 0),
-                "archived": archived,
-                "pinned": pinned,
-                "work_dir": entry.get("work_dir") or project_work_dir,
-                "running": running,
-                "background_jobs": bg_running,
-                "source": source,
-                "origin": origin,
-                "approval_mode": self._session_approval_modes.get(self._sk(sid, uid))
-                or normalize_cli_prefs(entry.get("cli")).get("permissions"),
-            })
-        seen = {row["session_id"] for row in out}
-        for turn in pkg.live_turn.iter_owner(uid):
-            if turn.session_id.startswith(CRON_SESSION_PREFIX) or turn.session_id in seen:
+            turn_dir = self.get_session_work_dir(turn.session_id, owner=uid)
+            if real_dir and os.path.realpath(turn_dir or "") != real_dir:
                 continue
             live_log = self.session_log_for(turn.session_id, owner=uid)
-            live_source = (
-                live_log.get_source()
-                or _infer_im_source_from_session_id(turn.session_id)
-                or "gateway"
-            )
-            live_title = SessionLog.display_title(
-                name=live_log.get_name(),
-                first_user=chat_images.strip_markers(turn.user_message or ""),
-                cron_job_name=((turn.cron_job or {}).get("name") or ""),
-            )
-            out.append({
+            source = live_log.get_source() or im_source_of_session_id(turn.session_id) or "gateway"
+            catalog.rows.insert(0, {
                 "session_id": turn.session_id,
-                "name": live_title,
+                "name": SessionLog.display_title(
+                    name=live_log.get_name(),
+                    first_user=strip_image_markers(turn.user_message or ""),
+                    cron_job_name=((turn.cron_job or {}).get("name") or ""),
+                ),
                 "preview": "",
                 "user_count": 0,
                 "first_timestamp": iso_timestamp(),
                 "last_timestamp": None,
                 "last_read_at": None,
+                "mtime": time.time(),
                 "unread": False,
                 "size_bytes": 0,
                 "archived": False,
-                "work_dir": self.get_session_work_dir(turn.session_id, owner=uid),
-                "running": not turn.done,
-                "source": live_source,
+                "pinned": False,
+                "work_dir": turn_dir,
+                "running": True,
+                "background_jobs": 0,
+                "source": source,
+                "origin": source,
                 "approval_mode": self._saved_approval_mode(turn.session_id, owner=uid),
             })
-        out.sort(key=lambda row: str(row.get("first_timestamp") or ""), reverse=True)
-        return out
 
     def session_log_for(self, session_id: str, owner: Optional[str] = None) -> SessionLog:
         """Open the on-disk SessionLog for a session (may not exist yet)."""
@@ -327,8 +235,7 @@ class AgentSessionsMixin:
         log_existed = False
         try:
             log = SessionLog(session_id=session_id, base_dir=base_dir)
-            with self._session_preview_lock:
-                self._session_preview_cache.pop(str(log.path), None)
+            forget_preview(str(log.path))
             if log.path.exists():
                 log.path.unlink()
                 log_existed = True
@@ -594,7 +501,7 @@ class AgentSessionsMixin:
         branch.set_source(RunSource.gateway.value)
         title = SessionLog.display_title(
             name=log.get_name(),
-            first_user=chat_images.strip_markers(log.first_user_message() or ""),
+            first_user=strip_image_markers(log.first_user_message() or ""),
         )
         SessionLog.rename_session(new_id, f"{title} (fork)", base_dir=str(log.base_dir))
         if log._cwd:
@@ -639,7 +546,7 @@ class AgentSessionsMixin:
 
     async def _write_title(self, log: SessionLog, question: str, answer: str, owner: str) -> None:
         prompt = (
-            f"User:\n{chat_images.strip_markers(question)[:2000]}\n\n"
+            f"User:\n{strip_image_markers(question)[:2000]}\n\n"
             f"Assistant:\n{answer[:2000]}"
         )
         try:

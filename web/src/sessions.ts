@@ -287,11 +287,10 @@ export async function pollSessionsPulse() {
   try {
     const { ok, data } = await api.fetchSessionsPulse();
     if (!ok || !data || typeof data.ver !== "number") return;
+    // The first reading is only a baseline: the catalog loaded at start-up
+    // already carries each session's ``running``.
     if (lastPulseVer === null) {
       lastPulseVer = data.ver;
-      if (Array.isArray(data.active) && data.active.length > 0) {
-        await syncFromServer(true);
-      }
       return;
     }
     if (data.ver !== lastPulseVer) {
@@ -352,10 +351,6 @@ export async function hydrateSession(id: string, force = false, allowResuming = 
   }
   const olderTurns = data.older_turns ?? 0;
   const msgs = mergeClientSteers(id, eventsToChatMsgs(data.events), olderTurns);
-  if (!olderTurns && (!sess.title || sess.title === "Chat")) {
-    const firstCron = msgs.find((m) => m.role === "user" && m.cronJob?.name)?.cronJob?.name?.trim();
-    if (firstCron) sess.title = firstCron;
-  }
   // Look up the files cards' paths before the transcript is shown, so each
   // reply and its card land in one paint. Bounded: a slow stat only brings
   // back the late card, never a blank chat.
@@ -484,7 +479,9 @@ export async function rateMessage(
   return true;
 }
 
-/** Stamp each assistant footer with the same round the Trace page draws. */
+/** Stamp each reply footer with its round from the Trace analysis. A round
+ *  names the reply it belongs to (``replyUuid``, the uuid of the bubble's last
+ *  log row), so footers are matched by identity, never by position. */
 export async function syncSessionRoundStats(id: string) {
   // New Chat has a client id and no jsonl yet; the analysis route 404s.
   const existing = getState().sessions[id];
@@ -493,41 +490,20 @@ export async function syncSessionRoundStats(id: string) {
   if (!ok || !data?.rounds) return;
   const sess = getState().sessions[id];
   if (!sess) return;
-  const rounds = (data.rounds as Array<{
-    compaction?: boolean;
-    inFlight?: boolean;
-    durationMs: number;
-    llmMs: number;
-    requests?: number;
-    tokens: {
-      prompt: number;
-      output: number;
-      cacheRead: number;
-      cacheWrite?: number;
-      cacheHitPercent: number | null;
-    };
-    costUsd: number | null;
-  }>).filter((r) => !r.compaction);
+  const rounds = data.rounds;
   // The log records the session's model once; per-round ids are not kept.
   const model = typeof data.meta?.model === "string" ? data.meta.model : "";
-  // Compact cards are not rounds (the analysis drops compaction rounds too).
-  const liveAi = getState().streams[id]?.aiMsg;
-  const assistants = sess.msgs.filter(
-    (m) => m.role === "assistant" && !m.compact && m !== liveAi && !(sess.running && m.inFlight),
-  );
-  const tailInFlight = Boolean((sess.running || liveAi) && rounds[rounds.length - 1]?.inFlight);
-  const settledRounds = tailInFlight ? rounds.slice(0, rounds.length - 1) : rounds;
-  const n = assistants.length;
-  const roundOffset = Math.max(0, settledRounds.length - n);
+  const byReply = new Map(rounds.filter((r) => r.replyUuid && !r.inFlight).map((r) => [r.replyUuid, r]));
   let changed = false;
   const lastRound = rounds[rounds.length - 1];
   if (lastRound?.tokens?.prompt && sess.lastInputTokens !== lastRound.tokens.prompt) {
     sess.lastInputTokens = lastRound.tokens.prompt;
     changed = true;
   }
-  for (let i = 0; i < n && roundOffset + i < settledRounds.length; i++) {
-    const m = assistants[i];
-    const rd = settledRounds[roundOffset + i];
+  for (const m of sess.msgs) {
+    if (m.role !== "assistant" || m.compact || !m.uuid) continue;
+    const rd = byReply.get(m.uuid);
+    if (!rd) continue;
     if (
       m.llmMs === rd.llmMs
       && m.durationMs === rd.durationMs

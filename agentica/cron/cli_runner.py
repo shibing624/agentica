@@ -61,7 +61,7 @@ def _prompt_open_terminal(
     scheduled prompt must not be recorded or rendered as the user's own words,
     and ``ticket_id`` makes the records this turn starts name the job.
     """
-    from agentica.cli.attach import prompt_live_session
+    from agentica.live.attach import prompt_live_session
 
     result = prompt_live_session(
         peer, prompt, session_id=session_id, timeout=ATTACH_PROMPT_TIMEOUT,

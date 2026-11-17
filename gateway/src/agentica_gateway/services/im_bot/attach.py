@@ -7,14 +7,14 @@ The client used to live here, which made it unreachable for the callers that
 need it most: the cron daemon runs in the CLI process, and ``agentica`` cannot
 import ``agentica_gateway`` (a separate distribution, and an optional one). The
 implementation now sits next to the server that speaks the same protocol
-(``agentica.cli.attach``), and this module keeps the old import path working so
+(``agentica.live.attach``), and this module keeps the old import path working so
 gateway code did not have to change all at once.
 """
 from __future__ import annotations
 
 from typing import Optional
 
-from agentica.cli.attach import (
+from agentica.live.attach import (
     AttachClient as _AttachRpcClient,
     prompt_live_session,
     read_attach_token,

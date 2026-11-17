@@ -81,7 +81,7 @@ for file in "${changed_files[@]:-}"; do
     agentica/model/openai/*|\
     agentica/model/anthropic/*|\
     agentica/compression/*|\
-    agentica/memory/session_log.py|\
+    agentica/session/log.py|\
     agentica/aux_session.py|\
     agentica/cost_tracker.py|\
     scripts/check-cache-impact.sh|\
@@ -95,7 +95,7 @@ for file in "${changed_files[@]:-}"; do
     agentica/agent/base.py|\
     agentica/model/message.py|\
     agentica/compression/*|\
-    agentica/memory/session_log.py)
+    agentica/session/log.py)
       system_prompt_sensitive+=("$file")
       ;;
   esac

@@ -13,6 +13,7 @@ import sys
 os.environ.setdefault("OPENAI_API_KEY", "sk-test-not-real")
 
 import pytest
+from agentica.session.catalog import Catalog
 
 # Guard: only run if fastapi + httpx are available
 pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
@@ -40,10 +41,10 @@ def mock_app():
         user_id="test-user",
         tools_used=["read_file"],
     ))
-    mock_svc.list_sessions = MagicMock(return_value=[
+    mock_svc.session_catalog = MagicMock(return_value=Catalog(rows=[
         {"session_id": "s1", "name": "Chat 1", "preview": "hello", "user_count": 1, "last_timestamp": None, "size_bytes": 100, "archived": False},
         {"session_id": "s2", "name": "Chat 2", "preview": "world", "user_count": 2, "last_timestamp": None, "size_bytes": 200, "archived": True},
-    ])
+    ]))
     mock_svc.delete_session = MagicMock(return_value=True)
     mock_svc.rename_session = MagicMock()
     mock_svc.archive_session = MagicMock()
@@ -313,8 +314,8 @@ class TestSessionEndpoints:
         assert sessions[1]["session_id"] == "s2"
         assert sessions[1]["archived"] is True
         assert data["scope"] == "recent"
-        mock_svc.list_sessions.assert_called_with(
-            owner="default", scope="recent", recent_days=30, include_cli=False, hide_temp_dirs=True,
+        mock_svc.session_catalog.assert_called_with(
+            "default", scope="recent", recent_days=30, include_cli=False, hide_temp_dirs=True,
         )
 
     def test_list_all_sessions(self, mock_app):
@@ -322,15 +323,15 @@ class TestSessionEndpoints:
         resp = client.get("/api/sessions?scope=all&recent_days=90")
         assert resp.status_code == 200
         assert resp.json()["scope"] == "all"
-        mock_svc.list_sessions.assert_called_with(
-            owner="default", scope="all", recent_days=90, include_cli=False, hide_temp_dirs=True,
+        mock_svc.session_catalog.assert_called_with(
+            "default", scope="all", recent_days=90, include_cli=False, hide_temp_dirs=True,
         )
 
     def test_list_sessions_follows_the_show_cli_sessions_pref(self, mock_app):
         client, mock_svc = mock_app
         with patch("agentica_gateway.routes.chat.show_cli_sessions_pref", return_value=True):
             client.get("/api/sessions")
-        assert mock_svc.list_sessions.call_args.kwargs["include_cli"] is True
+        assert mock_svc.session_catalog.call_args.kwargs["include_cli"] is True
 
     def test_fork_session(self, mock_app):
         client, mock_svc = mock_app
@@ -409,7 +410,7 @@ class TestSessionEndpoints:
         mock_svc.pin_session.assert_called_with("s1", pinned=False, owner="default")
 
     def test_pinned_flag_round_trips_through_the_sidecar(self, tmp_path):
-        from agentica.memory.session_log import SessionLog
+        from agentica.session.log import SessionLog
 
         log = SessionLog(session_id="s1", base_dir=str(tmp_path))
         log.append("user", "hi")

@@ -17,7 +17,7 @@ import shlex
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Sequence, Tuple
 
 from agentica.tools.base import Function, FunctionCall
 from agentica.tools.os_sandbox import repository_paths, writable_temp_roots
@@ -30,6 +30,51 @@ from agentica.tools.safety import (
 from agentica.utils.log import logger
 
 ApprovalDecision = Literal["allow", "allow_prefix", "deny", "deny_prefix"]
+
+_DECISION_ORDER: Tuple[ApprovalDecision, ...] = (
+    "allow",
+    "allow_prefix",
+    "deny",
+    "deny_prefix",
+)
+
+_LETTER_TO_DECISION: Dict[str, ApprovalDecision] = {
+    "y": "allow",
+    "yes": "allow",
+    "p": "allow_prefix",
+    "n": "deny",
+    "no": "deny",
+    "esc": "deny",
+    "escape": "deny",
+    "x": "deny_prefix",
+}
+
+
+def visible_approval_decisions(
+    options: Optional[Sequence[str]] = None,
+) -> Tuple[ApprovalDecision, ...]:
+    """Stable allow → allow-similar → deny → deny-similar, omitting hidden ones."""
+    offered = set(options) if options is not None else set(_DECISION_ORDER)
+    return tuple(d for d in _DECISION_ORDER if d in offered)
+
+
+def approval_decision_from_key(
+    key: str,
+    options: Optional[Sequence[str]] = None,
+) -> Optional[ApprovalDecision]:
+    """Map y / p / esc / x / 1..N to a decision among the visible options."""
+    k = (key or "").strip().lower()
+    visible = visible_approval_decisions(options)
+    if k.isdigit():
+        idx = int(k) - 1
+        if 0 <= idx < len(visible):
+            return visible[idx]
+        return None
+    decision = _LETTER_TO_DECISION.get(k)
+    if decision is None or decision not in visible:
+        return None
+    return decision
+
 ApprovalRoute = Literal["allow", "ask", "deny"]
 
 # Set around ``fc.execute()`` after a human (or allow-all classify) allowed

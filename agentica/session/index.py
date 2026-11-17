@@ -34,8 +34,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from agentica.config.project import projects_root, read_project_file
-from agentica.memory.log_rows import classify_user
-from agentica.memory.session_search import score_content, search_terms
+from agentica.session.rows import classify_user
+from agentica.session.search import score_content, search_terms
 from agentica.utils.log import logger
 
 INDEX_FILENAME = "session_index.db"
