@@ -201,10 +201,29 @@ class BuiltinTaskTool(Tool):
             "subagent_type": run.subagent_type,
             "task": run.task_description,
             "result": result,
-            "tool_calls_summary": run.tool_calls_summary or [],
+            "tool_calls_summary": self._display_tool_calls(run.tool_calls_summary or []),
             "child_session_id": run.child_session_id or "",
             "transcript_path": run.transcript_path or "",
         }, ensure_ascii=False, indent=2)
+
+    @staticmethod
+    def _display_tool_calls(summary: Any) -> Any:
+        """Keep parent-facing tool locators without replaying raw arguments."""
+        if not isinstance(summary, list):
+            return []
+        return [
+            {
+                k: v
+                for k, v in {
+                    "name": item.get("name", ""),
+                    "info": item.get("info", ""),
+                    "output_path": item.get("output_path"),
+                }.items()
+                if v
+            }
+            for item in summary
+            if isinstance(item, dict)
+        ]
 
     def model_label_for(self, tool_args: Optional[dict] = None) -> Optional[str]:
         """Which model the subagent this call would spawn actually runs.
@@ -335,7 +354,7 @@ class BuiltinTaskTool(Tool):
                 "model": result.get("model", ""),
                 "model_tier": result.get("model_tier", ""),
                 "result": result_content,
-                "tool_calls_summary": result.get("tool_calls_summary", []),
+                "tool_calls_summary": self._display_tool_calls(result.get("tool_calls_summary", [])),
                 "execution_time": result.get("execution_time", 0.0),
                 "tool_count": result.get("tool_count", 0),
             }
@@ -358,19 +377,21 @@ class BuiltinTaskTool(Tool):
                 "model": result.get("model", ""),
                 "model_tier": result.get("model_tier", ""),
                 "result": result.get("content", ""),
-                "tool_calls_summary": result.get("tool_calls_summary", []),
+                "tool_calls_summary": self._display_tool_calls(result.get("tool_calls_summary", [])),
                 "tool_count": result.get("tool_count", 0),
-                "elapsed_seconds": result.get("elapsed_seconds", 0.0),
+                "execution_time": result.get("execution_time", result.get("elapsed_seconds", 0.0)),
                 # ``run_id`` + ``next_action`` are how the parent Agent's ReAct
                 # loop learns it can resume this task instead of restarting.
                 "run_id": result.get("run_id"),
+                "child_session_id": result.get("child_session_id"),
+                "transcript_path": result.get("transcript_path"),
                 "next_action": result.get("next_action"),
                 "description": description[:300],
             }, ensure_ascii=False, indent=2)
 
         # Genuine failure: still surface partial content if any was recovered
         # (e.g. exception mid-stream), otherwise fall back to bare error.
-        payload = {
+        payload: Dict[str, Any] = {
             "success": False,
             "status": status,
             "error": result.get("error", "Subagent failed without an error message."),
@@ -378,6 +399,8 @@ class BuiltinTaskTool(Tool):
             "model": result.get("model", ""),
             "model_tier": result.get("model_tier", ""),
             "run_id": result.get("run_id"),
+            "child_session_id": result.get("child_session_id"),
+            "transcript_path": result.get("transcript_path"),
             "next_action": result.get("next_action"),
             "description": description[:300],
         }
@@ -385,7 +408,7 @@ class BuiltinTaskTool(Tool):
         if partial_content:
             payload["result"] = partial_content
             payload["partial"] = True
-            payload["tool_calls_summary"] = result.get("tool_calls_summary", [])
+            payload["tool_calls_summary"] = self._display_tool_calls(result.get("tool_calls_summary", []))
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
     @staticmethod

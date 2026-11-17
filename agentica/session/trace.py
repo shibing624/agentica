@@ -862,10 +862,17 @@ def _task_result_fields(content: Any) -> Optional[Dict[str, Any]]:
         "result": _detail(str(data.get("result") or ""))[:TASK_RESULT_CAP],
         "error": str(data.get("error") or ""),
     }
-    if isinstance(data.get("execution_time"), (int, float)):
-        out["executionMs"] = int(round(data["execution_time"] * 1000))
+    elapsed = data.get("execution_time")
+    if elapsed is None:
+        elapsed = data.get("elapsed_seconds")
+    if isinstance(elapsed, (int, float)):
+        out["executionMs"] = int(round(elapsed * 1000))
     if data.get("run_id"):
         out["runId"] = str(data["run_id"])
+    if data.get("child_session_id"):
+        out["childSessionId"] = str(data["child_session_id"])
+    if data.get("transcript_path"):
+        out["transcriptPath"] = str(data["transcript_path"])
     if data.get("model"):
         out["model"] = str(data["model"])
     if data.get("model_tier"):

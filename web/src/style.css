@@ -1862,9 +1862,10 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 [data-theme="dark"] .task-model.tier-main,[data-theme="dark"] .tr-tool-model.tier-main{color:#c084fc;background:rgba(139,92,246,.18)}
 .task-num{font-family:var(--mono);font-size:11.5px;font-variant-numeric:tabular-nums}
 .task-run{font-family:var(--mono);font-size:11px;opacity:.8}
-.task-sec>summary{cursor:pointer;list-style:none;color:var(--fg2);font-size:12px;user-select:none}
+.task-sec>summary{display:flex;align-items:center;gap:6px;min-height:28px;padding:2px 6px 2px 0;border-radius:6px;cursor:pointer;list-style:none;color:var(--fg2);font-size:12px;user-select:none}
 .task-sec>summary::-webkit-details-marker{display:none}
-.task-sec>summary::before{content:"▸";display:inline-block;width:12px;color:var(--fg3);transition:transform .12s}
+.task-sec>summary::before{content:"";flex:0 0 16px;width:16px;height:16px;background:currentColor;opacity:.65;clip-path:polygon(35% 20%,80% 50%,35% 80%);transition:transform .12s,opacity .12s}
+.task-sec>summary:hover::before,.task-sec[open]>summary::before{opacity:1}
 .task-sec[open]>summary::before{transform:rotate(90deg)}
 .task-sec-n{margin-left:6px;color:var(--fg3);font-family:var(--mono);font-size:11px}
 .task-brief{margin:4px 0 0 12px;white-space:pre-wrap;word-break:break-word;color:var(--fg2);max-height:220px;overflow:auto}
@@ -1874,8 +1875,12 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .task-step-info{color:var(--fg3)}
 .task-steps-more{list-style:none;color:var(--fg3)}
 .task-error{color:#b91c1c;white-space:pre-wrap;word-break:break-word}
-.task-report{border-top:var(--hair) solid var(--border);padding-top:6px;max-height:min(60vh,520px);overflow:auto;font-size:13px}
-.task-report-h{font-size:12px;color:var(--fg3);margin-bottom:2px}
+.task-report{border-top:var(--hair) solid var(--border);padding-top:6px;font-size:13px}
+.task-report-preview{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg3);font-weight:400}
+.task-report-body{max-height:min(60vh,520px);overflow:auto}
+.task-link{padding:1px 6px;border:var(--hair) solid var(--border);border-radius:5px;background:transparent;color:var(--fg3);font:inherit;font-size:11px;cursor:pointer}
+.task-link:hover{color:var(--fg);border-color:var(--fg3)}
+.task-raw .step-pre.out{max-height:240px;overflow:auto}
 /* Plan: todo list + the folded panel above the composer. */
 .todo-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
 .todo-item{display:flex;align-items:flex-start;gap:10px;font-size:13px;line-height:20px;color:var(--fg2)}

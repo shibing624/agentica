@@ -184,6 +184,35 @@ class TestBuiltinTaskTool:
         assert parsed["result"] == "answer is 42"
         assert parsed["tool_count"] == 1
         assert parsed["execution_time"] == 0.123
+    def test_task_completed_payload_omits_tool_input_blobs(self):
+        """The parent gets locators, not every child tool argument."""
+        tool = BuiltinTaskTool()
+        tool.set_parent_agent(MagicMock())
+
+        async def fake_spawn(self, **kwargs):
+            return {
+                "status": "completed",
+                "agent_type": "code",
+                "content": "answer",
+                "tool_calls_summary": [{
+                    "name": "execute",
+                    "info": "cd repo && rg ...",
+                    "input": "{\"command\":\"huge command\"}",
+                    "output_path": "/tmp/tool-result.txt",
+                }],
+                "tool_count": 1,
+                "execution_time": 0.5,
+                "run_id": "run-1",
+            }
+
+        with patch("agentica.subagents.runtime.SubagentRegistry.spawn", new=fake_spawn):
+            payload = json.loads(asyncio.run(tool.task("d", "d")))
+
+        assert payload["tool_calls_summary"] == [{
+            "name": "execute",
+            "info": "cd repo && rg ...",
+            "output_path": "/tmp/tool-result.txt",
+        }]
 
     def test_task_serializes_error_result(self):
         """Adapter surfaces spawn errors through the LLM-facing JSON envelope."""
@@ -205,6 +234,33 @@ class TestBuiltinTaskTool:
         assert parsed["success"] is False
         assert "timed out" in parsed["error"]
         assert parsed["subagent_type"] == "code"
+
+    def test_task_partial_payload_uses_execution_time_and_keeps_locators(self):
+        """Timeout rows need both the real elapsed time and child session links."""
+        tool = BuiltinTaskTool()
+        tool.set_parent_agent(MagicMock())
+
+        async def fake_spawn(self, **kwargs):
+            return {
+                "status": "timeout",
+                "error": "Subagent timed out",
+                "agent_type": "explore",
+                "content": "partial",
+                "tool_calls_summary": [],
+                "tool_count": 1,
+                "elapsed_seconds": 1801.25,
+                "run_id": "run-timeout",
+                "child_session_id": "parent.subagent.run-timeout",
+                "transcript_path": "/tmp/parent.subagent.run-timeout.jsonl",
+                "partial": True,
+            }
+
+        with patch("agentica.subagents.runtime.SubagentRegistry.spawn", new=fake_spawn):
+            payload = json.loads(asyncio.run(tool.task("d", "d")))
+
+        assert payload["execution_time"] == 1801.25
+        assert payload["child_session_id"] == "parent.subagent.run-timeout"
+        assert payload["transcript_path"] == "/tmp/parent.subagent.run-timeout.jsonl"
 
     def test_format_tool_brief_read_file(self):
         brief = BuiltinTaskTool._format_tool_brief("read_file", {"file_path": "/a/b/c.py"})

@@ -189,6 +189,8 @@ export type TaskResult = {
   result: string;
   error: string;
   runId?: string;
+  childSessionId?: string;
+  transcriptPath?: string;
 };
 
 /** The `task` tool's JSON result; null when it is not one (e.g. truncated). */
@@ -201,6 +203,11 @@ export function parseTaskResult(text: string | undefined): TaskResult | null {
     ? data.tool_calls_summary.filter((s: any) => s && typeof s === "object")
       .map((s: any) => ({ name: String(s.name || ""), info: String(s.info || "") }))
     : [];
+  const elapsedSeconds = typeof data.execution_time === "number"
+    ? data.execution_time
+    : typeof data.elapsed_seconds === "number"
+      ? data.elapsed_seconds
+      : undefined;
   return {
     success: !!data.success,
     status: String(data.status || (data.success ? "completed" : "error")),
@@ -208,12 +215,14 @@ export function parseTaskResult(text: string | undefined): TaskResult | null {
     subagentType: String(data.subagent_type || ""),
     model: data.model ? String(data.model) : undefined,
     modelTier: data.model_tier ? String(data.model_tier) : undefined,
-    executionMs: typeof data.execution_time === "number" ? Math.round(data.execution_time * 1000) : undefined,
+    executionMs: elapsedSeconds === undefined ? undefined : Math.round(elapsedSeconds * 1000),
     toolCount: Number(data.tool_count || steps.length) || 0,
     steps,
     result: String(data.result || ""),
     error: String(data.error || ""),
     runId: data.run_id ? String(data.run_id) : undefined,
+    childSessionId: data.child_session_id ? String(data.child_session_id) : undefined,
+    transcriptPath: data.transcript_path ? String(data.transcript_path) : undefined,
   };
 }
 

@@ -43,7 +43,15 @@ type Call = {
   resultSummary?: string;
 };
 
-type TaskFields = Partial<TaskResult> & { description?: string; prompt?: string; subagentType?: string; model?: string; modelTier?: string };
+type TaskFields = Partial<TaskResult> & {
+  description?: string;
+  prompt?: string;
+  subagentType?: string;
+  model?: string;
+  modelTier?: string;
+  childSessionId?: string;
+  transcriptPath?: string;
+};
 
 type ModelToolCall = {
   index: number;
@@ -1106,5 +1114,7 @@ function taskResultOf(t: TaskFields): TaskResult {
     result: t.result || "",
     error: t.error || "",
     runId: t.runId,
+    childSessionId: t.childSessionId,
+    transcriptPath: t.transcriptPath,
   };
 }

@@ -223,6 +223,13 @@ def test_spawn_persists_child_transcript_and_returns_locator(tmp_path):
     assert "inspect ticket ZX-41827" in text
     assert "child saw ZX-41827" in text
 
+    meta_path = Path(result["transcript_path"]).with_suffix(".meta.json")
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert meta["parent_session_id"] == "parent-session"
+    assert meta["parent_run_id"] == ""
+    assert meta["subagent_run_id"] == result["run_id"]
+    assert meta["source"] == "subagent"
+
 
 def test_spawn_records_child_tool_output_paths_in_summary(tmp_path):
     """The parent summary must not reduce child tool output to a count only;
@@ -267,6 +274,7 @@ def test_spawn_records_child_tool_output_paths_in_summary(tmp_path):
     assert output_path.is_file()
     assert output_path.read_text(encoding="utf-8") == full_tool_output
     assert "unique-child-tool-output-ZX-41827" not in json.dumps(summary, ensure_ascii=False)
+    assert "input" not in summary[0]
 
 
 def test_spawn_filters_toolkit_functions_by_allowed_and_denied_lists():
@@ -640,12 +648,12 @@ def test_spawn_exception_returns_partial_not_empty():
 
 def test_default_timeout_is_generous():
     """Guard against regression: default timeout must be big enough that real
-    code/research tasks don't hit it just from network latency + tool loops."""
+    long-running investigations don't hit it from tool loops and upstream latency."""
     cfg = SubagentConfig(
         type="x", name="x", description="x", system_prompt="s",
     )
-    # 30 min. If someone lowers this again, this test fails loudly.
-    assert cfg.timeout >= 1800
+    # 12h. Long-horizon subagents can legitimately run much longer than 30m.
+    assert cfg.timeout >= 12 * 60 * 60
 
 
 def test_builtin_task_tool_surfaces_partial_on_timeout():
@@ -766,7 +774,6 @@ def test_builtin_task_tool_get_task_result_returns_registry_record():
         tool_calls_summary=[{
             "name": "read_file",
             "info": "Read 3 lines from a.py",
-            "input": '{"file_path": "a.py"}',
             "output_path": "/tmp/a.py.out",
         }],
         child_session_id="parent.subagent.run-lookup",
@@ -787,7 +794,6 @@ def test_builtin_task_tool_get_task_result_returns_registry_record():
         "tool_calls_summary": [{
             "name": "read_file",
             "info": "Read 3 lines from a.py",
-            "input": '{"file_path": "a.py"}',
             "output_path": "/tmp/a.py.out",
         }],
         "child_session_id": "parent.subagent.run-lookup",
@@ -1594,7 +1600,7 @@ def test_task_system_prompt_exposes_model_tier_per_type():
     # into ``model_tier:`` frontmatter, where anything else is silently rejected.
     assert "| auxiliary |" in explore_row
     # The agent can only raise a timeout it knows about.
-    assert "| 1800s |" in explore_row
+    assert "| 43200s |" in explore_row
     assert "| `review`" not in prompt
 
 

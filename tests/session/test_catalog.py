@@ -96,6 +96,12 @@ class TestListed:
         assert _ids(list_catalog(user_id="default", scope="all")) == {"web"}
         assert _ids(list_catalog(user_id="default", scope="all", include_cli=True)) == {"web", "cli"}
 
+    def test_subagent_transcripts_are_not_conversations(self, proj):
+        _session("parent", proj)
+        child = _session("parent.subagent.run-1", proj, source="subagent")
+        child._write_meta({"parent_session_id": "parent", "subagent_run_id": "run-1"})
+        assert _ids(list_catalog(user_id="default", scope="all", include_cli=True)) == {"parent"}
+
     def test_stubs_and_legacy_cron_sessions_are_not_sessions(self, proj):
         _session("real", proj)
         SessionLog("stub", work_dir=str(proj), user_id="default").path.touch()

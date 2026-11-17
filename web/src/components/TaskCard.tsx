@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { IconChevronDown, IconListCheck } from "../icons";
 import { useStrings } from "../i18n";
 import { fmtDurationMs } from "../lib/format";
@@ -25,6 +25,13 @@ export function TaskCard({
   const ms = result?.executionMs ?? elapsedMs;
   const model = result?.model || callModel || "";
   const tier = result?.modelTier || callTier || "";
+  const [reportOpen, setReportOpen] = useState(() => Boolean(result?.result && result.result.length <= 2000));
+  const report = result?.result || "";
+  const reportPreview = useMemo(() => report.trim().replace(/\s+/g, " ").slice(0, 240), [report]);
+  const reportTruncated = report.length > reportPreview.length;
+  const copy = (value: string) => {
+    if (navigator.clipboard?.writeText) void navigator.clipboard.writeText(value);
+  };
   return (
     <div className="task-card">
       <div className="task-meta">
@@ -39,7 +46,17 @@ export function TaskCard({
         )}
         {ms != null && ms > 0 && <span className="task-num">{fmtDurationMs(ms)}</span>}
         {!!result?.toolCount && <span className="task-num">{S.chat.taskMeta(result.toolCount)}</span>}
-        {result?.runId && <span className="task-run" title={S.chat.taskRunId}>{result.runId}</span>}
+        {result?.runId && <span className="task-run" title={S.chat.taskRunId}>{result.runId.slice(0, 8)}</span>}
+        {result?.childSessionId && (
+          <button type="button" className="task-link" title={result.childSessionId} onClick={() => copy(result.childSessionId!)}>
+            {S.chat.taskChildSession}
+          </button>
+        )}
+        {result?.transcriptPath && (
+          <button type="button" className="task-link" title={result.transcriptPath} onClick={() => copy(result.transcriptPath!)}>
+            {S.chat.taskTranscript}
+          </button>
+        )}
       </div>
       {brief && (
         <details className="task-sec" open={!result && !running}>
@@ -59,13 +76,18 @@ export function TaskCard({
         </details>
       )}
       {result && !result.success && result.error && <div className="task-error">{result.error}</div>}
-      {result?.result && (
-        <div className="task-report">
-          <div className="task-report-h">{S.chat.taskReport}</div>
-          <Suspense fallback={<pre className="markdown-fallback">{result.result}</pre>}>
-            <ChatMarkdown text={result.result} streaming={false} />
-          </Suspense>
-        </div>
+      {report && (
+        <details className="task-sec task-report" open={reportOpen} onToggle={(e) => setReportOpen(e.currentTarget.open)}>
+          <summary>
+            {S.chat.taskReport}
+            {!reportOpen && reportPreview && <span className="task-report-preview">{reportPreview}{reportTruncated ? "…" : ""}</span>}
+          </summary>
+          <div className="task-report-body">
+            <Suspense fallback={<pre className="markdown-fallback">{report}</pre>}>
+              <ChatMarkdown text={report} streaming={false} />
+            </Suspense>
+          </div>
+        </details>
       )}
     </div>
   );

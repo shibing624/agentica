@@ -378,6 +378,9 @@ const en = {
     taskReport: "Report",
     taskBrief: "Brief",
     taskRunId: "Run id",
+    taskChildSession: "Child session",
+    taskTranscript: "Transcript",
+    taskRawResult: "Raw tool result",
     todoTitle: "Tasks",
     todoProgress: (done: number, total: number) => `${done}/${total} done`,
     todoCounts: (done: number, active: number, pending: number) =>
@@ -1389,6 +1392,9 @@ const zh: Strings = {
     taskReport: "结果",
     taskBrief: "任务说明",
     taskRunId: "运行 ID",
+    taskChildSession: "子会话",
+    taskTranscript: "完整轨迹",
+    taskRawResult: "原始工具结果",
     todoTitle: "任务",
     todoProgress: (done: number, total: number) => `${done}/${total} 已完成`,
     todoCounts: (done: number, active: number, pending: number) =>

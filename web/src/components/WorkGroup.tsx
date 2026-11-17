@@ -403,6 +403,7 @@ function ToolDetail({
   bgLogPath?: string;
   onOpenFile?: (path: string) => void;
 }) {
+  const S = useStrings();
   if (part.name === "task") {
     const result = parseTaskResult(resultText);
     return (
@@ -411,7 +412,12 @@ function ToolDetail({
                   model={args.model ? String(args.model) : undefined}
                   modelTier={args.model_tier ? String(args.model_tier) : undefined}
                   result={result} running={running} elapsedMs={duration} />
-        {!result && resultText && !running && <pre className="step-pre out">{resultText}</pre>}
+        {!result && resultText && !running && (
+          <details className="task-sec task-raw">
+            <summary>{S.chat.taskRawResult}</summary>
+            <pre className="step-pre out">{resultText}</pre>
+          </details>
+        )}
       </div>
     );
   }

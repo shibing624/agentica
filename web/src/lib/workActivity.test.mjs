@@ -137,6 +137,40 @@ test("parseTaskResult extracts model and modelTier for trace and chat cards", ()
   assert.equal(parsed?.modelTier, "main");
 });
 
+test("parseTaskResult reads partial elapsed_seconds and child session links", () => {
+  const parsed = A.parseTaskResult(JSON.stringify({
+    success: false,
+    status: "timeout",
+    error: "Subagent timed out after 1800 seconds",
+    subagent_type: "explore",
+    result: "partial",
+    tool_count: 61,
+    elapsed_seconds: 1800.002,
+    run_id: "63e9eaf0",
+    child_session_id: "parent.subagent.63e9eaf0",
+    transcript_path: "/tmp/child.jsonl",
+  }));
+  assert.equal(parsed?.executionMs, 1800002);
+  assert.equal(parsed?.childSessionId, "parent.subagent.63e9eaf0");
+  assert.equal(parsed?.transcriptPath, "/tmp/child.jsonl");
+});
+
+test("parseTaskResult drops tool input blobs from display steps", () => {
+  const parsed = A.parseTaskResult(JSON.stringify({
+    success: true,
+    status: "completed",
+    result: "done",
+    tool_count: 1,
+    tool_calls_summary: [{
+      name: "execute",
+      info: "cd repo && rg ...",
+      input: "{\"command\":\"huge command\"}",
+      output_path: "/tmp/tool-result.txt",
+    }],
+  }));
+  assert.deepEqual(parsed?.steps, [{ name: "execute", info: "cd repo && rg ..." }]);
+});
+
 test("analyzing detail falls back to what just happened when no thinking streams", () => {
   const summarize = (t) => `cmd:${t.name}`;
   // Claude (thinking omitted) / Responses (no summary): only tools, no think text.

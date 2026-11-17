@@ -128,9 +128,10 @@ class SubagentConfig:
     inherit_context: bool = False
     # Timeout for subagent execution in seconds (0 = no timeout).
     # Real-world code / research subagents routinely need 5–15 min. The
-    # previous default of 300s was the single biggest cause of "task tool
-    # keeps failing" reports — raise it to 30 min and let long tasks finish.
-    timeout: int = 1800
+    # Long-horizon investigations can run for hours. Callers may still pass a
+    # larger per-call timeout; lowering the configured default is ignored by
+    # the task tool.
+    timeout: int = 12 * 60 * 60
 
     # Definition provenance. Runtime registrations use ``runtime``.
     source: str = "runtime"
@@ -682,7 +683,6 @@ class SubagentRegistry:
                     for k, v in {
                         "name": tc["name"],
                         "info": tc.get("info", ""),
-                        "input": tc.get("input", ""),
                         "output_path": tc.get("output_path"),
                     }.items()
                     if v
@@ -713,9 +713,6 @@ class SubagentRegistry:
                         tool_calls_log.append({
                             "name": tool_name,
                             "info": brief,
-                            "input": json.dumps(
-                                tool_args, ensure_ascii=False, default=str,
-                            )[:1000],
                         })
                         _mirror_to_sink()
                         if cb is not None:
@@ -784,7 +781,6 @@ class SubagentRegistry:
                     for k, v in {
                         "name": tc["name"],
                         "info": tc.get("info", ""),
-                        "input": tc.get("input", ""),
                         "output_path": tc.get("output_path"),
                     }.items()
                     if v
@@ -1042,6 +1038,18 @@ class SubagentRegistry:
         child._max_turns = config.max_turns
         child_transcript_path = str(child._session_log.path) if child._session_log is not None else ""
         run.transcript_path = child_transcript_path
+        if child._session_log is not None:
+            parent_run_id = (
+                parent_agent.run_context.run_id
+                if parent_agent.run_context is not None
+                else parent_agent.run_id or ""
+            )
+            child._session_log._write_meta({
+                "source": "subagent",
+                "parent_session_id": parent_agent.session_id or "",
+                "parent_run_id": str(parent_run_id or ""),
+                "subagent_run_id": run_id,
+            })
 
         # Wire arch_v5.md Phase 0 lineage so the child's RunContext records
         # who spawned it (used by Runner._run_impl to set parent_run_id +
@@ -1114,6 +1122,7 @@ class SubagentRegistry:
                 "tool_calls_summary": partial_tools,
                 "tool_count": len(partial_tools),
                 "elapsed_seconds": elapsed,
+                "execution_time": elapsed,
                 "partial": True,
                 "next_action": (
                     f"Partial output above reflects the work completed before the "
@@ -1171,6 +1180,7 @@ class SubagentRegistry:
                     "tool_calls_summary": partial_tools,
                     "tool_count": len(partial_tools),
                     "elapsed_seconds": elapsed,
+                    "execution_time": elapsed,
                     "partial": True,
                     "next_action": (
                         f"Partial output above reflects the work completed before the "
@@ -1223,6 +1233,7 @@ class SubagentRegistry:
                 "tool_calls_summary": partial_tools,
                 "tool_count": len(partial_tools),
                 "elapsed_seconds": elapsed,
+                "execution_time": elapsed,
                 "partial": bool(partial_content or partial_tools),
                 "next_action": (
                     (
@@ -1294,6 +1305,7 @@ class SubagentRegistry:
                 "tool_calls_summary": tool_calls_summary,
                 "tool_count": len(tool_calls_summary),
                 "elapsed_seconds": elapsed,
+                "execution_time": elapsed,
                 "partial": True,
                 "next_action": (
                     f"Partial output above was produced before the {reason_str} limit. Prefer "
@@ -1417,7 +1429,7 @@ def register_custom_subagent(
     max_turns: int = 100,
     model_tier: Literal["auxiliary", "main"] = "auxiliary",
     execute_policy: Literal["inherit", "read_only"] = "inherit",
-    timeout: int = 1800,
+    timeout: int = 12 * 60 * 60,
     can_spawn_subagents: bool = False,
     inherit_workspace: bool = False,
     inherit_context: bool = False,

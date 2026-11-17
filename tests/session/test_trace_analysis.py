@@ -416,6 +416,29 @@ class TestRoundView:
         assert task["result"].startswith("xxx")
         assert out["summary"].startswith("Explore Agent · completed · ")
 
+    def test_task_rows_carry_child_session_links_and_partial_elapsed_seconds(self):
+        result = {
+            "success": False, "status": "timeout", "subagent_type": "explore",
+            "result": "partial", "error": "Subagent timed out", "elapsed_seconds": 1801.25,
+            "tool_count": 1, "run_id": "r9",
+            "child_session_id": "parent.subagent.r9", "transcript_path": "/tmp/child.jsonl",
+        }
+        entries = [
+            _e("2026-01-01T00:00:00.100Z", type="user", content="find foo"),
+            _e("2026-01-01T00:00:01.000Z", type="event", name="request_begin"),
+            _e("2026-01-01T00:00:02.000Z", type="event", name="tool_call", tool_call_id="t1", tool_name="task"),
+            _e("2026-01-01T00:00:02.100Z", type="event", name="request_end", status="completed"),
+            _e("2026-01-01T00:00:02.200Z", type="assistant", content="",
+               tool_calls=[{"id": "t1", "type": "function", "function": {
+                   "name": "task", "arguments": json.dumps({"description": "Find foo", "subagent_type": "explore"})}}]),
+            _e("2026-01-01T00:30:03.000Z", type="tool", tool_call_id="t1", tool_name="task",
+               content=json.dumps(result)),
+        ]
+        task = next(e for e in analyze_entries(entries)["rounds"][0]["entries"] if e["kind"] == "tool_result")["task"]
+        assert task["executionMs"] == 1801250
+        assert task["childSessionId"] == "parent.subagent.r9"
+        assert task["transcriptPath"] == "/tmp/child.jsonl"
+
     def test_task_rows_surface_resolved_model_and_tier_in_calls_and_body(self):
         result = {
             "success": True,
