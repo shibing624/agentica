@@ -16,8 +16,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from agentica.cli.prefs import normalize_cli_prefs
-from agentica.memory.session_log import SessionLog, is_session_unread, iso_timestamp
+from agentica.config.prefs import normalize_cli_prefs
+from agentica.session.log import SessionLog, is_session_unread, iso_timestamp
 from agentica.run.context import RunSource
 from agentica.tools.background_processes import (
     BackgroundProcess,

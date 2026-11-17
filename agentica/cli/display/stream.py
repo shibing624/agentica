@@ -23,7 +23,7 @@ from rich.syntax import Syntax
 from rich.text import Text
 
 from agentica.cli.runtime import TOOL_ICONS
-from agentica.cli.usage_display import (
+from agentica.model.usage_summary import (
     ProviderUsageSummary,
     format_cost_usd,
     format_turn_usage_summary,

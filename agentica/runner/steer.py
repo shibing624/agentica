@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from agentica.utils.log import logger
 from agentica.model.message import Message
-from agentica.memory.session_log import iso_timestamp
+from agentica.session.log import iso_timestamp
 
 if TYPE_CHECKING:
     from agentica.agent import Agent

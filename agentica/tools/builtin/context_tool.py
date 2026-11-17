@@ -18,9 +18,9 @@ from pathlib import Path
 from typing import List, Optional
 
 from agentica.compression.new_window import notes_path_for
-from agentica.memory.session_log import SessionLog, local_turn_stamp
+from agentica.session.log import SessionLog, local_turn_stamp
 from agentica.memory.session_recall import intent_line, turn_line
-from agentica.memory.session_search import (
+from agentica.session.search import (
     score_content,
     search_terms,
     snippet_for,

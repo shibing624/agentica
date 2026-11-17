@@ -17,7 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agentica.cli import session_resume as sr
 from agentica.cli.commands import session as cli_session
 from agentica.cli.commands.context import CommandContext
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 from agentica.run.response import AgentCancelledError
 
 

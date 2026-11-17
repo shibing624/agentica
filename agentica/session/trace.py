@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from agentica.model.cost import CostTracker
-from agentica.memory.log_rows import classify_user, row_payload
+from agentica.session.rows import classify_user, row_payload
 from agentica.model.usage import cache_hit_percent
 from agentica.utils.string import format_file_size
 from agentica.utils.tokens import count_text_tokens

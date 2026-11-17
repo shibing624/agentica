@@ -34,7 +34,7 @@ from agentica.experience.learning_report import (
 )
 from agentica.compression.new_window import notes_path_for
 from agentica.memory.intents import process_pending_intents
-from agentica.memory.session_index import clip_both_ends
+from agentica.session.index import clip_both_ends
 from agentica.model.message import Message
 from agentica.prompts.memory import (
     BATCH_JUDGE_PROMPT,

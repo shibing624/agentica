@@ -9,7 +9,7 @@ from pathlib import Path
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
 from agentica.compression.manager import CompressionManager
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 from agentica.tools.builtin.context_tool import BuiltinContextTool
 
 
@@ -146,7 +146,7 @@ class TestContextTool(unittest.TestCase):
             "abcd1111-0000-0000-0000-000000000000",
             "abcd2222-0000-0000-0000-000000000000",
         ])
-        with mock.patch("agentica.memory.session_log.uuid4", side_effect=lambda: next(ids)):
+        with mock.patch("agentica.session.log.uuid4", side_effect=lambda: next(ids)):
             slog.append("user", "alpha question")
             slog.append("user", "beta question")
         out = asyncio.run(tool.search_session(uuid="abcd"))

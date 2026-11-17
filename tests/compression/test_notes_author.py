@@ -12,7 +12,7 @@ os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
 from agentica.compression.manager import CompressionManager, apply_idle_compact
 from agentica.compression.notes_author import author_session_notes, write_notes_atomically
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 from agentica.model.message import Message
 from agentica.model.openai.chat import OpenAIChat
 from agentica.model.response import ModelResponse

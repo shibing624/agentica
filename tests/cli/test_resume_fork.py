@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 from agentica.workspace import Workspace
 
 

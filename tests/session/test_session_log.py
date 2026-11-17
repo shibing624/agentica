@@ -10,7 +10,7 @@ import tempfile
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
-from agentica.memory.session_log import (
+from agentica.session.log import (
     SessionLog,
     assert_trajectory_equivalent,
     local_turn_stamp,
@@ -704,7 +704,7 @@ class TestJSONLFormat:
             assert "uuid" in row and "session_id" in row and "timestamp" in row
 
     def test_trace_still_resolves_meta_from_an_events_only_log(self, tmp_dir, tmp_path):
-        from agentica.memory.trace import analyze_entries
+        from agentica.session.trace import analyze_entries
 
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -1174,12 +1174,12 @@ class TestSessionLastRead:
     """Web sidebar unread dot: last_read_at vs last jsonl event."""
 
     def test_missing_last_read_is_not_unread(self):
-        from agentica.memory.session_log import is_session_unread
+        from agentica.session.log import is_session_unread
         assert is_session_unread("2026-01-02T00:00:00.000Z", None) is False
         assert is_session_unread(None, "2026-01-01T00:00:00.000Z") is False
 
     def test_later_event_is_unread(self):
-        from agentica.memory.session_log import is_session_unread
+        from agentica.session.log import is_session_unread
         assert is_session_unread(
             "2026-01-01T00:01:00.000Z", "2026-01-01T00:00:00.000Z",
         ) is True
@@ -1510,7 +1510,7 @@ class TestTrajectoryEquivalence:
         so the one invariant that catches orphan ``tool_use`` was blind on the
         provider that actually rejects them.
         """
-        from agentica.memory.session_log import trajectory_skeleton
+        from agentica.session.log import trajectory_skeleton
 
         live = [
             Message(

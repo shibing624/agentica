@@ -20,8 +20,8 @@ pytest.importorskip("agentica_gateway", reason="requires agentica_gateway")
 from fastapi.testclient import TestClient
 
 from agentica import live as peers
-from agentica.cli.attach import AttachServer
-from agentica.memory.session_log import SessionLog
+from agentica.live.attach import AttachServer
+from agentica.session.log import SessionLog
 from agentica_gateway import deps
 from agentica_gateway.card_page import (
     PAGE_HEADERS,
@@ -44,7 +44,7 @@ from agentica_gateway.services.im_files import (
     extract_output_file_references,
     format_file_size,
 )
-from agentica.cli.approvals import approval_decision_from_key
+from agentica.agent.approvals import approval_decision_from_key
 
 
 class FakeChannel(Channel):

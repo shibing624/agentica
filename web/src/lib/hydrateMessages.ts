@@ -153,7 +153,7 @@ const IMAGE_MARK_RE = /(?:^|\n\n)\[图片: ([0-9a-f]{64}\.(?:png|jpg|gif|webp))\
 export const STEER_GUIDANCE_PREFIX = "[User guidance received while you were working]";
 const FOLDED_STEER_RE = /(?:^|\n\n)\[User guidance received while you were working\]\n([\s\S]*?)(?=(?:\n\n\[User guidance received while you were working\]\n)|$)/g;
 
-/** What the gateway decided a user row is (`agentica.memory.log_rows.row_payload`).
+/** What the gateway decided a user row is (`agentica.session.rows.row_payload`).
  *  The client draws from it and never parses `content` for these markers. */
 export type RowView = {
   automated: boolean;

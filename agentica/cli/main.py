@@ -10,7 +10,7 @@ import time
 
 from agentica.cli.runtime import get_console, parse_args, configure_tools, create_agent
 from agentica.cli.display import display_agent_execution_error, format_session_summary, resumable_session_id
-from agentica.cli.prefs import apply_cli_prefs, read_project_prefs
+from agentica.config.prefs import apply_cli_prefs, read_project_prefs
 from agentica.cli.setup import resolve_model_config, run_onboarding
 from agentica.model.cost import refresh_model_catalog_in_background
 from agentica.run.response import AgentCancelledError

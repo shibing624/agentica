@@ -12,7 +12,7 @@ from agentica.compression.notes import (
     notes_are_ready,
     rollover_handover,
 )
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 from agentica.model.message import Message
 
 

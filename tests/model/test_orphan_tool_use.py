@@ -873,7 +873,7 @@ class TestRefusedCallIsPersistedAsAnError(unittest.TestCase):
         import json
         import tempfile
         from types import SimpleNamespace
-        from agentica.memory.session_log import SessionLog
+        from agentica.session.log import SessionLog
 
         refusal = self._refusal(Claude(id="claude-opus-4-6", api_key="fake"))
         with tempfile.TemporaryDirectory() as tmp:

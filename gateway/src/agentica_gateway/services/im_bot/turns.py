@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from agentica.agent.approvals import ApprovalDecision, PendingApproval
-from agentica.cli.approvals import visible_approval_decisions
+from agentica.agent.approvals import visible_approval_decisions
 from agentica.live import PeerInfo, PeerMessageRefused
 from agentica.tools.background_processes import touch_activity_stamp
 from agentica.utils.log import logger
@@ -180,7 +180,7 @@ class ImTurnsMixin:
         socket is not usable yet — it cannot tell us anything, which is exactly
         why it is second.
         """
-        from agentica.cli.attach import prompt_live_session
+        from agentica.live.attach import prompt_live_session
 
         # The default 620s window is deliberate here: the report's answer is
         # what the phone is waiting for, so the claim and this session's

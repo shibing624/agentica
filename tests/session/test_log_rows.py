@@ -7,7 +7,7 @@ fragment folded after a question, a steer, a relayed row, a job report.
 """
 import tempfile
 
-from agentica.memory.log_rows import (
+from agentica.session.rows import (
     RELAYED_MARKER,
     STEER_GUIDANCE_PREFIX,
     classify_user,
@@ -15,8 +15,8 @@ from agentica.memory.log_rows import (
     split_window_preamble,
     strip_window_preamble,
 )
-from agentica.memory.session_log import SessionLog
-from agentica.memory.trace import chat_turn_page, with_row_views
+from agentica.session.log import SessionLog
+from agentica.session.trace import chat_turn_page, with_row_views
 
 CONT = "New context window started. Continue from session notes and search_session."
 LEGACY_CONT = "New context window started without a conversation summary. Use search_session."

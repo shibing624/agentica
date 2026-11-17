@@ -24,7 +24,7 @@ from uuid import uuid4
 from agentica.model.message import Message
 from agentica.run.response import RunResponse
 from agentica.run.context import TaskAnchor
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 from agentica.utils.log import logger
 
 if TYPE_CHECKING:

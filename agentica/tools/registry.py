@@ -15,6 +15,53 @@ from typing import Dict, Union, Callable, List
 
 _TOOL_REGISTRY: Dict[str, Union[Callable, "Tool"]] = {}
 
+# Tool registry - maps tool names to (module_name, class_name, category, description)
+# Module path: agentica.tools.{module_name}_tool.{ClassName}
+TOOL_REGISTRY = {
+    # AI/ML Tools
+    "cogvideo": ("cogvideo", "CogVideoTool", "AI/ML", "Text-to-video generation with CogVideo"),
+    "cogview": ("cogview", "CogViewTool", "AI/ML", "Text-to-image generation with CogView"),
+    "dalle": ("dalle", "DalleTool", "AI/ML", "Image generation with DALL-E"),
+    "video_analysis": ("video_analysis", "VideoAnalysisTool", "AI/ML", "Video content analysis"),
+    "volc_tts": ("volc_tts", "VolcTtsTool", "AI/ML", "Text-to-speech with Volcengine"),
+    # Search Tools
+    "arxiv": ("arxiv", "ArxivTool", "Search", "Search academic papers on arXiv"),
+    "baidu_search": ("baidu_search", "BaiduSearchTool", "Search", "Web search via Baidu"),
+    "dblp": ("dblp", "DblpTool", "Search", "Search computer science papers on DBLP"),
+    "duckduckgo": ("duckduckgo", "DuckDuckGoTool", "Search", "Web search via DuckDuckGo"),
+    "search_bocha": ("search_bocha", "SearchBochaTool", "Search", "Web search via Bocha"),
+    "search_exa": ("search_exa", "SearchExaTool", "Search", "Web search via Exa"),
+    "search_serper": ("search_serper", "SearchSerperTool", "Search", "Web search via Serper (Google)"),
+    "wikipedia": ("wikipedia", "WikipediaTool", "Search", "Search and read Wikipedia articles"),
+    "zhipu_web_search": ("zhipu_web_search", "ZhipuWebSearchTool", "Search", "Web search via ZhipuAI"),
+    # Web/Network Tools
+    "jina": ("jina", "JinaTool", "Web", "Web content extraction via Jina Reader"),
+    "newspaper": ("newspaper", "NewspaperTool", "Web", "Article extraction from news URLs"),
+    "url_crawler": ("url_crawler", "UrlCrawlerTool", "Web", "Recursive URL crawling"),
+    # File/Code Tools
+    "calculator": ("calculator", "CalculatorTool", "Code & Files", "Mathematical expression evaluation"),
+    "code": ("code", "CodeTool", "Code & Files", "Code generation and execution"),
+    "edit": ("edit", "EditTool", "Code & Files", "File editing with diff patches"),
+    "file": ("file", "FileTool", "Code & Files", "File system operations"),
+    "run_nb_code": ("run_nb_code", "RunNbCodeTool", "Code & Files", "Execute Jupyter notebook code"),
+    "run_python_code": ("run_python_code", "RunPythonCodeTool", "Code & Files", "Execute Python code snippets"),
+    "string": ("string", "StringTool", "Code & Files", "String manipulation utilities"),
+    "text_analysis": ("text_analysis", "TextAnalysisTool", "Code & Files", "Text analysis and NLP"),
+    "workspace": ("workspace", "WorkspaceTool", "Code & Files", "Workspace file management"),
+    # Data Tools
+    "hackernews": ("hackernews", "HackerNewsTool", "Data", "Fetch Hacker News stories"),
+    "sql": ("sql", "SqlTool", "Data", "SQL database queries"),
+    "weather": ("weather", "WeatherTool", "Data", "Weather information"),
+    "yfinance": ("yfinance", "YFinanceTool", "Data", "Financial data from Yahoo Finance"),
+    # Integration Tools
+    "airflow": ("airflow", "AirflowTool", "Integration", "Apache Airflow DAG management"),
+    "apify": ("apify", "ApifyTool", "Integration", "Web scraping via Apify"),
+    "mcp": ("mcp", "MCPTool", "Integration", "Model Context Protocol integration"),
+    "memori": ("memori", "MemoriTool", "Integration", "Long-term memory management"),
+    "skill": ("skill", "SkillTool", "Integration", "Skill document management"),
+    "video_download": ("video_download", "VideoDownloadTool", "Integration", "Video download from URLs"),
+}
+
 
 def register_tool(name: str, tool_or_func: Union[Callable, "Tool"]) -> None:
     """Register a tool to the global registry.

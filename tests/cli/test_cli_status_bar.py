@@ -23,7 +23,7 @@ from agentica.cli import (
 from agentica.cli import commands as cli_commands
 from agentica.cli import setup as cli_setup
 from agentica.agent.goals import CONTINUATION_PROMPT_PREFIX
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 
 
 
@@ -338,7 +338,7 @@ class TestCLIStatusBar(unittest.TestCase):
 
 
     def test_turn_clock_splits_past_a_minute(self):
-        from agentica.cli.display.status_bar import format_turn_clock
+        from agentica.utils.timer import format_turn_clock
 
         self.assertEqual(format_turn_clock(12.3), "12.3s")
         self.assertEqual(format_turn_clock(59.9), "59.9s")

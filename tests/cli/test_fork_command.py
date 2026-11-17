@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agentica.cli.commands.runtime import _cmd_fork
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 from agentica.workspace import Workspace
 
 
@@ -38,7 +38,7 @@ def session(tmp_path):
     # with what these tests are pinning.
     counter = iter(range(1, 100))
     with patch(
-        "agentica.memory.session_log.uuid4",
+        "agentica.session.log.uuid4",
         side_effect=lambda: f"aaaaaaa{next(counter):01x}-0000-4000-8000-000000000000",
     ):
         log.append("user", "first question")

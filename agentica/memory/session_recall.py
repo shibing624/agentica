@@ -31,8 +31,8 @@ from typing import Any, Dict, List, Optional, Sequence, Set
 
 from agentica.memory.intents import OPEN_INTENT_DAYS, process_pending_intents
 from agentica.memory.recall import display_path
-from agentica.memory.session_index import SessionIndex
-from agentica.memory.session_search import snippet_head
+from agentica.session.index import SessionIndex
+from agentica.session.search import snippet_head
 from agentica.model.message import Message
 from agentica.utils.log import logger
 

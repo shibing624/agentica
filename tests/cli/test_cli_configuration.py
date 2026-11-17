@@ -27,7 +27,7 @@ from agentica.cli.commands import helpers as cli_helpers
 from agentica.cli.commands import tools_skills as cli_tools_skills
 from agentica.cli import setup as cli_setup
 from agentica.agent.goals import CONTINUATION_PROMPT_PREFIX
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 
 
 

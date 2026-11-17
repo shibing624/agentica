@@ -38,7 +38,7 @@ from agentica.compression.token_budget import (
     CONTEXT_WINDOW_OPEN,
     WINDOW_CONTINUATION_MARK,
 )
-from agentica.memory.log_rows import classify_user
+from agentica.session.rows import classify_user
 from agentica.utils.log import logger
 from agentica.utils.skill_invocation import invocation_label
 from agentica.utils.tokens import count_text_tokens
@@ -1050,7 +1050,7 @@ class SessionLog:
         return entries[:last_boundary_idx] if last_boundary_idx >= 0 else entries
 
     def _conversation_rows(self) -> List[Dict[str, Any]]:
-        from agentica.memory.session_search import drop_shadowed_by_boundary
+        from agentica.session.search import drop_shadowed_by_boundary
 
         # Keep compact_boundary in this pass: it is what tells
         # ``drop_shadowed_by_boundary`` where a preserved tail begins, and the
@@ -1081,7 +1081,7 @@ class SessionLog:
         compact_boundary rows are not hits. Empty query returns no keyword
         hits — use ``list_user_questions`` for the user-question index.
         """
-        from agentica.memory.session_search import normalize_role, rank_entries
+        from agentica.session.search import normalize_role, rank_entries
 
         q = (query or "").strip()
         if not q:
@@ -1108,7 +1108,7 @@ class SessionLog:
         uuid-prefix match is returned so the caller can tell "none" from
         "ambiguous" instead of this layer picking one.
         """
-        from agentica.memory.session_search import _prose
+        from agentica.session.search import _prose
 
         original = next(
             (
@@ -1134,7 +1134,7 @@ class SessionLog:
 
     def list_user_questions(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Newest user turns across compact_boundary, preamble skipped."""
-        from agentica.memory.session_search import list_user_questions
+        from agentica.session.search import list_user_questions
 
         return list_user_questions(self._conversation_rows(), limit=limit)
 
@@ -2039,7 +2039,7 @@ class SessionLog:
     def _meta_cli(data: Dict[str, Any]) -> Dict[str, Any]:
         """Return the sidecar's ``cli`` block (saved CLI toggles), or ``{}``.
 
-        Shape is validated by :func:`agentica.cli.prefs.normalize_cli_prefs`,
+        Shape is validated by :func:`agentica.config.prefs.normalize_cli_prefs`,
         deliberately not here: the sidecar is a plain JSON blob and
         ``session_log`` must not grow a dependency on the CLI package. What
         this method guarantees is only that callers get a dict, never a
@@ -2202,7 +2202,7 @@ class SessionLog:
         Imported lazily: ``session_index`` imports ``session_search``, which
         imports this module.
         """
-        from agentica.memory.session_index import INDEX_FILENAME, SessionIndex
+        from agentica.session.index import INDEX_FILENAME, SessionIndex
 
         attached = self._search_index
         if isinstance(attached, SessionIndex):
@@ -2602,7 +2602,7 @@ class SessionLog:
         it.** Concurrent callers wait for one scan instead of each running
         their own.
         """
-        from agentica.memory.trace import analyze_entries
+        from agentica.session.trace import analyze_entries
 
         try:
             stat = self.path.stat()
@@ -2628,13 +2628,13 @@ class SessionLog:
 
     def trace_call_body(self, index: int) -> Optional[Dict[str, Any]]:
         """Body of the call at log line ``index`` (arguments, result, thinking, reply), or None."""
-        from agentica.memory.trace import call_body_in
+        from agentica.session.trace import call_body_in
 
         return call_body_in(self._full_analysis(), index)
 
     def trace_search(self, query: str, limit: int = 500) -> List[int]:
         """Log-line indices of the calls whose text contains ``query``."""
-        from agentica.memory.trace import search_calls_in
+        from agentica.session.trace import search_calls_in
 
         return search_calls_in(self._full_analysis(), query, limit)
 
@@ -2643,11 +2643,11 @@ class SessionLog:
 
         Does not write. Empty or missing files still return a valid analysis
         dict with ``hasTimeline=False``. ``lite`` leaves the bodies out (see
-        :func:`agentica.memory.trace.analyze_entries`) and is served from the
+        :func:`agentica.session.trace.analyze_entries`) and is served from the
         shared scan of the file; ``calls=False`` (with ``lite``) also leaves out
         each round's call list, for a reader that only needs the round totals.
         """
-        from agentica.memory.trace import analyze_entries, lite_view
+        from agentica.session.trace import analyze_entries, lite_view
 
         if lite:
             analysis = lite_view(self._full_analysis(), calls=calls)
@@ -2672,7 +2672,7 @@ class SessionLog:
 
     def format_trace(self, *, round_n: Optional[int] = None) -> str:
         """Plain-text Trace report (overview, or 1-based ``round_n`` detail)."""
-        from agentica.memory.trace import format_trace_text
+        from agentica.session.trace import format_trace_text
 
         return format_trace_text(self.analyze(), round_n=round_n)
 

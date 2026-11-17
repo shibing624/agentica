@@ -18,7 +18,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agentica.agent import Agent
 from agentica.cli.commands import tools_skills as cli_tools_skills
 from agentica.cli.commands.context import CommandContext
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 from agentica.config.project import project_base_dir, read_project_file
 from test_cli_prefs import _WorkDir
 
@@ -140,7 +140,7 @@ class TestStartupRestoresExtraTools(unittest.TestCase):
         return run_interactive
 
     def test_saved_tools_are_loaded_without_a_flag(self):
-        from agentica.cli.prefs import write_project_prefs
+        from agentica.config.prefs import write_project_prefs
 
         write_project_prefs(self.work.path, {"extra_tools": ["search_serper", "weather"]})
 
@@ -152,7 +152,7 @@ class TestStartupRestoresExtraTools(unittest.TestCase):
         self.assertEqual(names, ["search_serper", "weather"])
 
     def test_flag_and_saved_set_are_unioned_without_duplicates(self):
-        from agentica.cli.prefs import write_project_prefs
+        from agentica.config.prefs import write_project_prefs
 
         write_project_prefs(self.work.path, {"extra_tools": ["weather"]})
 

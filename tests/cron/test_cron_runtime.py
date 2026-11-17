@@ -422,7 +422,7 @@ class TestCronInCliTools(unittest.TestCase):
         from pathlib import Path
         from agentica.cli.runtime import parse_args
         from agentica.cron.cli_runner import build_cli_agent_factory
-        from agentica.memory.session_log import SessionLog
+        from agentica.session.log import SessionLog
 
         sys.argv = ["agentica"]
         cfg = vars(parse_args())

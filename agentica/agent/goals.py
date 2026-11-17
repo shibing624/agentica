@@ -53,7 +53,7 @@ from agentica.run.events import RunEventType
 from agentica.utils.log import logger
 
 if TYPE_CHECKING:
-    from agentica.memory.session_log import SessionLog
+    from agentica.session.log import SessionLog
     from agentica.model.base import Model
     from agentica.run.response import RunResponse
 

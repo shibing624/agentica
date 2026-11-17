@@ -24,7 +24,7 @@ from agentica.cli.commands.helpers import (
     clip_preview_head,
     format_path_for_display,
 )
-from agentica.cli.context_usage import measure_context
+from agentica.compression.context_usage import measure_context
 from agentica.cli.display import (
     display_diff,
     format_session_summary,
@@ -33,7 +33,7 @@ from agentica.cli.display import (
     resumable_session_id,
 )
 from agentica.cli.display.messages import build_file_diff
-from agentica.cli.prefs import apply_session_cli_prefs, sync_view_prefs_to_tui
+from agentica.config.prefs import apply_session_cli_prefs, sync_view_prefs_to_tui
 from agentica.cli.runtime import (
     configure_tools,
     create_agent,
@@ -50,7 +50,7 @@ from agentica.compression.new_window import notes_path_for
 from agentica.config.profiles import set_project_profile
 from agentica.agent.goals import GoalManager
 from agentica.memory.models import AgentRun
-from agentica.memory.session_log import SessionLog, local_turn_stamp
+from agentica.session.log import SessionLog, local_turn_stamp
 from agentica.model.message import Message
 from agentica.run.response import RunResponse
 from agentica.utils.log import logger

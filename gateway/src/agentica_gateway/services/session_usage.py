@@ -7,8 +7,8 @@ cached Agent is the source for billed tokens, API calls, and cost.
 """
 from typing import Any, Dict, Iterable, Optional
 
-from agentica.cli.context_usage import measure_context
-from agentica.cli.usage_display import ProviderUsageSummary
+from agentica.compression.context_usage import measure_context
+from agentica.model.usage_summary import ProviderUsageSummary
 from agentica.model.cost import CostTracker
 from agentica.model.usage import RequestUsage, split_prompt_usage
 

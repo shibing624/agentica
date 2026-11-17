@@ -326,7 +326,7 @@ class TestSessionLogErrorHandling(unittest.TestCase):
 
     def test_append_on_readonly_path_does_not_raise(self):
         """If write fails, should log warning but not raise."""
-        from agentica.memory.session_log import SessionLog
+        from agentica.session.log import SessionLog
         import tempfile
         import os
 

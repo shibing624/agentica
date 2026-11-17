@@ -50,7 +50,7 @@ from agentica.utils.async_utils import close_subprocess_transport, terminate_sub
 from agentica.utils.log import logger
 
 if TYPE_CHECKING:
-    from agentica.memory.session_log import SessionLog
+    from agentica.session.log import SessionLog
     from agentica.model.base import Model
 
 # Cap how much command output we feed back to the agent. Full pytest logs can

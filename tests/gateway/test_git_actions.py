@@ -336,7 +336,7 @@ def test_side_task_model_prefers_auxiliary():
 
 
 def test_first_exchange_names_an_unnamed_session(tmp_path):
-    from agentica.memory.session_log import SessionLog
+    from agentica.session.log import SessionLog
     from agentica_gateway.services.agent_service import AgentService
 
     svc = AgentService.__new__(AgentService)
@@ -362,7 +362,7 @@ def test_first_exchange_names_an_unnamed_session(tmp_path):
 
 
 def test_generated_title_bumps_the_session_pulse(tmp_path):
-    from agentica.memory.session_log import SessionLog
+    from agentica.session.log import SessionLog
     from agentica_gateway.services import live_turn
     import agentica_gateway.services.agent_service as svc_mod
     from agentica_gateway.services.agent_service import AgentService

@@ -170,7 +170,7 @@ def test_spawn_persists_child_transcript_and_returns_locator(tmp_path):
     """A completed subagent must leave a readable transcript, not only a short
     parent-facing summary. The locator is the recovery path when the summary is
     insufficient."""
-    from agentica.memory.session_log import SessionLog
+    from agentica.session.log import SessionLog
 
     registry = SubagentRegistry()
     _RUNTIME_SUBAGENT_CONFIGS["worker"] = SubagentConfig(

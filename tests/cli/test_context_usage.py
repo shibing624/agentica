@@ -8,7 +8,7 @@ import unittest
 
 from agentica.agent import Agent
 from agentica.agent.config import ToolConfig
-from agentica.cli.context_usage import COMPACT_SUMMARY_PREFIX, measure_context
+from agentica.compression.context_usage import COMPACT_SUMMARY_PREFIX, measure_context
 from agentica.memory.models import AgentRun
 from agentica.model.message import Message
 from agentica.model.openai import OpenAIChat

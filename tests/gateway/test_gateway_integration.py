@@ -409,7 +409,7 @@ class TestSessionEndpoints:
         mock_svc.pin_session.assert_called_with("s1", pinned=False, owner="default")
 
     def test_pinned_flag_round_trips_through_the_sidecar(self, tmp_path):
-        from agentica.memory.session_log import SessionLog
+        from agentica.session.log import SessionLog
 
         log = SessionLog(session_id="s1", base_dir=str(tmp_path))
         log.append("user", "hi")

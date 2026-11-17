@@ -15,7 +15,7 @@ from agentica.cli.commands.context import CommandContext
 from agentica.agent.hooks import MemoryExtractHooks
 from agentica.cli.commands.session import _cmd_compact
 from agentica.memory.models import AgentRun
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 from agentica.memory.working import WorkingMemory
 from agentica.model.message import Message
 from agentica.model.openai import OpenAIChat

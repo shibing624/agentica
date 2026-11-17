@@ -30,7 +30,7 @@ from agentica.cli.commands import model_config as cli_model_config
 from agentica.cli.commands import session as cli_session
 from agentica.cli import setup as cli_setup
 from agentica.agent.goals import CONTINUATION_PROMPT_PREFIX
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 from agentica.model.usage import Usage
 from agentica.utils.string import format_file_size
 
@@ -498,11 +498,11 @@ class TestResumeArchivedFilter(unittest.TestCase):
         )
         with (
             patch(
-                "agentica.memory.session_log.SessionLog.list_sessions",
+                "agentica.session.log.SessionLog.list_sessions",
                 return_value=sessions or self._sessions(),
             ),
-            patch("agentica.memory.session_log.SessionLog.list_user_messages", return_value=[]),
-            patch("agentica.memory.session_log.SessionLog.exists", return_value=False),
+            patch("agentica.session.log.SessionLog.list_user_messages", return_value=[]),
+            patch("agentica.session.log.SessionLog.exists", return_value=False),
             patch("agentica.cli.commands.session.create_agent") as create_agent,
             patch("agentica.cli.commands.session.GoalManager") as goal_manager,
         ):
@@ -516,9 +516,9 @@ class TestResumeArchivedFilter(unittest.TestCase):
     def test_picker_listing_excludes_archived(self):
         ctx = CommandContext(agent_config={}, current_agent=None)
         with (
-            patch("agentica.memory.session_log.SessionLog.list_sessions", return_value=self._sessions()),
+            patch("agentica.session.log.SessionLog.list_sessions", return_value=self._sessions()),
             patch(
-                "agentica.memory.session_log.SessionLog.session_preview",
+                "agentica.session.log.SessionLog.session_preview",
                 return_value={"user_count": 0, "first_user": None},
             ),
         ):
@@ -539,9 +539,9 @@ class TestResumeArchivedFilter(unittest.TestCase):
         current_agent._session_log = None
         ctx = CommandContext(agent_config={}, current_agent=current_agent)
         with (
-            patch("agentica.memory.session_log.SessionLog.list_sessions", return_value=self._sessions()),
+            patch("agentica.session.log.SessionLog.list_sessions", return_value=self._sessions()),
             patch(
-                "agentica.memory.session_log.SessionLog.session_preview",
+                "agentica.session.log.SessionLog.session_preview",
                 return_value={"user_count": 0, "first_user": None},
             ),
             patch("agentica.cli.commands.session.get_console") as mock_console,
@@ -558,9 +558,9 @@ class TestResumeArchivedFilter(unittest.TestCase):
         ctx = CommandContext(agent_config={}, current_agent=None)
         long_q = "Please investigate the login timeout for tenant " + ("x" * 300)
         with (
-            patch("agentica.memory.session_log.SessionLog.list_sessions", return_value=self._sessions()),
+            patch("agentica.session.log.SessionLog.list_sessions", return_value=self._sessions()),
             patch(
-                "agentica.memory.session_log.SessionLog.session_preview",
+                "agentica.session.log.SessionLog.session_preview",
                 return_value={
                     "user_count": 3,
                     "first_user": "first",

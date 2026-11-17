@@ -164,7 +164,7 @@ def test_session_stats_come_from_the_log_and_survive_a_gateway_restart(tmp_path,
     """The cached Agent forgets its usage on restart; the log does not."""
     from unittest.mock import AsyncMock
 
-    from agentica.memory.session_log import SessionLog
+    from agentica.session.log import SessionLog
     from agentica_gateway.services import agent_service as svc_mod
     from agentica_gateway.services.agent_service import AgentService
 
@@ -218,7 +218,7 @@ def test_usage_payload_includes_inflight_messages_while_agent_is_running():
 
 def test_build_agent_hydrates_working_memory_from_existing_session_log(tmp_path, monkeypatch):
     """Opening an old session in Desktop/Web must hydrate ``working_memory`` before any new run."""
-    from agentica.memory.session_log import SessionLog
+    from agentica.session.log import SessionLog
     from agentica_gateway.services import agent_service as svc_mod
     from agentica_gateway.services.agent_service import AgentService
 

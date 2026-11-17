@@ -12,7 +12,7 @@ pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 from agentica_gateway.services import agent_service as svc_mod  # noqa: E402
 from agentica_gateway.services import live_turn  # noqa: E402
 from agentica_gateway.services.agent_service import AgentService, is_system_temp_path  # noqa: E402
-from agentica.memory.session_log import SessionLog  # noqa: E402
+from agentica.session.log import SessionLog  # noqa: E402
 
 
 def _session(sid, work_dir, source=None, users=("hello",)):

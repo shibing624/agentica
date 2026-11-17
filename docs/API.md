@@ -116,7 +116,7 @@ from agentica.workspace import Workspace
 
 ```python
 from agentica import Agent
-from agentica.memory.session_log import SessionLog  # 也可从已有文件打开
+from agentica.session.log import SessionLog  # 也可从已有文件打开
 
 agent = Agent(model=..., session_id="my-session-001")
 log = agent.session_log          # Optional[SessionLog]

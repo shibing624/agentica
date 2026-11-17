@@ -16,7 +16,7 @@ const {
 after(() => vite.close());
 
 // The gateway attaches `row` to every user row it serves
-// (`agentica.memory.log_rows.row_payload`); the client does not parse `content`
+// (`agentica.session.rows.row_payload`); the client does not parse `content`
 // for markers. Rows here are plain unless a test gives `row` itself — what a
 // preamble or a steer prefix *means* is pinned in tests/memory/test_log_rows.py.
 const served = (e) => (e.type !== "user" || e.row ? e : {

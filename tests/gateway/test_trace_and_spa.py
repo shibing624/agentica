@@ -10,7 +10,7 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, AsyncMock
 
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 
 
 @pytest.fixture()

@@ -42,7 +42,7 @@ def _persist_extra_tools(ctx: CommandContext) -> None:
     module is never recorded, because replaying it at startup would execute a
     user .py file that this very command asks a human to confirm first.
     """
-    from agentica.cli.prefs import record_cli_prefs
+    from agentica.config.prefs import record_cli_prefs
 
     record_cli_prefs(
         ctx.agent_config,
@@ -730,7 +730,7 @@ def _cmd_reload_skills(ctx: CommandContext, cmd_args: str = ""):
 def _cmd_permissions(ctx: CommandContext, cmd_args: str = ""):
     con = get_console()
     from agentica.agent.permissions import PERMISSION_MODES
-    from agentica.cli.prefs import record_cli_prefs
+    from agentica.config.prefs import record_cli_prefs
 
     if cmd_args.strip():
         new_mode = cmd_args.strip().lower()

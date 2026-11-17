@@ -27,7 +27,7 @@ from agentica.model.message import Message
 from agentica.model.usage import split_prompt_usage
 from agentica.run.response import RunEvent, RunResponse, ToolCallInfo
 from agentica.memory import AgentRun
-from agentica.memory.session_log import iso_timestamp
+from agentica.session.log import iso_timestamp
 from agentica.compression.tool_result_storage import DEFAULT_MAX_RESULT_SIZE_CHARS
 
 if TYPE_CHECKING:
@@ -473,7 +473,7 @@ class PersistMixin:
         if not logger.isEnabledFor(10):  # logging.DEBUG == 10
             return
         try:
-            from agentica.memory.session_log import assert_trajectory_equivalent
+            from agentica.session.log import assert_trajectory_equivalent
 
             session_log = agent._session_log
             if session_log is None:

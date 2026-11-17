@@ -14,8 +14,8 @@ them, not because of the words they contain.
 import re
 from typing import Dict, Iterable, List, Sequence, Set
 
-from agentica.memory.log_rows import classify_user
-from agentica.memory.session_log import local_turn_stamp
+from agentica.session.rows import classify_user
+from agentica.session.log import local_turn_stamp
 
 ITEM_ROLES = ("user", "assistant", "tool")
 

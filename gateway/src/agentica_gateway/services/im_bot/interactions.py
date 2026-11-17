@@ -10,7 +10,7 @@ import sys
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
-from agentica.cli.approvals import (
+from agentica.agent.approvals import (
     approval_decision_from_key,
     visible_approval_decisions,
 )

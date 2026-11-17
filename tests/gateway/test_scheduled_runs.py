@@ -304,7 +304,7 @@ class TestSchedulerService:
 
     def test_unnamed_historical_and_inflight_cron_sessions_fallback_to_cron_job_name(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AGENTICA_HOME", str(tmp_path / "home"))
-        from agentica.memory.session_log import SessionLog
+        from agentica.session.log import SessionLog
         from agentica_gateway.services import live_turn
         from agentica_gateway.services.agent_service import AgentService
 

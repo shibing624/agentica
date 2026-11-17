@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from agentica.config.profiles import get_profiles
-from agentica.memory.trace import last_completed_round, search_conversation
+from agentica.session.trace import last_completed_round, search_conversation
 from agentica.tools.background_processes import read_activity_stamp_us
 
 from .. import deps

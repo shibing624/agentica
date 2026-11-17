@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from agentica.config.profiles import get_setting, set_setting
-from agentica.memory.session_log import SessionLog
+from agentica.session.log import SessionLog
 from agentica.run.response import AgentCancelledError
 from agentica.utils.log import logger
 

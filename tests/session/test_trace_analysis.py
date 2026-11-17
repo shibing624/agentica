@@ -2,8 +2,8 @@
 """Trace analysis invariants — sequential scan, not timestamp slicing."""
 import json
 
-from agentica.memory.session_log import SessionLog
-from agentica.memory.trace import (
+from agentica.session.log import SessionLog
+from agentica.session.trace import (
     analyze_entries, call_body, format_trace_text, last_completed_round,
     search_calls, search_conversation,
 )
@@ -629,7 +629,7 @@ class TestAnalysisCache:
         return log
 
     def _count_scans(self, monkeypatch):
-        import agentica.memory.trace as trace
+        import agentica.session.trace as trace
         real = trace.analyze_entries
         calls = []
 
@@ -641,7 +641,7 @@ class TestAnalysisCache:
         return calls
 
     def test_lookups_after_the_first_do_not_rescan_the_file(self, tmp_path, monkeypatch):
-        from agentica.memory import session_log as sl
+        from agentica.session import log as sl
         sl._analysis_cache.clear()
         log = self._log(tmp_path)
         scans = self._count_scans(monkeypatch)
@@ -654,7 +654,7 @@ class TestAnalysisCache:
         assert len(scans) == 1
 
     def test_a_log_that_grew_is_read_again(self, tmp_path, monkeypatch):
-        from agentica.memory import session_log as sl
+        from agentica.session import log as sl
         sl._analysis_cache.clear()
         log = self._log(tmp_path, n=1)
         scans = self._count_scans(monkeypatch)
@@ -667,7 +667,7 @@ class TestAnalysisCache:
         assert len(scans) == 2
 
     def test_stamping_session_fields_does_not_leak_into_the_cache(self, tmp_path):
-        from agentica.memory import session_log as sl
+        from agentica.session import log as sl
         sl._analysis_cache.clear()
         log = self._log(tmp_path)
         first = log.analyze(lite=True)
@@ -679,7 +679,7 @@ class TestAnalysisCache:
         assert log.trace_call_body(next(c["index"] for c in again["rounds"][0]["calls"] if c["kind"] == "tool"))
 
     def test_lite_matches_the_direct_lite_scan_and_can_leave_calls_out(self, tmp_path):
-        from agentica.memory import session_log as sl
+        from agentica.session import log as sl
         sl._analysis_cache.clear()
         log = self._log(tmp_path)
         direct = analyze_entries(log.iter_raw_entries(), lite=True)
@@ -692,7 +692,7 @@ class TestAnalysisCache:
         assert slim["rounds"][0]["tokens"] == direct["rounds"][0]["tokens"]
 
     def test_cache_is_bounded(self, tmp_path):
-        from agentica.memory import session_log as sl
+        from agentica.session import log as sl
         sl._analysis_cache.clear()
         for k in range(sl._ANALYSIS_CACHE_MAX_ENTRIES + 3):
             SessionLog(session_id=f"s{k}", base_dir=str(tmp_path)).append("user", f"q{k}")
@@ -725,7 +725,7 @@ def test_an_event_can_carry_the_moment_it_happened(tmp_path):
     request into one instant and the timeline drew a single bar."""
     import time
 
-    from agentica.memory.session_log import iso_timestamp
+    from agentica.session.log import iso_timestamp
 
     log = SessionLog(session_id="s1", base_dir=str(tmp_path))
     then = time.time() - 30
@@ -767,8 +767,8 @@ def test_a_streamed_turn_shows_thinking_and_reply_as_separate_phases(tmp_path):
     what the model actually spent, not to one lump."""
     import time
 
-    from agentica.memory.session_log import iso_timestamp
-    from agentica.memory.trace import analyze_entries
+    from agentica.session.log import iso_timestamp
+    from agentica.session.trace import analyze_entries
 
     log = SessionLog(session_id="s1", base_dir=str(tmp_path))
     t0 = time.time()
@@ -913,7 +913,7 @@ def test_search_conversation_matches_queries_and_answers_with_turn_numbers():
 
 
 def test_window_preamble_with_relayed_mention_is_not_classified_as_steering_or_round_title():
-    from agentica.memory.trace import chat_turn_page
+    from agentica.session.trace import chat_turn_page
 
     preamble = (
         "<context_window>\nCurrent context window 1.\n</context_window>\n\n"
@@ -949,7 +949,7 @@ def test_window_preamble_with_relayed_mention_is_not_classified_as_steering_or_r
 
 
 def test_chat_turn_page_keeps_the_unanswered_question_with_its_boundary():
-    from agentica.memory.trace import chat_turn_page
+    from agentica.session.trace import chat_turn_page
 
     question = "batch1 怎么算？"
     preamble = (
@@ -1001,12 +1001,12 @@ class TestChatTurnPageIncludeTurn:
         return [int(e["content"][1:]) for e in page["events"] if e["type"] == "user"]
 
     def test_without_it_the_page_is_the_last_few_turns(self):
-        from agentica.memory.trace import chat_turn_page
+        from agentica.session.trace import chat_turn_page
         page = chat_turn_page(self._entries(), 6)
         assert self._user_turns(page) == list(range(35, 41)) and page["older_turns"] == 34
 
     def test_one_read_reaches_the_turn_with_one_turn_of_context(self):
-        from agentica.memory.trace import chat_turn_page
+        from agentica.session.trace import chat_turn_page
         page = chat_turn_page(self._entries(), 6, include_turn=10)
         turns = self._user_turns(page)
         assert turns[0] == 9 and turns[-1] == 40, "from the turn before the hit through the end"
@@ -1015,19 +1015,19 @@ class TestChatTurnPageIncludeTurn:
         assert page["has_more"] is True and page["next_before"] > 0
 
     def test_first_turn_reaches_the_start_of_the_log(self):
-        from agentica.memory.trace import chat_turn_page
+        from agentica.session.trace import chat_turn_page
         for t in (1, 2):
             page = chat_turn_page(self._entries(), 6, include_turn=t)
             assert self._user_turns(page)[0] == 1 and page["older_turns"] == 0 and page["has_more"] is False
 
     def test_a_turn_already_in_the_window_changes_nothing(self):
-        from agentica.memory.trace import chat_turn_page
+        from agentica.session.trace import chat_turn_page
         plain = chat_turn_page(self._entries(), 6)
         assert chat_turn_page(self._entries(), 6, include_turn=38) == plain
         assert chat_turn_page(self._entries(), 6, include_turn=999) == plain  # beyond the log
 
     def test_pages_from_a_cursor_only_reach_back_from_that_cursor(self):
-        from agentica.memory.trace import chat_turn_page
+        from agentica.session.trace import chat_turn_page
         first = chat_turn_page(self._entries(), 6)
         page = chat_turn_page(self._entries(), 6, before=first["next_before"], include_turn=3)
         turns = self._user_turns(page)
@@ -1036,7 +1036,7 @@ class TestChatTurnPageIncludeTurn:
 
 
 def test_analyze_marks_in_flight_round_until_terminal_row():
-    from agentica.memory.trace import analyze_entries, last_completed_round
+    from agentica.session.trace import analyze_entries, last_completed_round
 
     base = [
         _e("2026-01-01T00:00:00.000Z", type="user", content="q1"),

@@ -11,7 +11,7 @@ making them easy to test and reuse across different response paths
 import json
 from typing import Any, Dict, List, Optional
 
-from agentica.cli.display.status_bar import format_turn_clock
+from agentica.utils.timer import format_turn_clock
 from agentica.run.response import ToolCallInfo
 from agentica.tools.helpers import files_unified_diff
 
