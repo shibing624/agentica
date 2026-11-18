@@ -7,9 +7,14 @@ Handles specific ACP methods like initialize, tools/list, tools/call, agent/exec
 """
 
 
+import asyncio
 import inspect
+import time
+import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Callable
 
+from agentica.acp.permissions import PermissionDecision, ToolPermissionPolicy
 from agentica.acp.types import (
     ACPTool,
     ACPToolCall,
@@ -17,15 +22,31 @@ from agentica.acp.types import (
     ACPInitializeParams,
     ACPInitializeResult,
     ACPAgentExecuteParams,
-    ACPErrorCode,
+    ACPMethod,
 )
-from agentica.acp.session import SessionManager, ACPSession, SessionStatus, SessionMessage
+from agentica.acp.session import SessionManager, ACPSession, SessionStatus
 from agentica.utils.log import logger
+from agentica.version import __version__
 
 if TYPE_CHECKING:
     from agentica.agent import Agent
     from agentica.model.base import Model
     from agentica.acp.protocol import ACPProtocolHandler
+
+
+def prompt_text(prompt: Any) -> str:
+    """Extract text from an ACP prompt content block array."""
+    if not isinstance(prompt, list):
+        raise ValueError("prompt must be a list of ACP content blocks")
+    parts = [
+        block["text"]
+        for block in prompt
+        if isinstance(block, dict) and block.get("type") == "text" and block.get("text")
+    ]
+    text = "\n".join(parts)
+    if not text.strip():
+        raise ValueError("prompt has no text content")
+    return text
 
 
 class ACPHandlers:
@@ -34,21 +55,23 @@ class ACPHandlers:
     def __init__(self, agent: Optional["Agent"] = None, model: Optional["Model"] = None,
                  protocol: Optional[Any] = None,
                  permission_policy: Optional[Any] = None,
-                 permission_callback: Optional[Callable] = None):
+                 permission_callback: Optional[Callable] = None,
+                 session_dir: Optional[str] = None):
         self._agent = agent
         self._model = model
         self._protocol = protocol
         self._initialized = False
         self._tools: List[ACPTool] = []
-        self._session_manager = SessionManager()
+        self._session_dir = session_dir
+        self._session_manager = SessionManager(storage_dir=session_dir)
+        self._agents: Dict[str, "Agent"] = {}
         # IDE tool-permission gate. Default AUTO = allow all (backward compatible).
         # ``permission_callback`` is an optional async/sync callable invoked for
         # ASK decisions: callback(tool_call) -> bool (True = grant). When a tool
         # needs approval but no callback is set, the call is denied (fail-safe).
-        from agentica.acp.permissions import ToolPermissionPolicy
         self._permission_policy = permission_policy or ToolPermissionPolicy()
         self._permission_callback = permission_callback
-        
+
         # Lazy-initialized tool instances (avoid repeated instantiation)
         self._file_tool = None
         self._execute_tool_instance = None
@@ -78,19 +101,34 @@ class ACPHandlers:
             self._web_search_tool = BuiltinWebSearchTool()
         return self._web_search_tool
     
+    def _new_agent(self, session_id: Optional[str] = None):
+        """Build an Agent; session_id pins its transcript for cross-process replay."""
+        # Imported here: agentica.agent pulls in the full tool stack.
+        from agentica.agent import Agent
+        from agentica.model.defaults import create_default_model
+
+        transcript_dir = str(Path(self._session_dir) / "transcripts") if self._session_dir else None
+        return Agent(
+            model=self._model or create_default_model(),
+            name="Agentica-ACP",
+            description="Agentica ACP Agent",
+            session_id=session_id,
+            session_base_dir=transcript_dir if session_id else None,
+        )
+
     def _get_or_create_agent(self):
-        """Get existing agent or create a new one (centralized initialization)"""
+        """Shared Agent for the legacy agent/execute path."""
         if self._agent is None:
-            from agentica.agent import Agent
-            from agentica.model.defaults import create_default_model
-            
-            model = self._model or create_default_model()
-            self._agent = Agent(
-                model=model,
-                name="Agentica-ACP",
-                description="Agentica ACP Agent",
-            )
+            self._agent = self._new_agent()
         return self._agent
+
+    def _agent_for(self, session: ACPSession):
+        """One Agent per ACP session so session/load resumes its transcript."""
+        if self._agent is not None:
+            return self._agent
+        if session.id not in self._agents:
+            self._agents[session.id] = self._new_agent(session_id=session.id)
+        return self._agents[session.id]
     
     def _setup_tools(self) -> None:
         """Setup available tools for ACP"""
@@ -182,22 +220,11 @@ class ACPHandlers:
         ])
     
     def handle_initialize(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle initialize request"""
+        """Negotiate protocol version 1 and advertise supported capabilities."""
         init_params = ACPInitializeParams.from_dict(params)
-        
         logger.info(f"ACP initialize from client: {init_params.clientInfo}")
-        
         self._initialized = True
-        
-        result = ACPInitializeResult(
-            protocolVersion=init_params.protocolVersion,
-            capabilities={
-                "tools": {"listChanged": True},
-                "agent": {"execute": True, "cancel": True},
-            },
-        )
-        
-        return result.to_dict()
+        return ACPInitializeResult().to_dict()
     
     def handle_shutdown(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle shutdown request"""
@@ -210,16 +237,7 @@ class ACPHandlers:
         self._initialized = False
 
     def handle_ping(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle ping / health-check request.
-
-        Returns server status and version so IDEs and monitors can confirm
-        the ACP server is alive and responding.
-        """
-        import time
-        try:
-            from agentica.version import __version__
-        except ImportError:
-            __version__ = "unknown"
+        """Health check for IDEs and monitors."""
         return {
             "status": "ok",
             "initialized": self._initialized,
@@ -255,8 +273,6 @@ class ACPHandlers:
         proceed. ASK decisions consult ``permission_callback``; absent a
         callback, ASK is treated as denied (fail-safe).
         """
-        from agentica.acp.permissions import PermissionDecision
-
         decision = self._permission_policy.decide(tool_call.name, tool_call.arguments)
         if decision == PermissionDecision.ALLOW:
             return None
@@ -356,131 +372,63 @@ class ACPHandlers:
     # ============ Session Management ============
     
     def handle_session_new(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Handle session/new request.
-        
-        Creates a new ACP session for the IDE.
-        Supports _meta for session key mapping (like acp_tech.md spec).
-        """
+        """Create a session; the id is also the agentica transcript id."""
         if not self._initialized:
             raise RuntimeError("Server not initialized")
-        
-        mode = params.get("mode", "default")
-        context = params.get("context", {})
-        cwd = params.get("cwd", ".")
-        
-        # Parse _meta for session key (ACP spec)
-        meta = params.get("_meta", {})
-        session_key = meta.get("sessionKey")
-        
+
         session = self._session_manager.create_session(
-            mode=mode,
-            initial_context=context,
-            cwd=cwd,
-            session_key=session_key
+            mode=params.get("mode", "default"),
+            initial_context=params.get("context", {}),
+            cwd=params.get("cwd", "."),
+            session_key=params.get("_meta", {}).get("sessionKey"),
         )
-        
-        logger.info(f"Created session {session.id} (mode: {mode}, cwd: {cwd})")
-        
-        return {
-            "sessionId": session.id,
-            "status": "created",
-            "mode": mode,
-        }
+        logger.info(f"Created session {session.id} (cwd: {session.cwd})")
+        return {"sessionId": session.id}
     
     def handle_session_prompt(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Handle session/prompt request.
-        
-        This is the core method - processes user prompt and returns response.
-        Supports streaming via notifications and cancellation via abort_event.
-        """
-        import uuid as uuid_module
-        import asyncio
-        
+        """Run one turn, streaming the answer as session/update notifications."""
         if not self._initialized:
             raise RuntimeError("Server not initialized")
-        
+
         session_id = params.get("sessionId")
-        prompt = params.get("prompt", "")
-        stream = params.get("stream", True)
-        
         if not session_id:
             raise ValueError("sessionId is required")
-        if not prompt:
-            raise ValueError("prompt is required")
-        
+        text = prompt_text(params.get("prompt"))
+
         session = self._session_manager.get_session(session_id)
-        if not session:
+        if session is None:
             raise RuntimeError(f"Session not found: {session_id}")
-        
-        # Cancel any existing run
+
         if session.active_run_id:
             self._session_manager.cancel_session(session_id)
-        
-        # Create new run with idempotency key
-        run_id = str(uuid_module.uuid4())
-        abort_event = asyncio.Event()
-        self._session_manager.set_active_run(session_id, run_id, abort_event)
-        
-        # Parse _meta for prefix_cwd option
-        meta = params.get("_meta", {})
-        prefix_cwd = meta.get("prefixCwd", True)
-        
-        # Optionally prefix working directory
-        if prefix_cwd and session.cwd:
-            prompt_with_cwd = f"[Working directory: {session.cwd}]\n\n{prompt}"
-        else:
-            prompt_with_cwd = prompt
-        
-        # Add user message to history
-        session.add_message("user", prompt)
+        run_id = str(uuid.uuid4())
+        self._session_manager.set_active_run(session_id, run_id, asyncio.Event())
+        session.add_message("user", text)
         session.update_status(SessionStatus.RUNNING)
-        
-        logger.info(f"Session {session_id} prompt (run_id={run_id[:8]}): {prompt[:100]}...")
-        
-        try:
-            # Execute with streaming support
-            if stream and self._protocol:
-                result = self._execute_with_streaming(session, prompt_with_cwd)
-            else:
-                result = self._execute_sync(session, prompt_with_cwd)
-            
-            session.update_status(SessionStatus.COMPLETED)
-            self._session_manager.clear_active_run(session_id)
-            
-            return {
-                "sessionId": session_id,
-                "stopReason": result.get("stop_reason", "end_turn"),
-                "content": result.get("content", ""),
-                "status": "completed",
-            }
-            
-        except Exception as e:
-            logger.error(f"Error in session {session_id}: {e}")
-            session.update_status(SessionStatus.ERROR)
-            self._session_manager.clear_active_run(session_id)
-            raise
-    
+        logger.info(f"Session {session_id} prompt (run_id={run_id[:8]})")
+
+        result = self._execute_with_streaming(session, text)
+
+        session.update_status(SessionStatus.COMPLETED)
+        self._session_manager.clear_active_run(session_id)
+        self._session_manager.save_session(session)
+        return {"stopReason": result.get("stop_reason", "end_turn")}
+
     def handle_session_load(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle session/load request - load a session by ID"""
+        """Resume a session created by an earlier process."""
         if not self._initialized:
             raise RuntimeError("Server not initialized")
-        
+
         session_id = params.get("sessionId")
         if not session_id:
             raise ValueError("sessionId is required")
-        
+
         session = self._session_manager.get_session(session_id)
-        if not session:
+        if session is None:
+            session = self._session_manager.restore_session(session_id, params.get("cwd", "."))
+        if session is None:
             raise RuntimeError(f"Session not found: {session_id}")
-        
-        return {
-            "sessionId": session.id,
-            "status": session.status.value,
-            "mode": session.mode,
-            "messageCount": len(session.messages),
-        }
+        return {"sessionId": session.id}
     
     def handle_session_cancel(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle session/cancel request"""
@@ -528,105 +476,25 @@ class ACPHandlers:
             "stats": stats,
         }
     
-    def _execute_sync(self, session: ACPSession, prompt: str) -> Dict[str, Any]:
-        """
-        Execute prompt synchronously.
-        
-        Args:
-            session: ACP session
-            prompt: User prompt
-            
-        Returns:
-            Execution result
-        """
-        agent = self._get_or_create_agent()
-        response = agent.run_sync(prompt)
-        content = response.content if response else ""
-        
-        # Add assistant message to history
-        session.add_message("assistant", content)
-        
-        return {
-            "content": content,
-            "stop_reason": "end_turn",
-        }
-    
     def _execute_with_streaming(self, session: ACPSession, prompt: str) -> Dict[str, Any]:
-        """
-        Execute prompt with streaming output.
-        
-        Sends progress notifications during execution.
-        
-        Args:
-            session: ACP session
-            prompt: User prompt
-            
-        Returns:
-            Execution result
-        """
-        full_content = []
-        
-        # Send initial progress
-        self._send_notification("notifications/progress", {
-            "sessionId": session.id,
-            "type": "start",
-            "message": "Processing...",
-        })
-        
-        try:
-            agent = self._get_or_create_agent()
-            response = agent.run_stream_sync(prompt)
-            
-            for chunk in response:
-                if chunk and chunk.content:
-                    full_content.append(chunk.content)
-                    
-                    # Send progress notification
-                    self._send_notification("notifications/session/update", {
-                        "sessionId": session.id,
-                        "type": "content",
-                        "content": chunk.content,
-                    })
-            
-            final_content = "".join(full_content)
-            
-            # Add assistant message to history
-            session.add_message("assistant", final_content)
-            
-            # Send completion notification
-            self._send_notification("notifications/complete", {
-                "sessionId": session.id,
-                "type": "complete",
-            })
-            
-            return {
-                "content": final_content,
-                "stop_reason": "end_turn",
-            }
-            
-        except Exception as e:
-            # Send error notification
-            self._send_notification("notifications/complete", {
-                "sessionId": session.id,
-                "type": "error",
-                "error": str(e),
-            })
-            raise
-    
+        """Stream the answer as standard ACP session/update notifications."""
+        chunks: List[str] = []
+        agent = self._agent_for(session)
+        for chunk in agent.run_stream_sync(prompt):
+            if chunk and chunk.content:
+                chunks.append(chunk.content)
+                self._send_notification(ACPMethod.SESSION_UPDATE.value, {
+                    "sessionId": session.id,
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": chunk.content},
+                    },
+                })
+
+        content = "".join(chunks)
+        session.add_message("assistant", content)
+        return {"content": content, "stop_reason": "end_turn"}
+
     def _send_notification(self, method: str, params: Dict[str, Any]) -> None:
-        """
-        Send a notification to the client.
-        
-        Notifications don't require a response.
-        """
-        if self._protocol:
-            from agentica.acp.types import ACPRequest
-            notification = ACPRequest(
-                id=0,  # Notifications use id=0 or null
-                method=method,
-                params=params,
-            )
-            # Use the protocol to send notification
-            # This requires protocol to have a send_notification method
-            if hasattr(self._protocol, 'send_notification'):
-                self._protocol.send_notification(method, params)
+        """Send a one-way notification over the protocol transport."""
+        self._protocol.send_notification(method, params)

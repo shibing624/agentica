@@ -10,21 +10,13 @@ import unittest
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-try:
-    import websockets  # noqa: F401
-    _HAS_WS = True
-except ImportError:
-    _HAS_WS = False
-
-if _HAS_WS:
-    from agentica.acp.permissions import (
-        ToolPermissionPolicy, PermissionMode, PermissionDecision,
-    )
-    from agentica.acp.handlers import ACPHandlers
-    from agentica.acp.types import ACPToolCall
+from agentica.acp.permissions import (
+    ToolPermissionPolicy, PermissionMode, PermissionDecision,
+)
+from agentica.acp.handlers import ACPHandlers
+from agentica.acp.types import ACPToolCall
 
 
-@unittest.skipUnless(_HAS_WS, "acp extras (websockets) not installed")
 class TestToolPermissionPolicy(unittest.TestCase):
     def test_auto_allows_all(self):
         p = ToolPermissionPolicy()  # AUTO default
@@ -63,7 +55,6 @@ class TestToolPermissionPolicy(unittest.TestCase):
         self.assertEqual(p.decide("some_unknown_tool"), PermissionDecision.DENY)
 
 
-@unittest.skipUnless(_HAS_WS, "acp extras (websockets) not installed")
 class TestHandlerPermissionGate(unittest.TestCase):
     def _handler(self, **kwargs):
         return ACPHandlers(**kwargs)

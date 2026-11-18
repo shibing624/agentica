@@ -12,6 +12,12 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Union
 from enum import Enum
 
+from agentica.version import __version__
+
+
+# ACP protocol version is an integer negotiated by initialize.
+ACP_PROTOCOL_VERSION = 1
+
 
 class ACPMethod(str, Enum):
     """ACP Standard Methods"""
@@ -20,15 +26,15 @@ class ACPMethod(str, Enum):
     SHUTDOWN = "shutdown"
     EXIT = "exit"
     PING = "ping"  # Health check: returns {"status": "ok", "version": ...}
-    
+
     # Tool methods
     TOOLS_LIST = "tools/list"
     TOOLS_CALL = "tools/call"
-    
+
     # Agent methods (legacy)
     AGENT_EXECUTE = "agent/execute"
     AGENT_CANCEL = "agent/cancel"
-    
+
     # Session management (ACP core)
     SESSION_NEW = "session/new"
     SESSION_PROMPT = "session/prompt"
@@ -36,42 +42,38 @@ class ACPMethod(str, Enum):
     SESSION_CANCEL = "session/cancel"
     SESSION_DELETE = "session/delete"
     SESSION_LIST = "session/list"
-    
+    SESSION_UPDATE = "session/update"
+    SESSION_REQUEST_PERMISSION = "session/request_permission"
+
     # File system (Client exposes to Agent)
     FS_READ_TEXT_FILE = "fs/read_text_file"
     FS_WRITE_TEXT_FILE = "fs/write_text_file"
     FS_LIST_DIRECTORY = "fs/list_directory"
     FS_SEARCH = "fs/search"
-    
+
     # Terminal
     TERMINAL_CREATE = "terminal/create"
     TERMINAL_OUTPUT = "terminal/output"
     TERMINAL_RELEASE = "terminal/release"
     TERMINAL_EXECUTE = "terminal/execute"
-    
-    # Notifications (no response needed)
-    NOTIFICATION_INITIALIZED = "notifications/initialized"
-    NOTIFICATION_PROGRESS = "notifications/progress"
-    NOTIFICATION_COMPLETE = "notifications/complete"
-    NOTIFICATION_SESSION_UPDATE = "notifications/session/update"
 
 
 @dataclass
 class ACPMessage:
     """Base ACP Message"""
     jsonrpc: str = "2.0"
-    
+
     def to_dict(self) -> Dict[str, Any]:
         raise NotImplementedError
 
 
-@dataclass 
+@dataclass
 class ACPRequest(ACPMessage):
     """ACP Request Message"""
     id: Union[str, int] = field(default=0)
     method: str = field(default="")
     params: Optional[Dict[str, Any]] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         result = {
             "jsonrpc": self.jsonrpc,
@@ -81,7 +83,7 @@ class ACPRequest(ACPMessage):
         if self.params is not None:
             result["params"] = self.params
         return result
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ACPRequest":
         return cls(
@@ -98,7 +100,7 @@ class ACPResponse(ACPMessage):
     id: Union[str, int] = field(default=0)
     result: Optional[Dict[str, Any]] = None
     error: Optional[Dict[str, Any]] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         result = {
             "jsonrpc": self.jsonrpc,
@@ -109,7 +111,7 @@ class ACPResponse(ACPMessage):
         elif self.result is not None:
             result["result"] = self.result
         return result
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ACPResponse":
         return cls(
@@ -118,12 +120,12 @@ class ACPResponse(ACPMessage):
             result=data.get("result"),
             error=data.get("error"),
         )
-    
+
     @classmethod
     def create_success(cls, id: Union[str, int], result: Dict[str, Any]) -> "ACPResponse":
         """Create a success response (factory method)"""
         return cls(id=id, result=result)
-    
+
     @classmethod
     def create_error(cls, id: Union[str, int], code: int, message: str, data: Any = None) -> "ACPResponse":
         """Create an error response (factory method)"""
@@ -139,7 +141,7 @@ class ACPTool:
     name: str
     description: str
     inputSchema: Dict[str, Any] = field(default_factory=dict)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "name": self.name,
@@ -153,7 +155,7 @@ class ACPToolCall:
     """ACP Tool Call"""
     name: str
     arguments: Dict[str, Any] = field(default_factory=dict)
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ACPToolCall":
         return cls(
@@ -167,7 +169,7 @@ class ACPToolResult:
     """ACP Tool Result"""
     content: str
     isError: bool = False
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "content": self.content,
@@ -178,34 +180,39 @@ class ACPToolResult:
 @dataclass
 class ACPInitializeParams:
     """ACP Initialize Parameters"""
-    protocolVersion: str = "2024-11-05"
-    capabilities: Dict[str, Any] = field(default_factory=dict)
+    protocolVersion: int = ACP_PROTOCOL_VERSION
+    clientCapabilities: Dict[str, Any] = field(default_factory=dict)
     clientInfo: Dict[str, str] = field(default_factory=dict)
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ACPInitializeParams":
         return cls(
-            protocolVersion=data.get("protocolVersion", "2024-11-05"),
-            capabilities=data.get("capabilities", {}),
+            protocolVersion=data.get("protocolVersion", ACP_PROTOCOL_VERSION),
+            clientCapabilities=data.get("clientCapabilities", {}),
             clientInfo=data.get("clientInfo", {}),
         )
 
 
 @dataclass
 class ACPInitializeResult:
-    """ACP Initialize Result"""
-    protocolVersion: str = "2024-11-05"
-    capabilities: Dict[str, Any] = field(default_factory=dict)
-    serverInfo: Dict[str, str] = field(default_factory=lambda: {
-        "name": "agentica",
-        "version": "0.1.0",
+    """ACP Initialize Result (protocol version 1)"""
+    protocolVersion: int = ACP_PROTOCOL_VERSION
+    agentCapabilities: Dict[str, Any] = field(default_factory=lambda: {
+        "loadSession": True,
+        "promptCapabilities": {"text": True, "embeddedContext": True},
     })
-    
+    agentInfo: Dict[str, str] = field(default_factory=lambda: {
+        "name": "agentica",
+        "version": __version__,
+    })
+    authMethods: List[Dict[str, Any]] = field(default_factory=list)
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "protocolVersion": self.protocolVersion,
-            "capabilities": self.capabilities,
-            "serverInfo": self.serverInfo,
+            "agentCapabilities": self.agentCapabilities,
+            "agentInfo": self.agentInfo,
+            "authMethods": self.authMethods,
         }
 
 
@@ -215,7 +222,7 @@ class ACPAgentExecuteParams:
     task: str
     context: Optional[Dict[str, Any]] = None
     files: Optional[List[str]] = None
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ACPAgentExecuteParams":
         return cls(
@@ -233,4 +240,3 @@ class ACPErrorCode:
     INVALID_PARAMS = -32602
     INTERNAL_ERROR = -32603
     SERVER_ERROR_START = -32000
-    SERVER_ERROR_END = -32099

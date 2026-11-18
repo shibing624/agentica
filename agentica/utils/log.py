@@ -422,6 +422,18 @@ def print_llm_stream(msg):
     print(msg, end="", flush=True)
 
 
+def route_console_logging_to_stderr() -> None:
+    """Move console handlers to stderr so stdout stays a clean protocol channel.
+
+    ACP and other stdio protocols cannot tolerate log lines interleaved with
+    their JSON frames. File handlers are left untouched.
+    """
+    for handler in logger.handlers:
+        if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+            handler.setStream(sys.stderr)
+            handler.setFormatter(_console_formatter_for(sys.stderr, color=False))
+
+
 def suppress_console_logging():
     """Suppress console output for agentica logger (keep file logging).
     

@@ -16,13 +16,15 @@ Usage:
 
 import asyncio
 import inspect
+import os
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from agentica.acp.protocol import ACPProtocolHandler
 from agentica.acp.handlers import ACPHandlers
 from agentica.acp.types import ACPErrorCode, ACPMethod
-from agentica.utils.log import logger
+from agentica.utils.log import logger, route_console_logging_to_stderr
 
 if TYPE_CHECKING:
     from agentica.agent import Agent
@@ -48,16 +50,24 @@ class ACPServer:
     }
     """
     
-    def __init__(self, agent: Optional["Agent"] = None, model: Optional["Model"] = None):
+    def __init__(self, agent: Optional["Agent"] = None, model: Optional["Model"] = None,
+                 session_dir: Optional[str] = None):
         """
         Initialize ACP Server.
-        
+
         Args:
             agent: Optional pre-configured Agent instance
             model: Optional Model to use for the agent
+            session_dir: Where session metadata and transcripts live. Defaults
+                to ~/.agentica/acp/sessions; override for tests or embedding.
         """
         self._protocol = ACPProtocolHandler()
-        self._handlers = ACPHandlers(agent=agent, model=model, protocol=self._protocol)
+        sessions = session_dir or os.environ.get("AGENTICA_ACP_SESSION_DIR") or str(
+            Path.home() / ".agentica" / "acp" / "sessions"
+        )
+        self._handlers = ACPHandlers(
+            agent=agent, model=model, protocol=self._protocol, session_dir=sessions
+        )
         self._running = False
         
         # Method dispatcher
@@ -88,32 +98,32 @@ class ACPServer:
     def run(self) -> None:
         """
         Run the ACP server.
-        
-        This method blocks and listens for JSON-RPC messages on stdin,
-        processing them until the server is shut down.
+
+        Blocks on stdin, reading one JSON-RPC frame per line and writing
+        frames to stdout until shutdown or EOF.
         """
         self._running = True
+        # stdout is the NDJSON transport. Any other writer — agentica logging,
+        # agent printers, third-party print() — would corrupt the frames, so
+        # route it to stderr. The protocol handler captured real stdout at
+        # construction and keeps writing frames there.
+        route_console_logging_to_stderr()
+        transport_stdout = sys.stdout
+        sys.stdout = sys.stderr
         logger.info("Agentica ACP Server started")
-        
+
         try:
             while self._running:
-                # Read message from stdin
                 request = self._protocol.read_message()
-                
                 if request is None:
-                    # EOF reached
                     logger.info("EOF reached, shutting down")
                     break
-                
-                # Handle the request
                 self._handle_request(request)
-                
         except KeyboardInterrupt:
             logger.info("Interrupted, shutting down")
-        except Exception as e:
-            logger.error(f"Server error: {e}")
         finally:
             self._running = False
+            sys.stdout = transport_stdout
             logger.info("Agentica ACP Server stopped")
     
     def _handle_request(self, request) -> None:

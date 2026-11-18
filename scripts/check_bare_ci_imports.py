@@ -20,7 +20,6 @@ TESTS = ROOT / "tests"
 EXTRA_IMPORTS = {
     "agentica_gateway": ("agentica_gateway", "fastapi"),
     "agentica.gateway": ("agentica_gateway", "fastapi"),
-    "agentica.acp": ("websockets",),
 }
 
 
