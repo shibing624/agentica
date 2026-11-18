@@ -122,3 +122,29 @@ def test_http_list_preview_upload_and_escape(client):
     st = c.post("/api/workspace/stat", json={"root": str(root), "paths": ["note.md", "new.py", "nope"]})
     assert st.status_code == 200
     assert set(st.json()["existing"]) == {"note.md", "new.py"}
+
+
+def test_an_excel_workbook_uploads_and_an_unknown_type_says_why_it_was_refused(client):
+    c, tmp_path = client
+    root = tmp_path / "proj"
+    root.mkdir()
+    # An .xlsx is a zip: binary bytes must land on disk untouched.
+    blob = bytes(range(256)) * 8
+    ok = c.post(
+        "/api/workspace/upload",
+        data={"root": str(root), "path": ""},
+        files={"file": ("Q3 报表.xlsx", blob, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        headers={"X-Agentica-Client": "web"},
+    )
+    assert ok.status_code == 200, ok.text
+    assert (root / "Q3 报表.xlsx").read_bytes() == blob
+
+    refused = c.post(
+        "/api/workspace/upload",
+        data={"root": str(root), "path": ""},
+        files={"file": ("a.exe", b"MZ", "application/octet-stream")},
+        headers={"X-Agentica-Client": "web"},
+    )
+    assert refused.status_code == 400
+    assert ".exe" in refused.json()["detail"]
+    assert not (root / "a.exe").exists()

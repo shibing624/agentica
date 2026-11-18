@@ -18,6 +18,18 @@ from agentica.config import AGENTICA_CACHE_DIR, AGENTICA_WORKSPACE_DIR, AGENTICA
 from agentica.config.profiles import apply_global_config, get_profile
 
 
+# What may be uploaded unless UPLOAD_ALLOWED_EXTENSIONS says otherwise: source,
+# text, documents (PDF and Office) and data tables, images, archives. One list,
+# because the dataclass default and the env default used to be two copies that
+# drifted (the env one lacked `.tex`, `.sql`, ...).
+DEFAULT_UPLOAD_EXTENSIONS = (
+    ".txt,.md,.py,.js,.ts,.jsx,.tsx,.json,.yaml,.yml,.toml,.csv,.tsv,"
+    ".tex,.bib,.sty,.cls,.sh,.html,.htm,.css,.xml,.sql,.rs,.go,.java,.c,.h,.cpp,.hpp,.log,.jsonl,.ipynb,"
+    ".pdf,.xlsx,.xls,.xlsm,.docx,.doc,.pptx,.ppt,.odt,.ods,.odp,.rtf,.parquet,"
+    ".png,.jpg,.jpeg,.gif,.webp,.svg,.zip,.tar,.gz"
+)
+
+
 @dataclass
 class Settings:
     """Gateway service configuration.
@@ -45,11 +57,7 @@ class Settings:
 
     # File upload limits
     upload_max_size_mb: int = 50
-    upload_allowed_extensions: str = (
-        ".txt,.md,.py,.js,.ts,.jsx,.tsx,.json,.yaml,.yml,.toml,.csv,"
-        ".tex,.bib,.sty,.cls,.sh,.html,.htm,.css,.xml,.sql,.rs,.go,.java,.c,.h,.cpp,.hpp,.log,.jsonl,"
-        ".pdf,.png,.jpg,.jpeg,.gif,.webp,.svg,.zip,.tar,.gz"
-    )
+    upload_allowed_extensions: str = DEFAULT_UPLOAD_EXTENSIONS
 
     # Run history retention (days); runs older than this are pruned on startup
     job_runs_retention_days: int = 30
@@ -198,11 +206,7 @@ class Settings:
 
             # Upload limits
             upload_max_size_mb=int(os.getenv("UPLOAD_MAX_SIZE_MB", "50")),
-            upload_allowed_extensions=os.getenv(
-                "UPLOAD_ALLOWED_EXTENSIONS",
-                ".txt,.md,.py,.js,.ts,.jsx,.tsx,.json,.yaml,.yml,.toml,.csv,"
-                ".pdf,.png,.jpg,.jpeg,.gif,.webp,.svg,.zip,.tar,.gz",
-            ),
+            upload_allowed_extensions=os.getenv("UPLOAD_ALLOWED_EXTENSIONS", DEFAULT_UPLOAD_EXTENSIONS),
 
             # Run history retention
             job_runs_retention_days=int(os.getenv("JOB_RUNS_RETENTION_DAYS", "30")),

@@ -281,7 +281,7 @@ export function WorkspaceBrowser({
       try {
         for (const file of files) {
           const up = await api.uploadWorkspaceFile(file, root, path);
-          if (!up.ok) showToast(S.chat.uploadFailed(file.name), 3000);
+          if (!up.ok) showToast(S.chat.uploadFailed(file.name, up.data?.detail), 5000);
         }
         showToast(S.files.uploaded);
         setReloadTick((t) => t + 1);

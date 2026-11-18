@@ -891,6 +891,16 @@ class TestSettings:
         ext_set = s.upload_allowed_ext_set
         assert ext_set == {".py", ".js", ".ts"}
 
+    def test_default_upload_list_takes_office_files_and_env_default_matches(self, monkeypatch):
+        """An Excel workbook uploads by default; the env default is the same list."""
+        from agentica_gateway.config import DEFAULT_UPLOAD_EXTENSIONS, Settings
+        monkeypatch.delenv("UPLOAD_ALLOWED_EXTENSIONS", raising=False)
+        for ext in (".xlsx", ".docx", ".pptx", ".csv", ".pdf"):
+            assert ext in Settings().upload_allowed_ext_set
+        assert Settings.from_env().upload_allowed_extensions == DEFAULT_UPLOAD_EXTENSIONS
+        monkeypatch.setenv("UPLOAD_ALLOWED_EXTENSIONS", ".txt")
+        assert Settings.from_env().upload_allowed_ext_set == {".txt"}
+
 
 class TestWebPrefsClean:
     """A stored tier the selector wrote before the rename keeps its meaning."""

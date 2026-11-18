@@ -2380,7 +2380,7 @@ async function sendMessage(sessId: string, text: string, files: File[]) {
     for (const f of otherFiles) {
       const up = await api.uploadFileApi(f, sess.dir || st.serverDir);
       if (up.ok && up.data?.path) uploaded.push(up.data.path);
-      else showToast(S.chat.uploadFailed(f.name), 3000);
+      else showToast(S.chat.uploadFailed(f.name, up.data?.detail), 5000);
     }
     if (uploaded.length) {
       const list = uploaded.join(", ");
