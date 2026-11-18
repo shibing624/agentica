@@ -293,3 +293,21 @@ test("dock menu template falls back cleanly when no session is open or recent li
   );
 });
 
+
+test("a browser-tab webview is stripped to a plain sandboxed web page, and only in its own storage", () => {
+  const { BROWSER_PARTITION, hardenWebview, isBrowsableUrl } = require("./util");
+  const prefs = { preload: "/evil.js", preloadURL: "file:///evil.js", nodeIntegration: true, nodeIntegrationInSubFrames: true, contextIsolation: false, sandbox: false, webSecurity: false };
+  assert.equal(hardenWebview(prefs, { src: "https://example.com/", partition: BROWSER_PARTITION }), true);
+  assert.deepEqual(prefs, { nodeIntegration: false, nodeIntegrationInSubFrames: false, contextIsolation: true, sandbox: true, webSecurity: true });
+  // A blank tab has no src yet.
+  assert.equal(hardenWebview({}, { partition: BROWSER_PARTITION }), true);
+  // The app's own storage (no partition, or another one) is never shared with a page.
+  for (const partition of [undefined, "", "persist:main", "persist:agentica-browser-x"]) {
+    assert.equal(hardenWebview({}, { src: "https://example.com/", partition }), false, String(partition));
+  }
+  for (const src of ["file:///etc/passwd", "javascript:alert(1)", "chrome://gpu", "data:text/html,x", "not a url"]) {
+    assert.equal(hardenWebview({}, { src, partition: BROWSER_PARTITION }), false, src);
+    assert.equal(isBrowsableUrl(src), false, src);
+  }
+  assert.equal(isBrowsableUrl("http://localhost:3000/a?b=1"), true);
+});

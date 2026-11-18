@@ -2277,3 +2277,17 @@ html[data-desktop="mac"] .auto-detail-bar{-webkit-app-region:drag}
 .bg-panel-btn svg{width:11px;height:11px}
 .bg-panel-btn:hover{color:var(--fg);border-color:var(--fg3)}
 .bg-output{margin:0;padding:8px 10px;max-height:280px;overflow:auto;background:transparent;font:11.5px/1.55 var(--mono);color:var(--fg2);white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* Browser tab (right panel). */
+.bv{display:flex;flex-direction:column;height:100%;min-height:0}
+.bv-bar{display:flex;align-items:center;gap:4px;padding:6px 8px;border-bottom:var(--hair) solid var(--border)}
+.bv-bar .ib.disabled,.bv-bar .ib:disabled{opacity:.35;pointer-events:none}
+.bv-back svg{transform:scaleX(-1)}
+.bv-loading svg{animation:icon-spin 1s linear infinite}
+.bv-url{flex:1;min-width:0;height:28px;padding:0 10px;border:var(--hair) solid var(--border);border-radius:var(--radius-sm);background:var(--bg2);color:var(--fg);font-size:13px;outline:none}
+.bv-url:focus{border-color:var(--accent)}
+.bv-url.bad{border-color:#dc2626}
+.bv-note{padding:6px 12px;font-size:12px;color:var(--fg3);border-bottom:var(--hair) solid var(--border)}
+.bv-page{position:relative;flex:1;min-height:0;display:flex}
+.bv-guest{flex:1;width:100%;border:0;background:#fff}
+.bv-empty{margin:auto;color:var(--fg3);font-size:13px}

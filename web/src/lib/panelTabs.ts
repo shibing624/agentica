@@ -14,7 +14,10 @@ export type PanelTab =
   /** One round's edits (dsh's review tab): every file the reply changed,
    *  `path` the one on screen; the header's selector switches between them. */
   | { key: string; kind: "review"; turn: number; files: FileEdits[]; path: string }
-  | { key: string; kind: "terminal"; id: string; ordinal: number };
+  | { key: string; kind: "terminal"; id: string; ordinal: number }
+  /** A web page. `url` is where the tab was last left (empty for a new tab);
+   *  `title` is whatever the page called itself. */
+  | { key: string; kind: "browser"; id: string; url: string; title: string };
 
 export type TabsState = { tabs: PanelTab[]; active: string };
 
@@ -46,6 +49,7 @@ export const fileKey = (path: string) => `file:${path}`;
 export const skillKey = (name: string) => `skill:${name}`;
 export const reviewKey = (turn: number) => `review:${turn}`;
 export const terminalKey = (id: string) => `term:${id}`;
+export const browserKey = (id: string) => `browser:${id}`;
 
 /** Open a tab, or focus it if one with the same key is already open. New tabs
  *  go right after the active one, as in a browser. */
@@ -176,6 +180,13 @@ export function restoreSessionPanel(raw: string | null | undefined): SessionPane
           if (!seen.has(key)) {
             seen.add(key);
             tabs.push({ key, kind: "skill", name: item.name });
+          }
+        } else if (item.kind === "browser" && typeof item.id === "string" && item.id) {
+          const key = browserKey(item.id);
+          const url = typeof item.url === "string" && /^https?:\/\//.test(item.url) ? item.url : "";
+          if (!seen.has(key)) {
+            seen.add(key);
+            tabs.push({ key, kind: "browser", id: item.id, url, title: typeof item.title === "string" ? item.title : "" });
           }
         } else if (
           item.kind === "review" &&

@@ -1001,6 +1001,19 @@ const en = {
     guideTitle: "Start",
     guideFiles: "Workspace files",
     guideFilesDesc: "Browse files in this chat's working directory",
+    guideBrowser: "Browser",
+    guideBrowserDesc: "Open a web page next to the chat, such as a local dev server",
+  },
+  browser: {
+    newTab: "New tab",
+    addressPlaceholder: "Enter a URL, e.g. localhost:3000",
+    notAnAddress: "Enter a web address (http or https)",
+    back: "Back",
+    forward: "Forward",
+    reload: "Reload",
+    openExternal: "Open in your browser",
+    embedNote: "Many sites refuse to be shown inside another page. If this one stays blank, open it in your browser.",
+    empty: "Enter a web address above",
   },
 
   terminal: {
@@ -2015,6 +2028,19 @@ const zh: Strings = {
     guideTitle: "开始",
     guideFiles: "工作区文件",
     guideFilesDesc: "浏览这个对话工作目录里的文件",
+    guideBrowser: "浏览器",
+    guideBrowserDesc: "在对话旁打开网页，例如本地开发服务",
+  },
+  browser: {
+    newTab: "新标签页",
+    addressPlaceholder: "输入网址，例如 localhost:3000",
+    notAnAddress: "请输入网址（http 或 https）",
+    back: "后退",
+    forward: "前进",
+    reload: "刷新",
+    openExternal: "在浏览器中打开",
+    embedNote: "很多网站不允许被嵌在其他页面里。如果这里一直空白，请在浏览器中打开。",
+    empty: "在上方输入网址",
   },
 
   terminal: {

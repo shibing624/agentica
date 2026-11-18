@@ -1,11 +1,13 @@
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef } from "react";
 import {
-  FileTypeIcon, IconClose, IconCompass, IconDiff, IconExitFullscreen, IconFullscreen, IconPlus, IconSidebarRight, IconTerminal,
+  FileTypeIcon, IconClose, IconCompass, IconDiff, IconExitFullscreen, IconFullscreen, IconGlobe, IconPlus, IconSidebarRight, IconTerminal,
 } from "../icons";
 import { useStrings } from "../i18n";
 import { isAbsOrHomePath } from "../lib/filePath";
+import { browserTabLabel } from "../lib/browserUrl";
 import { baseName, closeTabShortcut, isCloseTabKey, tabsToClose, type PanelTab } from "../lib/panelTabs";
+import { BrowserView } from "./BrowserView";
 import { DiffView } from "./DiffView";
 import { SkillPane } from "./SkillPane";
 import type { FilesPanelState } from "./useFilesPanel";
@@ -25,12 +27,14 @@ function TabLabel({ tab }: { tab: PanelTab }) {
   if (tab.kind === "file") return <><FileTypeIcon path={tab.path} size={15} />{baseName(tab.path)}</>;
   if (tab.kind === "review") return <><IconDiff />{S.files.reviewTitle(tab.turn)}</>;
   if (tab.kind === "skill") return <><FileTypeIcon kind="markdown" size={15} />/{tab.name}</>;
+  if (tab.kind === "browser") return <><IconGlobe />{tab.url || tab.title ? browserTabLabel(tab.url, tab.title) : S.browser.newTab}</>;
   return <><IconTerminal />{S.terminal.title(tab.ordinal)}</>;
 }
 
 function tabTitle(tab: PanelTab): string | undefined {
   if (tab.kind === "file") return tab.path;
   if (tab.kind === "skill") return tab.name;
+  if (tab.kind === "browser") return tab.url || undefined;
   return undefined;
 }
 
@@ -93,6 +97,7 @@ function GuidePage({ panel }: { panel: FilesPanelState }) {
     ...(panel.canTerminal
       ? [{ id: "terminal", icon: <IconTerminal />, title: S.terminal.newTerminal, desc: S.terminal.guideDesc, pick: panel.pickTerminal }]
       : []),
+    { id: "browser", icon: <IconGlobe />, title: S.files.guideBrowser, desc: S.files.guideBrowserDesc, pick: panel.pickBrowser },
   ];
   return (
     <div className="pg-guide">
@@ -241,6 +246,10 @@ export function FilesPanel({
                             onSelect={(path) => panel.selectReviewFile(tab.key, path)} onOpenFile={panel.browsePath} />
                 )}
                 {tab.kind === "skill" && <SkillPane name={tab.name} />}
+                {tab.kind === "browser" && (
+                  <BrowserView url={tab.url} visible={shown && active}
+                               onChange={(patch) => panel.updateBrowser(tab.key, patch)} />
+                )}
                 {tab.kind === "terminal" && (
                   <Suspense fallback={<p className="ws-muted">{S.common.loading}</p>}>
                     <TerminalView id={tab.id} visible={shown && active}

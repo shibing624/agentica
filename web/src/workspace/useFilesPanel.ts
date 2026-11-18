@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../api";
 import { useAppState, showToast } from "../store";
+import { uid } from "../lib/format";
 import { useStrings } from "../i18n";
 import {
-  activateTab, adoptTerminals, closeTab, closeTabs, fileKey, reviewKey, FILES_TAB, GUIDE_TAB, initialSessionPanel,
+  activateTab, adoptTerminals, closeTab, browserKey, closeTabs, fileKey, reviewKey, FILES_TAB, GUIDE_TAB, initialSessionPanel,
   nextTerminalOrdinal, openTab, readSessionPanel, replaceTab, skillKey, tabsToClose, terminalKey, upsertTab, writeSessionPanel,
   type PanelTab, type SessionPanelRecord, type TabsState,
 } from "../lib/panelTabs";
@@ -47,6 +48,10 @@ export type FilesPanelState = {
   /** Start a shell in the session's working directory. Admin only. */
   canTerminal: boolean;
   pickTerminal: () => void;
+  /** Start page card: the start page turns into a new browser tab. */
+  pickBrowser: () => void;
+  /** The page in a browser tab moved or retitled; remembered for the next load. */
+  updateBrowser: (key: string, patch: { url?: string; title?: string }) => void;
   /** The gateway no longer has this shell (closed elsewhere, or the gateway
    *  restarted): drop its tab without asking the gateway to close it. */
   terminalGone: (id: string) => void;
@@ -281,6 +286,18 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
     });
   }, [workspace, sessionKey, update, S.files.noRoot, S.terminal.startFailed]);
 
+  const pickBrowser = useCallback(() => {
+    const id = uid();
+    update((st) => replaceTab(st, GUIDE_TAB.key, { key: browserKey(id), kind: "browser", id, url: "", title: "" }));
+  }, [update]);
+
+  const updateBrowser = useCallback((key: string, patch: { url?: string; title?: string }) => {
+    update((st) => ({
+      ...st,
+      tabs: st.tabs.map((t) => (t.key === key && t.kind === "browser" ? { ...t, ...patch } : t)),
+    }));
+  }, [update]);
+
   const terminalGone = useCallback((id: string) => update((st) => closeTab(st, terminalKey(id))), [update]);
 
   return {
@@ -288,6 +305,6 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
     open, setOpen, width, startResize, resetWidth, fullscreen, setFullscreen,
     tabs: state.tabs, active: state.active, activate, close, closeMany,
     dirPath, setDirPath,
-    browsePath, revealInFilesTab, openSkill, openReview, selectReviewFile, openGuide, pickFiles, canTerminal, pickTerminal, terminalGone,
+    browsePath, revealInFilesTab, openSkill, openReview, selectReviewFile, openGuide, pickFiles, canTerminal, pickTerminal, pickBrowser, updateBrowser, terminalGone,
   };
 }

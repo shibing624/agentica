@@ -13,6 +13,10 @@
  * never land here instead of in the product: if it is not reachable over HTTP,
  * the desktop app cannot do it either.
  *
+ * One exception, kept to mechanism: the SPA's built-in browser tab needs a
+ * `<webview>` (an iframe cannot show most sites). The shell only allows it and
+ * locks it down — see `hardenWebview`; the tab itself is SPA code.
+ *
  * What it does:
  *
  *   1. one instance per machine,
@@ -32,7 +36,7 @@ const { buildDockMenuTemplate } = require("./dock-menu");
 const { startUpdates } = require("./updater");
 const { keepVisiblePosition, readWindowState, writeWindowState } = require("./window-state");
 const {
-  HEALTHY_AFTER_MS, MAX_GATEWAY_RESTARTS, iconPath, isAppUrl, restartDelayMs,
+  BROWSER_PARTITION, HEALTHY_AFTER_MS, MAX_GATEWAY_RESTARTS, hardenWebview, iconPath, isAppUrl, isBrowsableUrl, restartDelayMs,
 } = require("./util");
 
 const log = (msg) => console.log(`[desktop] ${msg}`);
@@ -98,7 +102,13 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
+      // For the SPA's browser tab only; `will-attach-webview` below refuses
+      // anything that is not a locked-down web page.
+      webviewTag: true,
     },
+  });
+  win.webContents.on("will-attach-webview", (event, webPreferences, params) => {
+    if (!hardenWebview(webPreferences, params)) event.preventDefault();
   });
   // The SPA lays out differently inside this shell (drag regions, room for the
   // traffic lights), and the user agent is the one signal it can read without a
@@ -514,7 +524,22 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
+  // Pages in the SPA's browser tab. A link that wants a new window loads in
+  // the same tab; anything that leaves http(s) is dropped; no page gets a
+  // permission (camera, location, notifications) it was never asked about.
+  app.on("web-contents-created", (_event, contents) => {
+    if (contents.getType() !== "webview") return;
+    contents.setWindowOpenHandler(({ url }) => {
+      if (isBrowsableUrl(url)) void contents.loadURL(url);
+      return { action: "deny" };
+    });
+    contents.on("will-navigate", (event, url) => {
+      if (!isBrowsableUrl(url)) event.preventDefault();
+    });
+  });
+
   app.whenReady().then(() => {
+    session.fromPartition(BROWSER_PARTITION).setPermissionRequestHandler((_contents, _permission, done) => done(false));
     installMenu();
     installDockIcon();
     void refreshDockMenu(false);

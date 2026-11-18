@@ -67,7 +67,48 @@ function iconPath(platform = process.platform) {
   return path.join(__dirname, "build", platform === "darwin" ? "icon-mac.png" : "icon.png");
 }
 
+/**
+ * The built-in browser tab's pages live in their own storage partition: a page
+ * opened there must never see the cookies of the app's own window (the gateway
+ * session is a cookie on this very host).
+ */
+const BROWSER_PARTITION = "persist:agentica-browser";
+
+/** Only web pages open in the browser tab; no file:, no custom schemes. */
+function isBrowsableUrl(url) {
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Decide whether a `<webview>` the page asked for may attach, and strip it of
+ * everything that is not a plain web page: no preload, no Node, sandboxed.
+ * Returns false to refuse the attach. The storage partition is the page's own
+ * attribute and is only *checked* here: Electron has already resolved it by
+ * the time this runs, so rewriting `params.partition` changes nothing (a guest
+ * "moved" that way still read the app window's cookies).
+ */
+function hardenWebview(webPreferences, params) {
+  if (params.partition !== BROWSER_PARTITION) return false;
+  if (params.src && !isBrowsableUrl(params.src)) return false;
+  delete webPreferences.preload;
+  delete webPreferences.preloadURL;
+  webPreferences.nodeIntegration = false;
+  webPreferences.nodeIntegrationInSubFrames = false;
+  webPreferences.contextIsolation = true;
+  webPreferences.sandbox = true;
+  webPreferences.webSecurity = true;
+  return true;
+}
+
 module.exports = {
+  BROWSER_PARTITION,
+  hardenWebview,
+  isBrowsableUrl,
   MAX_GATEWAY_RESTARTS,
   HEALTHY_AFTER_MS,
   restartDelayMs,
