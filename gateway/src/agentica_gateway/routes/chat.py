@@ -1052,17 +1052,8 @@ async def upload_file(
 ):
     """Upload a file to the working directory.
 
-    Enforces size limit and extension whitelist from settings.
+    Any file type is accepted (it is the user's own machine); the size limit is enforced.
     """
-    # Validate extension
-    ext = Path(file.filename or "").suffix.lower()
-    allowed = settings.upload_allowed_ext_set
-    if allowed and ext not in allowed:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File type '{ext}' not allowed. Allowed: {', '.join(sorted(allowed))}",
-        )
-
     # Read in chunks and enforce the size limit while streaming, so an oversized
     # upload is rejected mid-read instead of being fully buffered into memory
     # first (a full read() lets a client OOM the server regardless of the limit).

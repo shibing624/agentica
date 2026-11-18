@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- **右侧文件栏上传 Excel（`.xlsx`）等 Office 文件会失败**：网关的上传白名单默认没有任何 Office 格式，`.xlsx` 被直接拒（400，提示只在日志里，页面只弹「上传失败」）；默认值还在 `config.py` 里写了两份，环境变量那份比数据类那份少了 `.tex` / `.sql` 等一批，实际生效的是更短的那份。现在只有一份 `DEFAULT_UPLOAD_EXTENSIONS`，补上 `.xlsx .xls .xlsm .docx .doc .pptx .ppt .odt .ods .odp .rtf .tsv .ipynb .parquet`；上传失败的提示带上网关给的原因（如「File type '.exe' not allowed」）。自己设了 `UPLOAD_ALLOWED_EXTENSIONS` 的不受影响，需要自行补上（`gateway/src/agentica_gateway/config.py`、`web/src/workspace/WorkspaceBrowser.tsx`、`web/src/pages/ChatPage.tsx`）。
+- **右侧文件栏上传不再有扩展名白名单（`.xlsx` 等 Office 文件上传失败）**：网关的上传白名单默认没有任何 Office 格式，`.xlsx` 被直接拒（400，原因只在响应里，页面只弹「上传失败」）。这个白名单本身就不该有：右侧栏是用户本机的目录，agent 本来就能往里写任何文件，扩展名限制只挡住用户，路径越界另有 `resolve_write` 把关。现在删掉白名单和 `UPLOAD_ALLOWED_EXTENSIONS` 配置，工作区上传和聊天上传都接受任何类型，只保留 `UPLOAD_MAX_SIZE_MB` 的大小限制；上传失败的提示也带上网关给的原因（`gateway/src/agentica_gateway/config.py`、`routes/workspace.py`、`routes/chat.py`、`web/src/workspace/WorkspaceBrowser.tsx`、`web/src/pages/ChatPage.tsx`）。
 
 - **Web 右侧栏标签页支持右键菜单与快捷键（对齐 dsh）**：右键标签出「关闭 / 关闭其他标签页 / 关闭右侧标签页」（右侧没有标签时不显示后者，文件浏览器标签不可关闭，关闭其他后焦点落在被点的标签上；终端标签关闭时同样结束其 shell）；面板内按 `⌘⌥W`（macOS）/ `Ctrl+Alt+W`（其他系统）关闭当前标签，用 `code` 判断而不是字符，避开 macOS 上 Alt+W 打出的 `∑`。菜单用 `@radix-ui/react-context-menu`（键盘、Shift+F10、边缘避让、无障碍），这是 Web 里第一个 UI 库，构建体积约增加 90 kB（`web/src/workspace/FilesPanel.tsx`、`web/src/workspace/useFilesPanel.ts`、`web/src/lib/panelTabs.ts`、`web/src/style.css`）。
 

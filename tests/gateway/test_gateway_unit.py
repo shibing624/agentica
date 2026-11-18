@@ -884,23 +884,6 @@ class TestSettings:
         s.base_dir = Path("/tmp/other")
         assert s.base_dir == Path("/tmp/other")
 
-    def test_upload_allowed_ext_set(self):
-        """upload_allowed_ext_set parses comma-separated extensions."""
-        from agentica_gateway.config import Settings
-        s = Settings(upload_allowed_extensions=".py,.js,.ts")
-        ext_set = s.upload_allowed_ext_set
-        assert ext_set == {".py", ".js", ".ts"}
-
-    def test_default_upload_list_takes_office_files_and_env_default_matches(self, monkeypatch):
-        """An Excel workbook uploads by default; the env default is the same list."""
-        from agentica_gateway.config import DEFAULT_UPLOAD_EXTENSIONS, Settings
-        monkeypatch.delenv("UPLOAD_ALLOWED_EXTENSIONS", raising=False)
-        for ext in (".xlsx", ".docx", ".pptx", ".csv", ".pdf"):
-            assert ext in Settings().upload_allowed_ext_set
-        assert Settings.from_env().upload_allowed_extensions == DEFAULT_UPLOAD_EXTENSIONS
-        monkeypatch.setenv("UPLOAD_ALLOWED_EXTENSIONS", ".txt")
-        assert Settings.from_env().upload_allowed_ext_set == {".txt"}
-
 
 class TestWebPrefsClean:
     """A stored tier the selector wrote before the rename keeps its meaning."""
@@ -946,7 +929,6 @@ class TestUploadFile:
 
     def _settings(self, tmp_path, max_mb=1):
         s = MagicMock()
-        s.upload_allowed_ext_set = {".txt"}
         s.upload_max_size_mb = max_mb
         s.workspace_path = tmp_path
         return s

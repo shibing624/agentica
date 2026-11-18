@@ -108,13 +108,6 @@ async def workspace_upload(
     path: str = Form(""),
 ):
     """Write ``file`` into ``root`` / ``path`` / filename (path is the directory)."""
-    ext = Path(file.filename or "").suffix.lower()
-    allowed = settings.upload_allowed_ext_set
-    if allowed and ext not in allowed:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File type '{ext}' not allowed. Allowed: {', '.join(sorted(allowed))}",
-        )
     rel_dir = path.strip().strip("/")
     name = Path(file.filename or "upload").name
     rel = f"{rel_dir}/{name}" if rel_dir else name
