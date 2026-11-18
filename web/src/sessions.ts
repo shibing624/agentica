@@ -6,7 +6,7 @@ import {
   eventsToChatMsgs, mergeClientSteers,
   rememberSteersFromMsgs,
 } from "./lib/hydrateMessages";
-import { emptyChatIds } from "./lib/sessionDrafts";
+import { emptyChatIds, localOnlySessionIds } from "./lib/sessionDrafts";
 import { shouldApplyDisplayTitle } from "./lib/sessionTitle";
 import { messageFileCandidates } from "./lib/messageFiles";
 import { cachedExisting, statWorkspaceFilesBatched } from "./lib/workspaceStat";
@@ -115,6 +115,11 @@ export function loadSessions(scope: "recent" | "all" = getState().sessionScope):
     for (const [id, edit] of localEdits) {
       if (startedAt - edit.at > 3000) localEdits.delete(id);
     }
+    // Chats that have no server log yet (an unsent New Chat, a first turn just
+    // started) are not in the catalog, but are not gone either.
+    const catalogIds = new Set(Object.keys(merged));
+    const deletedIds = new Set([...localEdits].filter(([, e]) => e.deleted).map(([id]) => id));
+    for (const id of localOnlySessionIds(st.sessions, catalogIds, deletedIds)) merged[id] = st.sessions[id];
     if (st.curSess && !merged[st.curSess] && st.sessions[st.curSess] && !localEdits.get(st.curSess)?.deleted) {
       merged[st.curSess] = st.sessions[st.curSess];
     }

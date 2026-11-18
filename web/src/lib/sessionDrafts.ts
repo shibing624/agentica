@@ -40,3 +40,24 @@ export function emptyChatIds<T extends DraftSession>(
     .sort((a, b) => (b[1].ts || 0) - (a[1].ts || 0))
     .map(([id]) => id);
 }
+
+/**
+ * Local sessions the server catalog cannot list yet, which a refresh must keep.
+ *
+ * A "New Chat" with text typed into it, or a chat whose first turn has just
+ * started, has no log on the server: `GET /api/sessions` cannot return it.
+ * Merging the catalog over the local sessions used to drop everything the
+ * catalog did not mention except the open chat, so such a chat vanished if a
+ * refresh (focus sync, pulse, fork) landed while another chat was open. A chat
+ * the server has seen (`sizeBytes`) and no longer lists was removed elsewhere
+ * and goes.
+ */
+export function localOnlySessionIds<T extends { sizeBytes?: number }>(
+  local: Record<string, T>,
+  catalogIds: ReadonlySet<string>,
+  deletedIds: ReadonlySet<string>,
+): string[] {
+  return Object.entries(local)
+    .filter(([id, sess]) => !catalogIds.has(id) && !deletedIds.has(id) && !sess.sizeBytes)
+    .map(([id]) => id);
+}

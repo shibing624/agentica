@@ -10,7 +10,7 @@ const vite = await createServer({
   logLevel: "silent",
   server: { middlewareMode: true },
 });
-const { emptyChatIds } = await vite.ssrLoadModule("/src/lib/sessionDrafts.ts");
+const { emptyChatIds, localOnlySessionIds } = await vite.ssrLoadModule("/src/lib/sessionDrafts.ts");
 after(() => vite.close());
 
 const draft = (over = {}) => ({
@@ -44,4 +44,16 @@ test("only unsent local drafts count", () => {
 test("empty workspace has no drafts", () => {
   assert.deepEqual(emptyChatIds({}, "/work/alpha"), []);
   assert.deepEqual(emptyChatIds({ a: draft() }, "/work/other"), []);
+});
+
+test("a refresh keeps an unsent draft the catalog cannot list, and drops what the server removed", () => {
+  const local = {
+    draft: draft({ ts: 1 }),
+    firstTurn: draft({ title: "hello", msgs: [{ role: "user", content: "hello" }] }),
+    listed: draft({ sizeBytes: 900 }),
+    removedElsewhere: draft({ sizeBytes: 900 }),
+    deletedHere: draft(),
+  };
+  const kept = localOnlySessionIds(local, new Set(["listed"]), new Set(["deletedHere"]));
+  assert.deepEqual(kept.sort(), ["draft", "firstTurn"]);
 });
