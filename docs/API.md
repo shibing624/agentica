@@ -186,11 +186,13 @@ agentica --query "..."
 
 CLI 是面向最终用户的产品入口，默认使用 `DeepAgent` 体验。CLI 参数、权限模式、技能安装、日常任务命令和 TUI 行为属于 Product Surface，不应作为嵌入式 SDK 的最小依赖假设。
 
-### ACP（IDE 集成）— `uv add "agentica[acp]"`
+### ACP（IDE 集成）— 基础安装自带，无需额外依赖
 
 ```python
 from agentica.acp import ACPServer
 ```
+
+ACP 走 stdio NDJSON，日志与 Agent 输出一律到 stderr；协议细节、会话恢复和第三方客户端示例见 [ACP 集成](advanced/acp.md)。
 
 ### MCP（Model Context Protocol）— `uv add "agentica[mcp]"`
 

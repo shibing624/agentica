@@ -12,6 +12,7 @@ Core (default-installed, fast top-level imports)::
         BuiltinFetchUrlTool, BuiltinWebSearchTool,
         BuiltinTodoTool, BuiltinTaskTool, BuiltinMemoryTool,
     )
+    from agentica.acp import ACPServer                        # stdio ACP server (no extra deps)
 
 Other LLM providers (lazy, avoid heavy SDK import at startup)::
 
@@ -22,7 +23,6 @@ Other LLM providers (lazy, avoid heavy SDK import at startup)::
 Optional extras (need ``pip install agentica[xxx]``)::
 
     from agentica.mcp import MCPClient             # pip install agentica[mcp]
-    from agentica.acp import ACPServer             # pip install agentica[acp]
     from agentica_gateway.main import app          # pip install agentica-gateway
 
 ═══════════════════════════════════════════════════════════════

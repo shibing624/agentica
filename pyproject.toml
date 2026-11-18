@@ -72,7 +72,7 @@ bedrock  = ["boto3", "aioboto3"]
 # Protocols
 # ═══════════════════════════════════════════════════════════
 mcp = ["mcp>=2,<3"]
-acp = ["websockets>=12.0"]
+# ACP is stdio NDJSON and ships in the base install; no extra packages needed.
 
 # ═══════════════════════════════════════════════════════════
 # Tools（细粒度，参照 agno）
@@ -190,7 +190,6 @@ models = [
 full = [
     "agentica[models]",
     "agentica[mcp]",
-    "agentica[acp]",
     "agentica[tools-extra]",
     "agentica[tools-media]",
     "agentica[gateway]",
