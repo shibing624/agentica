@@ -4,7 +4,9 @@ import { fmtDurationMs } from "../lib/format";
 import { jobDuration, parseBackgroundStart } from "../lib/backgroundJobs";
 import { normalizeMentionedPath } from "../lib/filePath";
 import { workSummary, type MsgPart } from "../lib/msgParts";
-import { formatToolDisplay, layoutToolDisplay, parseToolArgs } from "../lib/toolDisplay";
+import * as api from "../api";
+import { splitExternalTarget } from "../lib/filePath";
+import { formatToolDisplay, layoutToolDisplay, parseToolArgs, toolImageSource } from "../lib/toolDisplay";
 import {
   analyzingDetail, diffStats, doneTitle, firstLine, groupCategories, latestCompletedParagraphFirstLine, parseShellOutput,
   parseTaskResult, parseTodos, runningTool,
@@ -446,8 +448,10 @@ function ToolDetail({
   // The call itself: full command / every argument, since the row only had room for one line.
   const call = layout.body.trim() ? layout.body : (layout.header.length > 60 || part.name === "execute" ? display : "");
   const showResult = Boolean(resultText) && !showDiff && (isError || !HIDE_RESULT_TOOLS.has(part.name));
+  const imageSrc = toolImageUrl(toolImageSource(part.name, args));
   return (
     <div className="wr-body">
+      {imageSrc ? <PreviewableImage className="tool-thumb" src={imageSrc} alt={String(args.image_path_or_url)} loading="lazy" /> : null}
       {call ? <pre className={layout.bodyKind === "call" || part.name === "execute" ? "step-tool-call" : "step-pre"}>{call}</pre> : null}
       {showDiff ? (
         <div className="work-tool-diff">
@@ -458,6 +462,16 @@ function ToolDetail({
       {!call && !showDiff && !showResult && !running && <pre className="step-pre">{part.argsStr || "{}"}</pre>}
     </div>
   );
+}
+
+/** Where the browser can load a tool's image from: a URL as is, a file through the workspace content route. */
+function toolImageUrl(source: string | null): string | null {
+  if (!source) return null;
+  if (/^https?:\/\//i.test(source)) return source;
+  const cwd = sessionCwd();
+  if (!cwd && !source.startsWith("/") && !source.startsWith("~")) return null;
+  const { targetRoot, targetRel } = splitExternalTarget(source, cwd);
+  return api.workspaceContentUrl(targetRoot, targetRel);
 }
 
 function promptCwdLabel(cwd: string): string {

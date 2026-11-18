@@ -10,7 +10,7 @@ const vite = await createServer({
   logLevel: "silent",
   server: { middlewareMode: true },
 });
-const { formatToolDisplay, layoutToolDisplay } = await vite.ssrLoadModule("/src/lib/toolDisplay.ts");
+const { formatToolDisplay, layoutToolDisplay, toolImageSource } = await vite.ssrLoadModule("/src/lib/toolDisplay.ts");
 after(() => vite.close());
 
 test("execute keeps the complete command in the expanded call body", () => {
@@ -48,4 +48,12 @@ test("task rows show subagent_type without inventing a model", () => {
   assert.equal(inherited.split("\n")[0], "description='Find it', subagent_type='explore'");
   assert.equal(inherited.split("\n")[1].trim(), "find it in src/");
   assert.ok(!inherited.includes("model="));
+});
+
+test("an image analysis call names the image it looks at", () => {
+  assert.equal(toolImageSource("analyze_image", { image_path_or_url: " /tmp/a.png " }), "/tmp/a.png");
+  assert.equal(toolImageSource("analyze_image", { image_path_or_url: "https://x/y.png", question: "?" }), "https://x/y.png");
+  assert.equal(toolImageSource("analyze_image", { image_path_or_url: "  " }), null);
+  assert.equal(toolImageSource("analyze_image", {}), null);
+  assert.equal(toolImageSource("read_file", { image_path_or_url: "/tmp/a.png" }), null);
 });

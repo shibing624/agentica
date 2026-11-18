@@ -168,3 +168,11 @@ function shortenPathsInCommand(command: string, cwd: string): string {
   }
   return command;
 }
+
+/** The image a tool call looks at, as the model named it (a URL or a path), or
+ *  `null` for any other call. The chat shows it as a thumbnail on the row. */
+export function toolImageSource(name: string, args: Record<string, unknown>): string | null {
+  if (name !== "analyze_image") return null;
+  const source = args.image_path_or_url;
+  return typeof source === "string" && source.trim() ? source.trim() : null;
+}

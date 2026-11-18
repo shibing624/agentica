@@ -878,6 +878,8 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .img-open{display:inline-block;padding:0;margin:0;border:0;background:none;cursor:zoom-in;border-radius:8px;line-height:0;max-width:100%}
 .img-open:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .img-open>img{max-width:100%}
+.wr-body .tool-thumb{margin:2px 0 8px}
+.wr-body .tool-thumb>img{max-height:120px;max-width:200px;object-fit:cover;border-radius:8px;border:var(--hair) solid var(--border)}
 .img-lightbox{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;padding:40px}
 .img-lightbox-mask{position:absolute;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(6px)}
 .img-lightbox-image{position:relative;max-width:min(100%,1600px);max-height:100%;object-fit:contain;border-radius:10px;background:var(--bg);box-shadow:var(--elev-pop)}

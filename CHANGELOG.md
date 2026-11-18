@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Web 的图片分析调用在过程里显示被看的图片缩略图**：模型用 `analyze_image` 看图时，展开该工具行会先显示这张图的缩略图，点击放大；本地路径经已有的 `/api/workspace/content` 取图（工作区内外的绝对路径都可），`http(s)` 地址直接加载。调用参数里本来就带着路径，所以不需要改后端；多张图是多次调用，各自一张。用户粘贴的图片（只有 `[图片: …]` 标记、模型没有拿到路径）和模型直接用自己的视觉看到的图（`read_file` 之类读出来的）不在此列（`web/src/components/WorkGroup.tsx`、`web/src/lib/toolDisplay.ts`、`web/src/style.css`）。
+
 - **新建会话里写了字、还没发送，切去别的会话再切回来，这个会话消失**：Web 刷新会话目录时，只保留服务端返回的会话和当前打开的会话；还没有日志的 New Chat 草稿（以及刚开始第一轮、日志还没落盘的会话）服务端列不出来，切走后碰上一次目录刷新（窗口重新获得焦点、别处有会话开始或结束、fork）就被整个丢掉，输入框里的文字和图片也跟着没了，所以只是偶发。现在目录里没有、且服务端从没见过（无 `sizeBytes`）的本地会话一律保留；服务端见过又不再列出的才视为已在别处删除（`web/src/sessions.ts`、`web/src/lib/sessionDrafts.ts`）。
 
 - **自动压缩后 Web 不再把运行时的内部提示当成用户提问显示，也不再把同一轮工具卡片显示两遍**：一轮里调用 `analyze_image` 时，图片是作为一条跟随的 user 消息送给模型的（「The image is attached below — look at it and answer using your own vision…」）。这条消息之前没有标记，压缩恰好在这时触发，就把它当成「本轮的提问」：新窗口前言后面接的是这段工具提示而不是你的问题，日志把它写成用户行，Web 显示为一个用户气泡；同时这一轮已经落盘的工具调用又随新窗口尾部写了一遍，工具卡片出现两次，`content` 还写成了字符串 `"null"`。和你的提问里带不带图片无关。修复：图片跟随消息和 max-tokens 续写的「Continue from where you left off.」都标成运行时注入（`_injected` + `_runtime_notice`），不再被当成回合起点，也不写进日志；新窗口尾部里本轮已经写过的行（提问、工具轮次、工具结果，依据本轮写入记账判断，不靠文字比较）标上 `window_replay`，回放（`load()`）照旧使用，Web 页面、会话内搜索、对话索引一律跳过这份副本；空内容写成 `""` 而不是 `"null"`。旧日志没有这个标记，读取时按 tool-call id 识别：边界后的助手/工具行，如果它的 id 在上一个窗口里已经写过，就是副本，开启这段副本的用户行一并隐藏。本机全部会话日志里这样识别出的 11 个用户行，没有一个是之前没出现过的真实提问。日志文件不改写（`agentica/model/base.py`、`agentica/runner/loop.py`、`agentica/session/log.py`、`agentica/session/rows.py`、`agentica/session/trace.py`）。
