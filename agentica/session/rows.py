@@ -246,10 +246,72 @@ def clean_steer_text(raw: str) -> str:
     return text.strip()
 
 
+def is_window_replay(entry: Mapping[str, Any]) -> bool:
+    """A row the new window wrote again after a ``compact_boundary``.
+
+    ``append_post_compact_messages`` writes the preserved tail so ``load()``
+    can replay from the boundary; the rows this turn had already logged are
+    copies and carry ``window_replay``. The conversation shows the original.
+    """
+    return entry.get("window_replay") is True
+
+
+def _call_ids(entry: Mapping[str, Any]) -> List[str]:
+    if entry.get("type") == "assistant":
+        return [str(tc.get("id") or "") for tc in entry.get("tool_calls") or [] if isinstance(tc, dict)]
+    if entry.get("type") in ("tool", "tool_audit"):
+        return [str(entry.get("tool_call_id") or "")]
+    return []
+
+
+def mark_window_replays(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """``entries`` with the replayed tail of each new window marked.
+
+    Logs written since the writer sets ``window_replay`` need nothing. Older
+    logs are read by tool-call id: a tail assistant/tool row whose ids were
+    already logged in the window the boundary closed is a copy, and so is the
+    user row that opens such a tail — it belonged to the same turn (its
+    question, or a runtime message the cut mistook for one). Rows are copied
+    only when they are marked; the log is never rewritten.
+    """
+    out = list(entries)
+    window_start = 0
+    for pos, entry in enumerate(entries):
+        if entry.get("type") != "compact_boundary":
+            continue
+        seen = {i for e in entries[window_start:pos] for i in _call_ids(e) if i}
+        window_start = pos + 1
+        tail_user: Optional[int] = None
+        replayed = False
+        for k in range(pos + 1, len(entries)):
+            row = entries[k]
+            kind = row.get("type")
+            if kind == "compact_boundary":
+                break
+            if kind == "user":
+                if tail_user is not None:
+                    break
+                tail_user = k
+                continue
+            ids = _call_ids(row)
+            if ids and all(i and i in seen for i in ids):
+                out[k] = {**row, "window_replay": True}
+                replayed = True
+            elif kind in ("assistant", "tool", "tool_audit"):
+                break
+        if replayed and tail_user is not None and not is_window_replay(entries[tail_user]):
+            out[tail_user] = {**entries[tail_user], "window_replay": True}
+    return out
+
+
 def classify_user(entry: Mapping[str, Any]) -> RowView:
     """Read a ``type == "user"`` row. The order is fixed here, once."""
     content = entry.get("content")
     content = content if isinstance(content, str) else ("" if content is None else str(content))
+    if is_window_replay(entry):
+        # The new window's opening row: its preamble is new, the question
+        # behind it is a copy of the row logged before the boundary.
+        return RowView(False, False, "", split_window_preamble(content))
     if entry.get("automated") is True:
         # Nobody typed it, so nothing in it is peeled: it is shown as logged.
         return RowView(True, entry.get("steer") is True or is_steer_text(content), content)

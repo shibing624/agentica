@@ -13,7 +13,14 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from agentica.model.cost import CostTracker
-from agentica.session.rows import classify_user, row_payload, strip_image_markers, tool_error_of
+from agentica.session.rows import (
+    classify_user,
+    is_window_replay,
+    mark_window_replays,
+    row_payload,
+    strip_image_markers,
+    tool_error_of,
+)
 from agentica.model.usage import cache_hit_percent
 from agentica.utils.string import format_file_size
 from agentica.utils.tokens import count_text_tokens
@@ -554,8 +561,8 @@ def search_conversation(
     hits: List[Dict[str, Any]] = []
     turn = 0
     seen_turn_role: set = set()
-    for e in entries:
-        if not isinstance(e, dict):
+    for e in mark_window_replays([e for e in entries if isinstance(e, dict)]):
+        if is_window_replay(e) and e.get("type") != "user":
             continue
         kind = e.get("type")
         if kind == "user":
@@ -666,8 +673,13 @@ def chat_turn_page(
     back ``turns`` at a time, each page costing a scan of the whole file.
     """
     chat_entries = [
-        e for e in entries
-        if isinstance(e, dict) and e.get("type") in _CHAT_ENTRY_TYPES
+        e for e in mark_window_replays([
+            e for e in entries
+            if isinstance(e, dict) and e.get("type") in _CHAT_ENTRY_TYPES
+        ])
+        # A replayed assistant/tool row is a copy of one above the boundary;
+        # the replayed user row stays: it carries the new window's preamble.
+        if e.get("type") == "user" or not is_window_replay(e)
     ]
     total = len(chat_entries)
     end = min(total, max(0, before)) if before is not None else total

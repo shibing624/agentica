@@ -321,7 +321,10 @@ class LoopMixin:
                 loop_state.max_tokens_recovery_count += 1
                 truncated = LoopMixin._get_last_assistant_message(messages)
                 if truncated is not None and truncated.content:
-                    messages.append(Message(role="user", content="Continue from where you left off."))
+                    nudge = Message(role="user", content="Continue from where you left off.")
+                    nudge._injected = True
+                    nudge._runtime_notice = True
+                    messages.append(nudge)
                     recovery = "continue"
                 elif (
                     truncated is not None

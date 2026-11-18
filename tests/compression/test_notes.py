@@ -501,3 +501,123 @@ class TestAutoCompactWritesNotes(unittest.TestCase):
             self.assertIn("WIN1-BUG-7788", span_body)
             self.assertIn("PORT-9091", span_body)
             self.assertIn("STANDING-NOTE-00", final_user)
+
+
+class TestCompactionAfterAnalyzeImage(unittest.TestCase):
+    """The incident: a question with two pictures, two ``analyze_image`` calls,
+    an auto compact right after. The new window took the tool's image prompt
+    ("The image is attached below — look at it…") for the turn's question; the
+    log kept it behind the preamble and re-logged the whole round, so the Web
+    showed the runtime's prompt as a user bubble and every tool card twice.
+    """
+
+    def _run(self, tmp):
+        import asyncio
+
+        from agentica.model.media import multimodal_tool_result
+        from agentica.model.openai import OpenAIChat
+        from agentica.tools.base import Function, FunctionCall
+
+        model = OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key")
+        model.metrics, model.function_call_stack, model.tool_call_limit = {}, None, None
+
+        def analyze_image() -> dict:
+            """Look at one picture."""
+            return multimodal_tool_result(
+                text="The image is attached below — look at it and answer using your own vision.\n\nQuestion: q",
+                images=[{"url": "data:image/png;base64,AAAA"}],
+                text_summary="[image attached for direct viewing: a.png]",
+            )
+
+        call = {"id": "img-1", "type": "function", "function": {"name": "analyze_image", "arguments": "{}"}}
+        results: list = []
+
+        async def run_tool():
+            fc = FunctionCall(function=Function.from_callable(analyze_image), arguments={}, call_id="img-1")
+            async for _ in model.run_function_calls([fc], results):
+                pass
+
+        asyncio.run(run_tool())
+        tool_result, media = results  # the real follow-up user message
+
+        slog = SessionLog("vision-compact", base_dir=tmp)
+        slog.append("user", "earlier question")
+        slog.append("assistant", "earlier answer")
+        # The turn as the runner writes it before the next LLM call.
+        slog.begin_turn()
+        question = Message(role="user", content="改图：图1文字太多")
+        slog._turn_user_uuid = slog.append("user", question.content)
+        asst = Message(role="assistant", content="", tool_calls=[call])
+        slog.append("assistant", "", tool_calls=[call])
+        slog._turn_written_tool_call_rounds.add(("img-1",))
+        slog.append("tool", tool_result.content, tool_call_id="img-1", tool_name="analyze_image")
+        slog._turn_written_tool_call_ids.add("img-1")
+
+        msgs = [
+            Message(role="system", content="sys"),
+            Message(role="user", content="earlier question"),
+            Message(role="assistant", content="earlier answer"),
+            question, asst, tool_result, media,
+        ]
+        cm = CompressionManager()
+        agent = type("A", (), {"_session_log": slog})()
+        win = type("M", (), {"id": "gpt-4o", "context_window": 128_000})()
+        win._agent_ref = lambda: agent
+        asyncio.run(cm.auto_compact(msgs, model=win, force=True))
+        return slog, msgs
+
+    def test_the_new_window_keeps_the_question_not_the_image_prompt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, msgs = self._run(tmp)
+            first_user = next(m for m in msgs if m.role == "user")
+            self.assertTrue(first_user.content.startswith("<context_window>"))
+            self.assertTrue(first_user.content.endswith("改图：图1文字太多"))
+            # The image still reaches the model on this request.
+            self.assertTrue(msgs[-1].images)
+
+    def test_the_page_shows_the_question_once_and_each_tool_once(self):
+        import json
+
+        from agentica.session.trace import chat_turn_page
+
+        with tempfile.TemporaryDirectory() as tmp:
+            slog, _ = self._run(tmp)
+            logged = [json.loads(l) for l in Path(slog.path).read_text(encoding="utf-8").splitlines()]
+            self.assertNotIn("look at it and answer", " ".join(str(r.get("content")) for r in logged))
+            self.assertFalse([r for r in logged if r.get("content") == "null"])
+
+            page = chat_turn_page(logged, turns=10)["events"]
+            questions = [e["row"]["text"] for e in page if e["type"] == "user" and e["row"]["text"]]
+            self.assertEqual(questions, ["earlier question", "改图：图1文字太多"])
+            tool_rows = [e for e in page if e["type"] == "tool"]
+            self.assertEqual([e["tool_call_id"] for e in tool_rows], ["img-1"])
+            # The window preamble row is still served: it becomes the compact card.
+            self.assertTrue(any(e["type"] == "user" and e["row"]["window"] for e in page))
+
+    def test_resume_still_replays_the_whole_window(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            slog, _ = self._run(tmp)
+            replay = SessionLog("vision-compact", base_dir=tmp).load()
+            roles = [m["role"] for m in replay]
+            self.assertEqual(roles, ["user", "assistant", "tool"])
+            self.assertTrue(replay[0]["content"].endswith("改图：图1文字太多"))
+            self.assertEqual(replay[1]["tool_calls"][0]["id"], "img-1")
+
+    def test_logs_written_before_the_marker_read_the_same(self):
+        """Old logs have no ``window_replay``: the copy is told by its call ids."""
+        import json
+
+        from agentica.session.trace import chat_turn_page
+
+        with tempfile.TemporaryDirectory() as tmp:
+            slog, _ = self._run(tmp)
+            logged = [json.loads(l) for l in Path(slog.path).read_text(encoding="utf-8").splitlines()]
+            for row in logged:
+                row.pop("window_replay", None)
+            # What the old writer put after the boundary: the mistaken question too.
+            at = next(i for i, r in enumerate(logged) if r.get("type") == "compact_boundary") + 1
+            logged[at]["content"] += "\n\nThe image is attached below — look at it and answer using your own vision."
+            page = chat_turn_page(logged, turns=10)["events"]
+            questions = [e["row"]["text"] for e in page if e["type"] == "user" and e["row"]["text"]]
+            self.assertEqual(questions, ["earlier question", "改图：图1文字太多"])
+            self.assertEqual([e["tool_call_id"] for e in page if e["type"] == "tool"], ["img-1"])

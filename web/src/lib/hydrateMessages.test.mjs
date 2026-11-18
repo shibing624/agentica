@@ -318,6 +318,22 @@ test("auto compact as a turn starts shows the question once, after the card", ()
   assert.deepEqual(view(msgs), ["user:old", "assistant:before", "card:auto", "user:batch1 怎么算？", "assistant:这样算"]);
 });
 
+test("a window replay row (server row.text empty) leaves the original question in place, once", () => {
+  // Since the writer marks the new window's copy (`window_replay`), the server
+  // serves its row with no prose: the question bubble is the one logged
+  // before the boundary, and the replayed tool round is not served at all.
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "改图" },
+    { type: "assistant", content: "", tool_calls: [{ id: "i1", type: "function", function: { name: "analyze_image", arguments: "{}" } }] },
+    { type: "tool", tool_call_id: "i1", tool_name: "analyze_image", content: "[image attached]" },
+    { type: "compact_boundary", trigger: "auto" },
+    windowRow(""),
+    { type: "assistant", content: "改好了" },
+  ]);
+  assert.deepEqual(view(msgs).filter((v) => v.startsWith("user:")), ["user:改图"]);
+  assert.equal(view(msgs).filter((v) => v.startsWith("card")).length, 1);
+});
+
 test("a question asked again after it was answered is not a shadow", () => {
   const msgs = eventsToChatMsgs([
     { type: "user", content: "q" },

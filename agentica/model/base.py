@@ -1481,6 +1481,11 @@ class Model(ABC):
                         # a provider that pairs id-less messages to tool_use ids
                         # does not swallow it as a lost tool result.
                         media_message._tool_media = True
+                        # Not a turn the person started and not part of the
+                        # conversation: compaction must not read it as the
+                        # turn's question, and the log must not keep it.
+                        media_message._injected = True
+                        media_message._runtime_notice = True
                         additional_messages_from_function_call.append(media_message)
                     function_call_output = multimodal_text_summary(envelope)
                 elif function_call_output is not None and not isinstance(function_call_output, str):

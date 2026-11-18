@@ -37,7 +37,14 @@ from agentica.compression.token_budget import (
     CONTEXT_WINDOW_OPEN,
     WINDOW_CONTINUATION_MARK,
 )
-from agentica.session.rows import STEER_GUIDANCE_PREFIX, classify_user, strip_image_markers, tool_error_of
+from agentica.session.rows import (
+    STEER_GUIDANCE_PREFIX,
+    classify_user,
+    is_window_replay,
+    mark_window_replays,
+    strip_image_markers,
+    tool_error_of,
+)
 from agentica.utils.log import logger
 from agentica.utils.skill_invocation import invocation_label
 from agentica.utils.tokens import count_text_tokens
@@ -647,19 +654,29 @@ class SessionLog:
         appear twice); without it, ``/compact`` followed by ``/fork`` or
         ``/resume`` keeps the summary and drops the pending question.
         System messages are skipped — they are rebuilt when the Agent is created —
-        and so are runtime notices (todo reminder, file-change note): the tail
-        is the conversation, and those were never part of it.
+        and so are runtime notices (todo reminder, file-change note, the images
+        a tool sent for the model to look at, the max-tokens "continue"): the
+        tail is the conversation, and those were never part of it. Rows this
+        turn already logged are marked ``window_replay``.
         This runs before the request goes out, so the trailing user message is
         still the request copy: it is written without its request-only blocks
         (recall, hook context), which ``load()`` must not replay.
         """
         written = 0
+        question_logged = self._turn_user_uuid is not None
         for msg in messages:
             if msg.role not in ("user", "assistant", "tool"):
                 continue
             if msg._runtime_notice:
                 continue
             meta: Dict[str, Any] = {}
+            if self._already_logged_this_turn(msg, question_logged):
+                # The window re-writes it so ``load()`` (which replays from the
+                # boundary) has it; the row itself is already on disk above
+                # the boundary. Readers of the conversation skip the copy.
+                meta["window_replay"] = True
+            if msg.role == "user" and not msg._injected:
+                question_logged = False  # only the turn's own question was logged
             if msg.tool_call_id:
                 meta["tool_call_id"] = msg.tool_call_id
             if msg.tool_name:
@@ -676,13 +693,27 @@ class SessionLog:
                 # transcript shows what the person typed.
                 meta["wire_content"] = msg.content
                 meta["request_only_blocks"] = list(msg._request_only_blocks)
-            self.append(
-                msg.role,
-                content if isinstance(content, str) else json.dumps(content, ensure_ascii=False),
-                **meta,
-            )
+            if content is None:
+                content = ""
+            elif not isinstance(content, str):
+                content = json.dumps(content, ensure_ascii=False)
+            self.append(msg.role, content, **meta)
             written += 1
         return written
+
+    def _already_logged_this_turn(self, msg: "Message", question_logged: bool) -> bool:
+        """Was ``msg`` written to this log earlier in the current turn?
+
+        Read from the turn's own write bookkeeping (``begin_turn``): the
+        question once ``_turn_user_uuid`` is set, a tool round by its call ids,
+        a tool result by its call id.
+        """
+        if msg.role == "user":
+            return question_logged and not msg._injected
+        if msg.role == "assistant":
+            ids = tuple(str(tc.get("id") or "") for tc in msg.tool_calls or [] if isinstance(tc, dict))
+            return bool(ids) and all(ids) and ids in self._turn_written_tool_call_rounds
+        return bool(msg.tool_call_id) and msg.tool_call_id in self._turn_written_tool_call_ids
 
     def append_provider_checkpoint(self, checkpoint: Dict[str, Any]) -> str:
         """Persist opaque provider state without changing the visible transcript."""
@@ -1051,8 +1082,10 @@ class SessionLog:
             if e.get("type", "") in ("user", "assistant", "tool", "tool_audit", "compact_boundary")
         ]
         rows: List[Dict[str, Any]] = []
-        for entry in drop_shadowed_by_boundary(typed):
+        for entry in drop_shadowed_by_boundary(mark_window_replays(typed)):
             if entry.get("type") == "compact_boundary":
+                continue
+            if is_window_replay(entry) and entry.get("type") != "user":
                 continue
             if entry.get("type") == "user" and classify_user(entry).is_pure_window:
                 continue
