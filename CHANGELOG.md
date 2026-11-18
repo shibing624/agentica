@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **右侧文件栏上传 Excel（`.xlsx`）等 Office 文件会失败**：网关的上传白名单默认没有任何 Office 格式，`.xlsx` 被直接拒（400，提示只在日志里，页面只弹「上传失败」）；默认值还在 `config.py` 里写了两份，环境变量那份比数据类那份少了 `.tex` / `.sql` 等一批，实际生效的是更短的那份。现在只有一份 `DEFAULT_UPLOAD_EXTENSIONS`，补上 `.xlsx .xls .xlsm .docx .doc .pptx .ppt .odt .ods .odp .rtf .tsv .ipynb .parquet`；上传失败的提示带上网关给的原因（如「File type '.exe' not allowed」）。自己设了 `UPLOAD_ALLOWED_EXTENSIONS` 的不受影响，需要自行补上（`gateway/src/agentica_gateway/config.py`、`web/src/workspace/WorkspaceBrowser.tsx`、`web/src/pages/ChatPage.tsx`）。
+
+- **Web 右侧栏标签页支持右键菜单与快捷键（对齐 dsh）**：右键标签出「关闭 / 关闭其他标签页 / 关闭右侧标签页」（右侧没有标签时不显示后者，文件浏览器标签不可关闭，关闭其他后焦点落在被点的标签上；终端标签关闭时同样结束其 shell）；面板内按 `⌘⌥W`（macOS）/ `Ctrl+Alt+W`（其他系统）关闭当前标签，用 `code` 判断而不是字符，避开 macOS 上 Alt+W 打出的 `∑`。菜单用 `@radix-ui/react-context-menu`（键盘、Shift+F10、边缘避让、无障碍），这是 Web 里第一个 UI 库，构建体积约增加 90 kB（`web/src/workspace/FilesPanel.tsx`、`web/src/workspace/useFilesPanel.ts`、`web/src/lib/panelTabs.ts`、`web/src/style.css`）。
+
 - **Web 的图片分析调用在过程里显示被看的图片缩略图**：模型用 `analyze_image` 看图时，展开该工具行会先显示这张图的缩略图，点击放大；本地路径经已有的 `/api/workspace/content` 取图（工作区内外的绝对路径都可），`http(s)` 地址直接加载。调用参数里本来就带着路径，所以不需要改后端；多张图是多次调用，各自一张。用户粘贴的图片（只有 `[图片: …]` 标记、模型没有拿到路径）和模型直接用自己的视觉看到的图（`read_file` 之类读出来的）不在此列（`web/src/components/WorkGroup.tsx`、`web/src/lib/toolDisplay.ts`、`web/src/style.css`）。
 
 - **新建会话里写了字、还没发送，切去别的会话再切回来，这个会话消失**：Web 刷新会话目录时，只保留服务端返回的会话和当前打开的会话；还没有日志的 New Chat 草稿（以及刚开始第一轮、日志还没落盘的会话）服务端列不出来，切走后碰上一次目录刷新（窗口重新获得焦点、别处有会话开始或结束、fork）就被整个丢掉，输入框里的文字和图片也跟着没了，所以只是偶发。现在目录里没有、且服务端从没见过（无 `sizeBytes`）的本地会话一律保留；服务端见过又不再列出的才视为已在别处删除（`web/src/sessions.ts`、`web/src/lib/sessionDrafts.ts`）。

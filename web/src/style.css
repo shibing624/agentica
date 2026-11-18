@@ -1444,6 +1444,11 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .pt-close svg{width:12px;height:12px}
 .pt-tab:is(.active,:hover,:focus-within) .pt-close{opacity:1;pointer-events:auto}
 .pt-close:hover{color:var(--fg);background:var(--border2)}
+.pt-menu{z-index:1100;min-width:190px;padding:4px;border:var(--hair) solid var(--border);border-radius:var(--radius-sm);background:var(--bg);box-shadow:var(--elev-pop);font-size:13px;color:var(--fg)}
+.pt-menu-item{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:6px 10px;border-radius:var(--radius-sm);outline:none;cursor:pointer;user-select:none}
+.pt-menu-item[data-highlighted]{background:var(--bg3)}
+.pt-menu-item[data-disabled]{color:var(--fg3);cursor:default;pointer-events:none}
+.pt-menu-item kbd{font-family:var(--sans);font-size:11.5px;color:var(--fg3)}
 .pt-add{margin-left:2px}
 .pt-fill{flex:1 1 0;min-width:0}
 /* ===== START PAGE (dsh guide) ===== */

@@ -147,3 +147,36 @@ test("each session persists its own opened file tabs, active tab, open state, an
   assert.equal(rt.active, "files");
   assert.equal(rt.preferredActive, "term:t1");
 });
+
+test("close others / close to the right never touch the file browser or the tab itself", () => {
+  const st = { tabs: [T.FILES_TAB, { key: "file:a", kind: "file", path: "a" }, { key: "file:b", kind: "file", path: "b" }, { key: "file:c", kind: "file", path: "c" }], active: "file:c" };
+  assert.deepEqual(T.tabsToClose(st, "file:b", "others"), ["file:a", "file:c"]);
+  assert.deepEqual(T.tabsToClose(st, "file:b", "right"), ["file:c"]);
+  assert.deepEqual(T.tabsToClose(st, "file:c", "right"), []);
+  assert.deepEqual(T.tabsToClose(st, "files", "others"), ["file:a", "file:b", "file:c"]);
+  assert.deepEqual(T.tabsToClose(st, "nope", "others"), []);
+});
+
+test("closing several tabs hands focus to the tab the menu was opened on", () => {
+  const st = { tabs: [T.FILES_TAB, { key: "file:a", kind: "file", path: "a" }, { key: "file:b", kind: "file", path: "b" }, { key: "file:c", kind: "file", path: "c" }], active: "file:c" };
+  const next = T.closeTabs(st, T.tabsToClose(st, "file:b", "others"), "file:b");
+  assert.deepEqual(next.tabs.map((t) => t.key), ["files", "file:b"]);
+  assert.equal(next.active, "file:b");
+  const stay = T.closeTabs({ ...st, active: "file:b" }, ["file:c"], "file:a");
+  assert.equal(stay.active, "file:b");
+  assert.equal(T.closeTabs(st, ["files"], "file:a").tabs.length, 4);
+});
+
+test("the close-tab chord is Cmd+Alt+W on a Mac and Ctrl+Alt+W elsewhere", () => {
+  const key = { code: "KeyW", altKey: true, shiftKey: false, metaKey: false, ctrlKey: false };
+  const setPlatform = (platform) => Object.defineProperty(globalThis, "navigator", { value: { platform }, configurable: true });
+  setPlatform("MacIntel");
+  assert.equal(T.isCloseTabKey({ ...key, metaKey: true }), true);
+  assert.equal(T.isCloseTabKey({ ...key, ctrlKey: true }), false);
+  assert.equal(T.closeTabShortcut(), "⌥⌘W");
+  setPlatform("Win32");
+  assert.equal(T.isCloseTabKey({ ...key, ctrlKey: true }), true);
+  assert.equal(T.isCloseTabKey({ ...key, metaKey: true }), false);
+  assert.equal(T.isCloseTabKey({ ...key, ctrlKey: true, altKey: false }), false);
+  assert.equal(T.isCloseTabKey({ ...key, ctrlKey: true, code: "KeyQ" }), false);
+});

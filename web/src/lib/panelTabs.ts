@@ -69,6 +69,25 @@ export function closeTab(state: TabsState, key: string): TabsState {
   return { tabs, active: next.key };
 }
 
+/** Which tabs "Close others" / "Close tabs to the right" of `key` would close.
+ *  The fixed file browser is never one of them. */
+export function tabsToClose(state: TabsState, key: string, scope: "others" | "right"): string[] {
+  const at = state.tabs.findIndex((t) => t.key === key);
+  if (at < 0) return [];
+  return state.tabs
+    .filter((t, i) => t.key !== key && t.key !== FILES_TAB.key && (scope === "others" || i > at))
+    .map((t) => t.key);
+}
+
+/** Close several tabs at once. When the active one is among them, `keep` (the
+ *  tab the menu was opened on) takes over. */
+export function closeTabs(state: TabsState, keys: string[], keep: string): TabsState {
+  const gone = new Set(keys.filter((k) => k !== FILES_TAB.key));
+  const tabs = state.tabs.filter((t) => !gone.has(t.key));
+  if (!gone.has(state.active)) return { tabs, active: state.active };
+  return { tabs, active: tabs.some((t) => t.key === keep) ? keep : (tabs.at(-1) ?? FILES_TAB).key };
+}
+
 export function activateTab(state: TabsState, key: string): TabsState {
   return state.tabs.some((t) => t.key === key) ? { ...state, active: key } : state;
 }
@@ -216,4 +235,18 @@ export function writeSessionPanel(
 export function baseName(path: string): string {
   const i = path.lastIndexOf("/");
   return i >= 0 ? path.slice(i + 1) : path;
+}
+
+const isApple = () => /Mac|iPhone|iPad/.test(navigator.platform);
+
+/** Close the active tab: Cmd+Alt+W on macOS, Ctrl+Alt+W elsewhere (dsh Web's
+ *  binding; the browser keeps the plain Cmd/Ctrl+W for itself). `code`, not
+ *  `key`: Alt+W types a different character on a Mac. */
+export function isCloseTabKey(e: { code: string; altKey: boolean; shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }): boolean {
+  if (e.code !== "KeyW" || !e.altKey || e.shiftKey) return false;
+  return isApple() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+}
+
+export function closeTabShortcut(): string {
+  return isApple() ? "⌥⌘W" : "Ctrl+Alt+W";
 }

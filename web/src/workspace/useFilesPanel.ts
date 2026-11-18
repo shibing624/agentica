@@ -3,8 +3,8 @@ import * as api from "../api";
 import { useAppState, showToast } from "../store";
 import { useStrings } from "../i18n";
 import {
-  activateTab, adoptTerminals, closeTab, fileKey, reviewKey, FILES_TAB, GUIDE_TAB, initialSessionPanel,
-  nextTerminalOrdinal, openTab, readSessionPanel, replaceTab, skillKey, terminalKey, upsertTab, writeSessionPanel,
+  activateTab, adoptTerminals, closeTab, closeTabs, fileKey, reviewKey, FILES_TAB, GUIDE_TAB, initialSessionPanel,
+  nextTerminalOrdinal, openTab, readSessionPanel, replaceTab, skillKey, tabsToClose, terminalKey, upsertTab, writeSessionPanel,
   type PanelTab, type SessionPanelRecord, type TabsState,
 } from "../lib/panelTabs";
 import { isAbsOrHomePath, toWorkspaceRelative } from "../lib/filePath";
@@ -26,6 +26,8 @@ export type FilesPanelState = {
   active: string;
   activate: (key: string) => void;
   close: (key: string) => void;
+  /** Close every other tab / every tab to the right of `key` (never the file browser). */
+  closeMany: (key: string, scope: "others" | "right") => void;
   /** Current directory path in the `files` tab for this session. */
   dirPath: string;
   setDirPath: (dirPath: string) => void;
@@ -251,6 +253,16 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
     update((st) => closeTab(st, key));
   }, [update]);
 
+  const closeMany = useCallback((key: string, scope: "others" | "right") => {
+    const st = stateRef.current;
+    const keys = tabsToClose(st, key, scope);
+    for (const k of keys) {
+      const tab = st.tabs.find((t) => t.key === k);
+      if (tab?.kind === "terminal") void api.closeTerminal(tab.id);
+    }
+    update((cur) => closeTabs(cur, keys, key));
+  }, [update]);
+
   const openGuide = useCallback(() => {
     updateRecord((rec) => {
       const next = openTab({ tabs: rec.tabs, active: rec.active }, GUIDE_TAB);
@@ -274,7 +286,7 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
   return {
     sessionKey,
     open, setOpen, width, startResize, resetWidth, fullscreen, setFullscreen,
-    tabs: state.tabs, active: state.active, activate, close,
+    tabs: state.tabs, active: state.active, activate, close, closeMany,
     dirPath, setDirPath,
     browsePath, revealInFilesTab, openSkill, openReview, selectReviewFile, openGuide, pickFiles, canTerminal, pickTerminal, terminalGone,
   };

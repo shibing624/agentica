@@ -1,10 +1,11 @@
+import * as ContextMenu from "@radix-ui/react-context-menu";
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef } from "react";
 import {
   FileTypeIcon, IconClose, IconCompass, IconDiff, IconExitFullscreen, IconFullscreen, IconPlus, IconSidebarRight, IconTerminal,
 } from "../icons";
 import { useStrings } from "../i18n";
 import { isAbsOrHomePath } from "../lib/filePath";
-import { baseName, type PanelTab } from "../lib/panelTabs";
+import { baseName, closeTabShortcut, isCloseTabKey, tabsToClose, type PanelTab } from "../lib/panelTabs";
 import { DiffView } from "./DiffView";
 import { SkillPane } from "./SkillPane";
 import type { FilesPanelState } from "./useFilesPanel";
@@ -130,6 +131,12 @@ export function FilesPanel({
         className={"files-panel" + (shown ? " open" : "") + (panel.fullscreen ? " fullscreen" : "")}
         style={{ width: panel.fullscreen ? undefined : shown ? panel.width : 0 }}
         inert={!shown}
+        onKeyDownCapture={(e) => {
+          if (!isCloseTabKey(e) || panel.active === "files") return;
+          e.preventDefault();
+          e.stopPropagation();
+          panel.close(panel.active);
+        }}
       >
         <div className="files-panel-inner" style={{ width: panel.fullscreen ? "100%" : panel.width }}>
           <div className="files-panel-head">
@@ -140,19 +147,42 @@ export function FilesPanel({
                 return (
                   <div key={tab.key} className="pt-cell">
                     {i > 0 && <span className={"pt-slot" + (active || prevActive ? " blank" : "")} />}
-                    <div className={"pt-tab" + (active ? " active" : "") + (tab.kind === "files" ? " fixed" : "")}
-                         role="tab" aria-selected={active} title={tabTitle(tab)}
-                         onMouseDown={(e) => { if (e.button === 1 && tab.kind !== "files") { e.preventDefault(); panel.close(tab.key); } }}
-                         onClick={() => panel.activate(tab.key)}>
-                      <span className="pt-title"><TabLabel tab={tab} /></span>
-                      {tab.kind !== "files" && (
-                        <button type="button" className="pt-close" aria-label={S.files.closeTab}
-                                title={S.files.closeTab}
-                                onClick={(e) => { e.stopPropagation(); panel.close(tab.key); }}>
-                          <IconClose />
-                        </button>
-                      )}
-                    </div>
+                    <ContextMenu.Root>
+                      <ContextMenu.Trigger asChild>
+                        <div className={"pt-tab" + (active ? " active" : "") + (tab.kind === "files" ? " fixed" : "")}
+                             role="tab" aria-selected={active} title={tabTitle(tab)}
+                             onMouseDown={(e) => { if (e.button === 1 && tab.kind !== "files") { e.preventDefault(); panel.close(tab.key); } }}
+                             onClick={() => panel.activate(tab.key)}>
+                          <span className="pt-title"><TabLabel tab={tab} /></span>
+                          {tab.kind !== "files" && (
+                            <button type="button" className="pt-close" aria-label={S.files.closeTab}
+                                    title={S.files.closeTab}
+                                    onClick={(e) => { e.stopPropagation(); panel.close(tab.key); }}>
+                              <IconClose />
+                            </button>
+                          )}
+                        </div>
+                      </ContextMenu.Trigger>
+                      <ContextMenu.Portal>
+                        <ContextMenu.Content className="pt-menu">
+                          <ContextMenu.Item className="pt-menu-item" disabled={tab.kind === "files"}
+                                            onSelect={() => panel.close(tab.key)}>
+                            <span>{S.files.closeTab}</span>
+                            <kbd>{closeTabShortcut()}</kbd>
+                          </ContextMenu.Item>
+                          <ContextMenu.Item className="pt-menu-item"
+                                            disabled={tabsToClose(panel, tab.key, "others").length === 0}
+                                            onSelect={() => panel.closeMany(tab.key, "others")}>
+                            <span>{S.files.closeOthers}</span>
+                          </ContextMenu.Item>
+                          {tabsToClose(panel, tab.key, "right").length > 0 && (
+                            <ContextMenu.Item className="pt-menu-item" onSelect={() => panel.closeMany(tab.key, "right")}>
+                              <span>{S.files.closeRight}</span>
+                            </ContextMenu.Item>
+                          )}
+                        </ContextMenu.Content>
+                      </ContextMenu.Portal>
+                    </ContextMenu.Root>
                   </div>
                 );
               })}
