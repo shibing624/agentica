@@ -44,7 +44,7 @@ class Settings:
     agent_max_sessions: int = 50
 
     # File upload limits
-    upload_max_size_mb: int = 50
+    upload_max_size_mb: int = 1024
 
     # Run history retention (days); runs older than this are pruned on startup
     job_runs_retention_days: int = 30
@@ -183,7 +183,7 @@ class Settings:
             agent_max_sessions=int(os.getenv("AGENT_MAX_SESSIONS", "50")),
 
             # Upload limits
-            upload_max_size_mb=int(os.getenv("UPLOAD_MAX_SIZE_MB", "50")),
+            upload_max_size_mb=int(os.getenv("UPLOAD_MAX_SIZE_MB", "1024")),
 
             # Run history retention
             job_runs_retention_days=int(os.getenv("JOB_RUNS_RETENTION_DAYS", "30")),

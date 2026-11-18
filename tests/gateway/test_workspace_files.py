@@ -179,3 +179,20 @@ def test_a_larger_than_one_chunk_upload_lands_whole_and_replaces_the_old_file(cl
     assert res.json()["size"] == len(blob)
     assert (root / "data.bin").read_bytes() == blob
     assert sorted(p.name for p in root.iterdir()) == ["data.bin"]
+
+
+def test_a_file_over_the_old_50mb_cap_still_opens_and_a_huge_text_file_previews_its_head(client):
+    c, tmp_path = client
+    root = tmp_path / "proj"
+    root.mkdir()
+    # Sparse files: they cost no disk, only the size the route sees.
+    with open(root / "big.pdf", "wb") as f:
+        f.truncate(60 * 1024 * 1024)
+    raw = c.get("/api/workspace/content", params={"root": str(root), "path": "big.pdf"}, headers={"Range": "bytes=0-9"})
+    assert raw.status_code == 206 and len(raw.content) == 10
+    # A text preview is the head only, however large the file is.
+    (root / "big.txt").write_bytes(b"head\n" + b"x" * (60 * 1024 * 1024))
+    prev = c.get("/api/workspace/content", params={"root": str(root), "path": "big.txt", "preview": 1})
+    assert prev.status_code == 200
+    assert prev.json()["truncated"] is True and prev.json()["content"].startswith("head")
+    assert len(prev.json()["content"]) == prev.json()["limit"]

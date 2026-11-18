@@ -11,7 +11,10 @@ import codecs
 from pathlib import Path
 # 256 KiB preview cap; 50 MiB hard ceiling for a full inline read.
 TEXT_PREVIEW_BYTES = 256 * 1024
-MAX_READ_BYTES = 50 * 1024 * 1024
+# Raw bytes are streamed from disk (and the browser asks for ranges), so this is
+# not a memory limit; it only stops previewing something absurd inline.
+# Text previews never read more than TEXT_PREVIEW_BYTES whatever the file size.
+MAX_READ_BYTES = 1024 * 1024 * 1024
 
 CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
