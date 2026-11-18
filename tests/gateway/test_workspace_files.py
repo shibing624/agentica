@@ -139,3 +139,43 @@ def test_any_file_type_uploads_unchanged(client):
         )
         assert res.status_code == 200, (name, res.text)
         assert (root / name).read_bytes() == blob
+
+
+def test_an_oversized_upload_is_cut_off_and_leaves_no_file_behind(client, monkeypatch):
+    from agentica_gateway.config import settings
+    c, tmp_path = client
+    root = tmp_path / "proj"
+    root.mkdir()
+    (root / "keep.bin").write_bytes(b"original")
+    monkeypatch.setattr(settings, "upload_max_size_mb", 1)
+    res = c.post(
+        "/api/workspace/upload",
+        data={"root": str(root), "path": ""},
+        files={"file": ("keep.bin", b"x" * (2 * 1024 * 1024), "application/octet-stream")},
+        headers={"X-Agentica-Client": "web"},
+    )
+    assert res.status_code == 413
+    assert "1MB" in res.json()["detail"]
+    # The refused upload neither replaced the file that was there nor left a temp file.
+    assert (root / "keep.bin").read_bytes() == b"original"
+    assert sorted(p.name for p in root.iterdir()) == ["keep.bin"]
+
+
+def test_a_larger_than_one_chunk_upload_lands_whole_and_replaces_the_old_file(client, monkeypatch):
+    from agentica_gateway.config import settings
+    c, tmp_path = client
+    root = tmp_path / "proj"
+    root.mkdir()
+    (root / "data.bin").write_bytes(b"old")
+    monkeypatch.setattr(settings, "upload_max_size_mb", 8)
+    blob = bytes(range(256)) * (3 * 4096 + 7)  # ~3 MB, not a multiple of the chunk size
+    res = c.post(
+        "/api/workspace/upload",
+        data={"root": str(root), "path": ""},
+        files={"file": ("data.bin", blob, "application/octet-stream")},
+        headers={"X-Agentica-Client": "web"},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["size"] == len(blob)
+    assert (root / "data.bin").read_bytes() == blob
+    assert sorted(p.name for p in root.iterdir()) == ["data.bin"]

@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from ..config import settings
+from ..services.uploads import save_upload
 from ..workspace_files import (
     CONTENT_TYPES,
     MAX_READ_BYTES,
@@ -116,16 +117,5 @@ async def workspace_upload(
     except WorkspacePathError as e:
         _raise(e)
         return
-    max_bytes = settings.upload_max_size_mb * 1024 * 1024
-    chunks: list[bytes] = []
-    total = 0
-    while chunk := await file.read(1024 * 1024):
-        total += len(chunk)
-        if total > max_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File exceeds size limit of {settings.upload_max_size_mb}MB",
-            )
-        chunks.append(chunk)
-    dest.write_bytes(b"".join(chunks))
+    total = await save_upload(file, dest, settings.upload_max_size_mb)
     return {"status": "ok", "path": rel, "filename": name, "size": total}

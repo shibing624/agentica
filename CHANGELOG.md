@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **右侧栏新增浏览器标签页**：「+」启动页多一张「浏览器」卡片，标签里是地址栏（后退 / 前进 / 刷新 / 在系统浏览器中打开）加页面。地址栏只认 http(s)：没写协议的，本机地址补 `http://`、其他补 `https://`，不是网址的直接拒绝，不当搜索词猜；标签会记住最后停留的地址和页面标题，刷新后恢复。Desktop 里页面是 Electron 的 `<webview>`，带 `X-Frame-Options` 的网站也能显示；纯 Web 里只能用 iframe，很多网站会拒绝被嵌入，标签里有提示，预览本机开发服务（`localhost:端口`）是主要用途。壳（`desktop/`）的改动只有机制：打开 `webviewTag`，`will-attach-webview` 里只放行「带固定存储分区、地址是 http(s)」的 webview，并去掉 preload / Node、强制沙箱，页面申请的权限（摄像头、定位、通知）一律拒绝，页面里要开新窗口就在同一标签里打开，离开 http(s) 的跳转被拦。页面和应用窗口存储隔离：真实 Electron 里实测，页面读不到网关会话 cookie、没有 `require` / `window.electron`；顺带发现只在 `will-attach-webview` 里改 `params.partition` 不生效（页面仍用默认分区、读到了应用的 cookie），所以分区由页面声明、壳只校验不匹配就拒绝。这是 `desktop/main.js` 头部「壳里没有 preload / IPC」原则的一个例外，需要发新安装包才生效（`desktop/main.js`、`desktop/util.js`、`web/src/workspace/BrowserView.tsx`、`web/src/lib/browserUrl.ts`、`web/src/lib/panelTabs.ts`）。
+
+- **上传改为流式写盘，超限不再留半个文件**：此前整个文件先读进内存、再一次写盘；现在边收边写到同目录的临时文件，收完才替换目标，超过 `UPLOAD_MAX_SIZE_MB` 时在限额处直接中止（413）并删掉临时文件，不会截断也不会覆盖已有的同名文件。工作区上传和聊天上传共用 `services/uploads.py`（`gateway/src/agentica_gateway/services/uploads.py`、`routes/workspace.py`、`routes/chat.py`）。
+
 - **右侧文件栏上传不再有扩展名白名单（`.xlsx` 等 Office 文件上传失败）**：网关的上传白名单默认没有任何 Office 格式，`.xlsx` 被直接拒（400，原因只在响应里，页面只弹「上传失败」）。这个白名单本身就不该有：右侧栏是用户本机的目录，agent 本来就能往里写任何文件，扩展名限制只挡住用户，路径越界另有 `resolve_write` 把关。现在删掉白名单和 `UPLOAD_ALLOWED_EXTENSIONS` 配置，工作区上传和聊天上传都接受任何类型，只保留 `UPLOAD_MAX_SIZE_MB` 的大小限制；上传失败的提示也带上网关给的原因（`gateway/src/agentica_gateway/config.py`、`routes/workspace.py`、`routes/chat.py`、`web/src/workspace/WorkspaceBrowser.tsx`、`web/src/pages/ChatPage.tsx`）。
 
 - **Web 右侧栏标签页支持右键菜单与快捷键（对齐 dsh）**：右键标签出「关闭 / 关闭其他标签页 / 关闭右侧标签页」（右侧没有标签时不显示后者，文件浏览器标签不可关闭，关闭其他后焦点落在被点的标签上；终端标签关闭时同样结束其 shell）；面板内按 `⌘⌥W`（macOS）/ `Ctrl+Alt+W`（其他系统）关闭当前标签，用 `code` 判断而不是字符，避开 macOS 上 Alt+W 打出的 `∑`。菜单用 `@radix-ui/react-context-menu`（键盘、Shift+F10、边缘避让、无障碍），这是 Web 里第一个 UI 库，构建体积约增加 90 kB（`web/src/workspace/FilesPanel.tsx`、`web/src/workspace/useFilesPanel.ts`、`web/src/lib/panelTabs.ts`、`web/src/style.css`）。

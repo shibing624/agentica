@@ -29,6 +29,7 @@ from ..models import (
 )
 from ..services.agent_service import AgentService
 from ..services import chat_images, live_turn
+from ..services.uploads import save_upload
 from .settings import show_cli_sessions_pref
 
 try:
@@ -1054,22 +1055,6 @@ async def upload_file(
 
     Any file type is accepted (it is the user's own machine); the size limit is enforced.
     """
-    # Read in chunks and enforce the size limit while streaming, so an oversized
-    # upload is rejected mid-read instead of being fully buffered into memory
-    # first (a full read() lets a client OOM the server regardless of the limit).
-    max_bytes = settings.upload_max_size_mb * 1024 * 1024
-    chunks = []
-    total = 0
-    while chunk := await file.read(1024 * 1024):
-        total += len(chunk)
-        if total > max_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File exceeds size limit of {settings.upload_max_size_mb}MB",
-            )
-        chunks.append(chunk)
-    content = b"".join(chunks)
-
     # Write to destination — enforce that files land inside workspace
     workspace = settings.workspace_path.resolve()
     if target_dir:
@@ -1084,12 +1069,8 @@ async def upload_file(
     base.mkdir(parents=True, exist_ok=True)
     dest = base / Path(file.filename or "upload").name
 
-    try:
-        dest.write_bytes(content)
-    except OSError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to write file: {e}")
-
-    return {"status": "ok", "path": str(dest), "filename": file.filename, "size": len(content)}
+    size = await save_upload(file, dest, settings.upload_max_size_mb)
+    return {"status": "ok", "path": str(dest), "filename": file.filename, "size": size}
 
 
 # ============== Helpers ==============
