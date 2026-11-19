@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-11-19
+
 - **上传上限默认改为 1GB，右侧栏不再因为文件超过 50MB 打不开**：流式写盘之后上传不占内存，`UPLOAD_MAX_SIZE_MB` 默认从 50 改为 1024。右侧栏预览的几种情况：文本、代码、Markdown、CSV 一直只读文件开头 256KB 并提示「预览已截断」，与文件多大无关；图片和 PDF 由网关直接从磁盘按范围发送，原来 50MB 的上限没有保护作用，只是让超过的文件显示成坏图 / 空白，现在放宽到 1GB；Excel 在浏览器里整个解析，仍保留 20MB 的上限并提示「请下载后查看」；下载始终不受限（`gateway/src/agentica_gateway/config.py`、`workspace_files.py`）。
 
 - **右侧栏新增浏览器标签页**：「+」启动页多一张「浏览器」卡片，标签里是地址栏（后退 / 前进 / 刷新 / 在系统浏览器中打开）加页面。地址栏只认 http(s)：没写协议的，本机地址补 `http://`、其他补 `https://`，不是网址的直接拒绝，不当搜索词猜；标签会记住最后停留的地址和页面标题，刷新后恢复。Desktop 里页面是 Electron 的 `<webview>`，带 `X-Frame-Options` 的网站也能显示；纯 Web 里只能用 iframe，很多网站会拒绝被嵌入，标签里有提示，预览本机开发服务（`localhost:端口`）是主要用途。壳（`desktop/`）的改动只有机制：打开 `webviewTag`，`will-attach-webview` 里只放行「带固定存储分区、地址是 http(s)」的 webview，并去掉 preload / Node、强制沙箱，页面申请的权限（摄像头、定位、通知）一律拒绝，页面里要开新窗口就在同一标签里打开，离开 http(s) 的跳转被拦。页面和应用窗口存储隔离：真实 Electron 里实测，页面读不到网关会话 cookie、没有 `require` / `window.electron`；顺带发现只在 `will-attach-webview` 里改 `params.partition` 不生效（页面仍用默认分区、读到了应用的 cookie），所以分区由页面声明、壳只校验不匹配就拒绝。这是 `desktop/main.js` 头部「壳里没有 preload / IPC」原则的一个例外，需要发新安装包才生效（`desktop/main.js`、`desktop/util.js`、`web/src/workspace/BrowserView.tsx`、`web/src/lib/browserUrl.ts`、`web/src/lib/panelTabs.ts`）。

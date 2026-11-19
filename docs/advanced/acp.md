@@ -37,7 +37,7 @@ agentica acp
 
 ```jsonl
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"my-client","version":"1.0"}}}
-{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"promptCapabilities":{"text":true,"embeddedContext":true}},"agentInfo":{"name":"agentica","version":"1.6.0"},"authMethods":[]}}
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"promptCapabilities":{"text":true,"embeddedContext":true}},"agentInfo":{"name":"agentica","version":"1.6.1"},"authMethods":[]}}
 {"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/path/to/project","mcpServers":[]}}
 {"jsonrpc":"2.0","id":2,"result":{"sessionId":"a1b2c3d4"}}
 {"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"a1b2c3d4","prompt":[{"type":"text","text":"你好"}]}}

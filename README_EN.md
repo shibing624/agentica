@@ -106,6 +106,7 @@ Link WeChat (scan a QR code), Feishu, WeCom, Telegram, QQ, DingTalk, or Slack wi
 
 ## 🔥 News
 
+- [2026/11/19] **v1.6.1**: A browser tab in the right panel, uploads up to 1GB of any file type, one session catalog and one log reader, and compaction that prunes once at the window line. See [Release-v1.6.1](https://github.com/shibing624/agentica/releases/tag/v1.6.1)
 - [2026/11/12] **v1.5.2**: Web and Desktop background jobs and automations, a shared question card with live thinking, and `agentica watch` for long jobs outside this process. See [Release-v1.5.2](https://github.com/shibing624/agentica/releases/tag/v1.5.2)
 - [2026/11/04] **v1.5.1**: Standalone `agentica-gateway` package released in lockstep with `agentica`; updated macOS / Windows / Linux Desktop installers, PyPI packages, and npm `@agentica-ai/sdk`. See [Release-v1.5.1](https://github.com/shibing624/agentica/releases/tag/v1.5.1)
 - [2026/10/22] **v1.5.0**: Langfuse 5 request tracing, full-window history replay, cross-provider fallback with tool history intact, and provider-calibrated context compression. See [Release-v1.5.0](https://github.com/shibing624/agentica/releases/tag/v1.5.0)
