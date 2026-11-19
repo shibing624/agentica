@@ -489,6 +489,10 @@ class SessionLog:
         # Prompt size of the immediately preceding LLM request in the current
         # context window, used to measure step-over-step prefix reuse and cliffs.
         self._last_request_prompt_tokens: int = 0
+        # Per-message digests of the preceding request in this window. A cache
+        # cliff over an unchanged prefix is the provider dropping its cache; a
+        # cliff where these differ is the request itself having changed.
+        self._last_request_digests: Optional[List[str]] = None
 
     def begin_turn(self) -> None:
         """Open a turn for incremental writes (resets the per-turn bookkeeping).
@@ -625,6 +629,7 @@ class SessionLog:
         })
         self._last_uuid = entry_uuid
         self._last_request_prompt_tokens = 0
+        self._last_request_digests = None
         return entry_uuid
 
     def lineage_key(self, model: Optional[str] = None) -> str:

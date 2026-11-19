@@ -953,3 +953,33 @@ def test_agents_md_digest_follows_edits_of_the_whole_chain(tmp_path, monkeypatch
     assert second != first
     (project / "AGENTS.md").write_text("PROJECT\n", encoding="utf-8")
     assert ws.agents_md_digest() != second
+
+
+def _usage_rows(slog):
+    return [e["request"] for e in slog.iter_raw_entries() if e.get("name") == "token_usage"]
+
+
+def test_token_usage_says_whether_the_request_kept_the_previous_prefix(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTICA_HOME", str(tmp_path))
+    spy = _SpyOpenAIChat(id="claude-haiku-5-5")
+    agent = Agent(
+        model=spy,
+        add_history_to_context=True,
+        tool_config=ToolConfig(auto_load_mcp=False),
+        session_id="sess-prefix-intact",
+        session_base_dir=str(tmp_path / "sessions"),
+    )
+    asyncio.run(agent.run("first question"))
+    asyncio.run(agent.run("second question", config=RunConfig(automated_input=True)))
+    rows = _usage_rows(agent._session_log)
+    assert "prefix_intact" not in rows[0]
+    assert rows[1]["prefix_intact"] is True
+    assert "prefix_diverged_at" not in rows[1]
+
+    # Rewrite an earlier message: the next request no longer starts with the
+    # previous one, and the row names the first message that differs.
+    agent.working_memory.runs[0].response.messages[1].content = "rewritten question"
+    asyncio.run(agent.run("third question"))
+    rows = _usage_rows(agent._session_log)
+    assert rows[2]["prefix_intact"] is False
+    assert rows[2]["prefix_diverged_at"] == 1

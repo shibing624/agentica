@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from collections import defaultdict
@@ -994,6 +995,27 @@ class PersistMixin:
             PersistMixin._trace_event(agent, name, at=at, **payload)
 
     @staticmethod
+    def _request_digests(messages: List[Message]) -> List[str]:
+        """One digest per message of the request that produced the last reply.
+
+        The reply is the last assistant message; everything before it is what
+        was sent. ``reasoning_content`` is left out because the wire never
+        carries it back.
+        """
+        end = len(messages)
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].role == "assistant":
+                end = i
+                break
+        digests = []
+        for msg in messages[:end]:
+            wire = msg.to_model_dict()
+            wire.pop("reasoning_content", None)
+            raw = json.dumps(wire, ensure_ascii=False, sort_keys=True, default=str)
+            digests.append(hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest())
+        return digests
+
+    @staticmethod
     def _trace_token_usage(agent: "Agent", messages: List[Message]) -> None:
         assistant = None
         for msg in reversed(messages):
@@ -1038,6 +1060,19 @@ class PersistMixin:
                 if prev_prompt >= 1024 and reuse_ratio < 0.9:
                     req_payload["cache_cliff"] = True
             slog._last_request_prompt_tokens = prompt_actual
+            digests = PersistMixin._request_digests(messages)
+            prev_digests = slog._last_request_digests
+            if prev_digests is not None:
+                # Did this request start with every message of the previous one?
+                # True on a cliff means the provider lost its cache, not us.
+                diverged_at = next(
+                    (i for i, d in enumerate(prev_digests) if i >= len(digests) or digests[i] != d),
+                    None,
+                )
+                req_payload["prefix_intact"] = diverged_at is None
+                if diverged_at is not None:
+                    req_payload["prefix_diverged_at"] = diverged_at
+            slog._last_request_digests = digests
         PersistMixin._trace_event(
             agent,
             "token_usage",
