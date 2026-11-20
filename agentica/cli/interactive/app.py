@@ -1573,6 +1573,8 @@ def run_interactive(
 
         # No config dict passed: this is a global settings toggle, read the same
         # way the CLI's other toggles are (see _maybe_start_cron above).
+        if agent_config.get("computer_use"):
+            raise RuntimeError("Computer Use sessions accept input only from the local terminal")
         if not attach_enabled():
             raise RuntimeError("settings.attach_enabled is off")
 

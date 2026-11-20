@@ -5,10 +5,11 @@ The proxy's provider-visible schema must be fixed (action + name + arguments),
 so MCP/dynamic-skill inventory churn no longer cold-starts the prompt cache —
 the whole point of extracting optional tools out of the top-level schema.
 """
+import json
 import unittest
 
 from agentica.model.openai import OpenAIChat
-from agentica.tools.base import FunctionCall
+from agentica.tools.base import FunctionCall, get_function_call
 from agentica.tools.decorators import tool
 
 
@@ -73,14 +74,35 @@ class TestUseCapabilityDispatch(unittest.IsolatedAsyncioTestCase):
 
     async def test_call_dispatches_to_deferred_tool(self):
         agent = _build_agent_with_deferred()
-        fn = agent.model.functions["use_capability"]
-        fc = FunctionCall(
-            function=fn,
-            arguments={"action": "call", "name": "get_weather", "arguments": {"city": "Beijing"}},
+        fc = get_function_call(
+            "use_capability", json.dumps({"action": "call", "name": "get_weather", "arguments": {"city": "Beijing"}}),
+            "proxy_call_1", agent.model.functions,
         )
-        ok = await fc.execute()
-        self.assertTrue(ok)
-        self.assertIn("sunny in Beijing", str(fc.result))
+        results = []
+        async for _ in agent.model.run_function_calls([fc], results):
+            pass
+        self.assertEqual(results[0].tool_call_id, "proxy_call_1")
+        self.assertEqual(results[0].content, "sunny in Beijing")
+
+    async def test_proxy_call_preserves_target_approval(self):
+        agent = _build_agent_with_deferred()
+        seen = []
+
+        async def approve(call):
+            seen.append((call.function.name, call.arguments))
+            return "deny" if call.function.name == "get_weather" else "allow"
+
+        agent.approve = approve
+        fc = get_function_call(
+            "use_capability", json.dumps({"action": "call", "name": "get_weather", "arguments": {"city": "Beijing"}}),
+            "proxy_call_1", agent.model.functions,
+        )
+        results = []
+        async for _ in agent.model.run_function_calls([fc], results):
+            pass
+        self.assertEqual(seen, [("get_weather", {"city": "Beijing"})])
+        self.assertTrue(results[0].tool_call_error)
+        self.assertNotIn("sunny", results[0].content)
 
     async def test_call_unknown_name_reports_error(self):
         agent = _build_agent_with_deferred()

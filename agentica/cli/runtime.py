@@ -8,6 +8,7 @@ import argparse
 import importlib
 import inspect
 import os
+import shutil
 import sys
 from typing import Any, Callable, Dict, List, Optional
 
@@ -418,6 +419,10 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--computer-use", nargs=2, metavar=("APP_BUNDLE_ID", "WINDOW_ID"),
+        help="Experimental: enable local macOS Computer Use for one TextEdit window (human approval per action)",
+    )
+    parser.add_argument(
         "--tools",
         nargs="*",
         choices=list(TOOL_REGISTRY.keys()),
@@ -512,6 +517,24 @@ def parse_args():
         help="Resume the session at a specific message UUID",
     )
     args = parser.parse_args()
+    if args.computer_use:
+        if args.query is not None or args.print_only or args.command == "acp":
+            parser.error("--computer-use requires the interactive CLI")
+        if sys.platform != "darwin" or not (sys.stdin.isatty() and sys.stdout.isatty()) or (
+            "SSH_CONNECTION" in os.environ or os.stat("/dev/console").st_uid != os.getuid()
+        ):
+            parser.error("--computer-use requires a terminal in the local macOS desktop session")
+        bundle_id, window_id = args.computer_use
+        if (
+            bundle_id != "com.apple.TextEdit"
+            or not (window_id.isascii() and window_id.isdecimal() and len(window_id) <= 10)
+            or not 0 < int(window_id) < 2**32
+        ):
+            parser.error("--computer-use currently requires com.apple.TextEdit and a valid window ID")
+        executable = shutil.which("peekaboo")
+        if executable is None:
+            parser.error("--computer-use requires Peekaboo. Install with: brew install openclaw/tap/peekaboo")
+        args.computer_use = (os.path.abspath(executable), bundle_id, int(window_id))
     if args.command == "resume" and not args.resume_session_id:
         parser.error("agentica resume requires a session id")
     if args.command != "resume" and args.resume_session_id is not None:
@@ -1004,6 +1027,10 @@ def create_agent(
         for tool in cli_tools:
             if tool.name == "worktree_tool":
                 tool._binder = worktree_binder
+    if include_ask_user_question and approve is not None and agent_config.get("computer_use"):
+        from agentica.tools.builtin.computer_use_tool import ComputerUseTool
+
+        cli_tools.append(ComputerUseTool(*agent_config["computer_use"]))
 
     new_agent = DeepAgent(
         model=model,

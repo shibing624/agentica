@@ -55,21 +55,16 @@ class TestNonInteractiveNeverBlocks:
         try:
             install_sink(NotifyConfig(enabled=True, socket=desktop.socket_path))
             from agentica.cli.approvals import build_noninteractive_approve
+            from agentica.tools.base import Function, FunctionCall
 
             approve = build_noninteractive_approve(_StubAgent())
 
             # A command that would park a human in `ask` mode: this is the case
             # where a blocking sink would hang a headless run forever.
-            class _FC:
-                call_id = "call_1"
-                arguments = {"command": "rm -f /tmp/x"}
-                function = type("F", (), {"name": "bash",
-                                          "arguments": {"command": "rm -f /tmp/x"}})()
-                approval_trace = None
-                approval_waited = False
+            call = FunctionCall(call_id="call_1", function=Function(name="bash"), arguments={"command": "rm -f /tmp/x"})
 
             started = time.monotonic()
-            decision = asyncio.run(approve(_FC()))
+            decision = asyncio.run(approve(call))
             elapsed = time.monotonic() - started
 
             # get_registry() is None -> the manual path denies at once. No wait.

@@ -145,6 +145,7 @@ class PendingApproval:
     preview: str
     similar_label: str = ""
     options: Tuple[ApprovalDecision, ...] = ("allow", "allow_prefix", "deny", "deny_prefix")
+    local_approval_context: str | None = None
 
 
 @dataclass
@@ -496,8 +497,10 @@ def classify(
 
     Modes nest: ``auto`` is a superset of ``ask``, ``allow-all`` is root.
     Project deny grants apply only in ``ask`` / ``auto``. ``allow-all``
-    never parks and never denies. Neither tier inspects ``action``.
+    never parks and never denies except for explicitly human-only tools.
     """
+    if fc.function.local_approval_context is not None:
+        return "deny" if mode != "allow-all" and grants.denies(fc, work_dir=work_dir) else "ask"
     if mode == "allow-all":
         return "allow"
     if grants.denies(fc, work_dir=work_dir):
@@ -548,7 +551,7 @@ def classify_pending(
 ) -> ApprovalRoute:
     """Re-classify an already-parked approval after a mid-turn mode change."""
     fc = FunctionCall(
-        function=Function(name=pending.name),
+        function=Function(name=pending.name, local_approval_context=pending.local_approval_context),
         arguments=dict(pending.arguments),
         call_id=pending.tool_call_id,
     )
@@ -702,6 +705,11 @@ def describe_approval(fc: FunctionCall, *, work_dir: Optional[str] = None) -> Tu
     """``(question, preview)`` for an approval card. No extra LLM call."""
     name = fc.function.name
     args = fc.arguments or {}
+    if fc.function.local_approval_context is not None:
+        return (
+            f"Allow Computer Use in {fc.function.local_approval_context}?",
+            "Observe can send window contents to the model. " + json.dumps(args, ensure_ascii=False),
+        )
     if name in EXECUTE_TOOLS:
         preview = str(args.get("command") or "")
         if is_sandbox_escalation(fc):
@@ -802,6 +810,7 @@ def make_approve(
         if (
             mode == "auto"
             and review is not None
+            and fc.function.local_approval_context is None
             and not is_sandbox_escalation(fc)
             and not _is_hard_unsafe(fc, work_dir=work_dir)
         ):
@@ -884,6 +893,7 @@ def make_approve(
             preview=preview,
             similar_label=similar_label,
             options=options,
+            local_approval_context=fc.function.local_approval_context,
         )
         fc.approval_waited = True
         started = time.monotonic()
@@ -993,6 +1003,8 @@ def _similar_label_for(fc: FunctionCall) -> str:
 
 
 def _approval_options(fc: FunctionCall, *, work_dir: Optional[str]) -> Tuple[ApprovalDecision, ...]:
+    if fc.function.local_approval_context is not None:
+        return ("allow", "deny")
     # A hard-unsafe call is asked about every time (``classify`` checks it
     # before allow grants), so an "allow similar" would be a promise nothing
     # keeps. "Deny similar" stays: refusing the class for good is still useful.

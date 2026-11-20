@@ -1174,18 +1174,19 @@ class Model(ABC):
             copies the guardrail template: result+error, ``exceptions[idx]``
             stays None, no raise, no sibling abort.
             """
-            if _agent is None:
-                return False
-            approve_fn = _agent.approve
+            approve_fn = _agent.approve if _agent is not None else None
             if approve_fn is None:
-                return False
-            try:
-                decision = await approve_fn(fc)
-            except Exception:
+                if fc.function.local_approval_context is None:
+                    return False
                 decision = "deny"
+            else:
+                try:
+                    decision = await approve_fn(fc)
+                except Exception:
+                    decision = "deny"
             if decision not in ("allow", "allow_prefix", "deny", "deny_prefix"):
                 decision = "deny"
-            session_log = _agent._session_log
+            session_log = _agent._session_log if _agent is not None else None
             if session_log is not None and (fc.approval_waited or fc.approval_trace):
                 payload: Dict[str, Any] = {
                     "tool_call_id": fc.call_id or "",

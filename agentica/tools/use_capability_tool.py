@@ -20,14 +20,14 @@ Actions (closed enum, cannot drift):
 import json
 from typing import Literal
 
-from agentica.tools.base import FunctionCall, Tool
+from agentica.tools.base import Tool
 
 
 class UseCapabilityTool(Tool):
     """Expose a fixed-schema proxy for discovering/calling deferred tools."""
 
     def __init__(self):
-        super().__init__(name="use_capability", description="Discover and call optional capabilities")
+        super().__init__(name="builtin_use_capability", description="Discover and call optional capabilities")
         self.register(self.use_capability)
 
     async def use_capability(
@@ -45,8 +45,7 @@ class UseCapabilityTool(Tool):
             name: Capability (tool) name for inspect / call / decline.
             arguments: JSON object of arguments passed to the capability on call.
         """
-        functions = getattr(getattr(agent, "model", None), "functions", None) or {}
-        deferred = {n: f for n, f in functions.items() if getattr(f, "deferred", False)}
+        deferred = {n: f for n, f in agent.model.functions.items() if f.deferred and f.is_available()}
 
         if action == "list":
             if not deferred:
@@ -64,14 +63,9 @@ class UseCapabilityTool(Tool):
             return json.dumps(fn.to_dict(), ensure_ascii=False)
 
         if action == "call":
-            fn = deferred.get(name)
-            if fn is None:
-                return f"Unknown capability {name!r}. Use action='list' to see available capabilities."
-            fc = FunctionCall(function=fn, arguments=arguments or {})
-            ok = await fc.execute()
-            if ok:
-                return str(fc.result)
-            return f"Capability {name!r} failed: {fc.error}"
+            # Runtime resolves valid calls to the real tool before scheduling,
+            # so it goes through the same approvals, guardrails and output path.
+            return f"Unknown or unavailable capability {name!r}. Use action='list' to see available capabilities."
 
         if action == "decline":
             return f"Declined capability {name!r}." if name else "Declined."

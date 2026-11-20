@@ -62,7 +62,7 @@ def format_approval_prompt(pending: PendingApproval) -> str:
         allow_similar = "Yes, and don't ask again for this class of path (p)"
         deny_similar = "No, and don't ask again for this class of path (x)"
     else:
-        question = f"Would you like to allow this {name} call?"
+        question = pending.question if pending.local_approval_context is not None else f"Would you like to allow this {name} call?"
         body = preview
         allow_similar = f"Yes, and don't ask again for this {name} tool (p)"
         deny_similar = f"No, and don't ask again for this {name} tool (x)"
@@ -452,7 +452,8 @@ def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
         # offered to a desktop app, where the user may answer instead — the same
         # answer, applied the same way. The app has no authority of its own, and
         # with no hook configured this is a no-op.
-        _offer_approval_to_hook(pending, state, loop, req, ui_holder)
+        if pending.local_approval_context is None:
+            _offer_approval_to_hook(pending, state, loop, req, ui_holder)
         timeout_s = human_wait_timeout()
         if timeout_s > 0:
             req.idle_timeout = timeout_s

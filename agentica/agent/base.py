@@ -1007,6 +1007,11 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             # connection on the startup path) and are listed concurrently
             # otherwise; see agentica.tools.mcp_tool.prepare_mcp_servers.
             servers = mcp_tool.tools if isinstance(mcp_tool, CompositeMultiMcpTool) else [mcp_tool]
+            if any(server.defer_schema for server in servers):
+                from agentica.tools.use_capability_tool import UseCapabilityTool
+
+                if not any(isinstance(tool, UseCapabilityTool) for tool in self.tools or []):
+                    self.tools = [*(self.tools or []), UseCapabilityTool()]
             ready = prepare_mcp_servers(servers)
             if not ready:
                 logger.warning("Failed to auto-load MCP tools: no MCP server could be reached")

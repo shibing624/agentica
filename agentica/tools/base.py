@@ -192,6 +192,8 @@ class Function(BaseModel):
         return v
     # A description of what the function does, used by the model to choose when and how to call the function.
     description: Optional[str] = None
+    # Host-owned target for tools that require a local user's confirmation.
+    local_approval_context: str | None = None
     # The parameters the functions accepts, described as a JSON Schema object.
     # To describe a function that accepts no parameters, provide the value {"type": "object", "properties": {}}.
     parameters: Dict[str, Any] = Field(
@@ -611,7 +613,9 @@ class FunctionCall(BaseModel):
             # Pair with the "[tool] name(args)" line above so each call has a
             # visible result at INFO. Keep the preview short — full result is
             # available via the model's tool-message at DEBUG / in storage.
-            _result_preview = str(self.result) if self.result is not None else ""
+            from agentica.model.media import multimodal_text_summary
+
+            _result_preview = multimodal_text_summary(self.result) if self.result is not None else ""
             if len(_result_preview) > 150:
                 _result_preview = _result_preview[:150] + "..."
             logger.info(f"[tool] {self.function.name} -> {_result_preview}")
@@ -843,6 +847,16 @@ def get_function_call(
                 f"— the omitted text cannot be recovered."
             )
             return function_call
+        if (
+            name == "use_capability" and function_to_call.origin is not None
+            and function_to_call.origin.type == "builtin"
+            and (function_call.arguments or {}).get("action") == "call"
+        ):
+            target_name = function_call.arguments.get("name")
+            target_args = function_call.arguments.get("arguments")
+            target = functions.get(target_name) if isinstance(target_name, str) else None
+            if target is not None and target.deferred and target.name != name and target.is_available():
+                return get_function_call(target_name, json.dumps(target_args), call_id, functions)
     return function_call
 
 

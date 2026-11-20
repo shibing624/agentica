@@ -4,13 +4,38 @@
 @description: 
 """
 
+import json
 from typing import Any, Dict, List, Optional
 from mcp import Tool as MCPTool
 from mcp.types import CallToolResult, EmbeddedResource, ImageContent, TextContent
 from agentica.mcp.server import MCPServer
+from agentica.model.media import multimodal_text_summary, multimodal_tool_result
 from agentica.utils.log import logger
 
 __all__ = ["MCPClient"]
+
+
+def to_agent_tool_result(result: CallToolResult) -> str | dict:
+    text_parts = []
+    images = []
+    for item in result.content:
+        if isinstance(item, TextContent):
+            text_parts.append(item.text)
+        elif isinstance(item, ImageContent):
+            images.append({"url": f"data:{item.mime_type};base64,{item.data}"})
+        elif isinstance(item, EmbeddedResource):
+            text_parts.append(f"[Embedded resource: {item.resource.uri}]")
+        else:
+            text_parts.append(f"[Unsupported content type: {item.type}]")
+    if not text_parts and result.structured_content is not None:
+        text_parts.append(json.dumps(result.structured_content, ensure_ascii=False))
+    text = "\n".join(text_parts)
+    if result.is_error:
+        return f"Error: {text or 'MCP tool reported failure'}"
+    if images:
+        summary = text or "[Image(s) attached for direct viewing]"
+        return multimodal_tool_result(summary, images, text_summary=summary)
+    return text
 
 
 class MCPClient:
@@ -127,21 +152,7 @@ class MCPClient:
         Returns:
             The extracted text content
         """
-        if result.is_error:
-            return f"Error: {result.content}"
-
-        text_parts = []
-        for content_item in result.content:
-            if isinstance(content_item, TextContent):
-                text_parts.append(content_item.text)
-            elif isinstance(content_item, ImageContent):
-                text_parts.append(f"[Image content: {content_item.data}]")
-            elif isinstance(content_item, EmbeddedResource):
-                text_parts.append(f"[Embedded resource: {content_item.resource.model_dump_json()}]")
-            else:
-                text_parts.append(f"[Unsupported content type: {content_item.type}]")
-
-        return "\n".join(text_parts)
+        return multimodal_text_summary(to_agent_tool_result(result))
 
     async def list_tools(self) -> List[MCPTool]:
         """List the available tools.

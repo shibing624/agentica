@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **本机 Computer Use 试验版**：macOS 交互 CLI 可用 `--computer-use com.apple.TextEdit <窗口ID>` 授权一个 TextEdit 窗口。使用本机安装的 Peekaboo，支持截图、观察后定向点击/设置控件值；每次工具调用均由当前终端明确批准，不向 Desktop、Web、IM 或后台任务开放。
+
+- **MCP 可按服务延迟暴露工具**：`mcp_config.json` 可为单个 server 配置 `"defer_schema": true`；通过固定的 `use_capability` 查看和调用，实际调用仍走目标工具的审批与护栏。现有配置默认不变。MCP 调用改走可取消的异步路径，图片走多模态输入而不是文本 Base64。
+
 - **DeepSeek 开思考时，工具循环后的新回合不再丢前缀缓存**：OpenAI 兼容线路原先在发送前删掉历史 assistant 的 `reasoning_content`。DeepSeek 思考模式带 `tools` 时会把历届推理拼回上下文；字段缺失时，服务端对刚结束的工具循环换一种渲染，于是新 user 回合（人工提问或后台任务通知）的第一次请求从上一轮开头起全部重算。实测 `deepseek-flash`（官方）在 97K 上下文时新回合复用率只剩 0.18。现在 `reasoning_content` 按模型返回的原样回传：同一场景 6/6 次新回合复用 ≥ 0.99，`venus-ds-v4-1-flash` 同样；另 14 个 chat profile（Claude / GPT / Gemini / GLM / Kimi / hy4）冒烟均正常。换模型时 `ensure_history_portable` 仍会去掉旧模型的推理内容（`agentica/model/openai/chat.py`）。
 
 - **会话日志 `token_usage` 记录本次请求是否完整沿用上一次请求的前缀**：新增 `prefix_intact`，不一致时给出 `prefix_diverged_at`（第一处不同的消息序号）。`cache_cliff` 与 `prefix_intact: true` 同时出现即为上游丢缓存，不是 agentica 改了请求（`agentica/runner/persist.py`、`agentica/session/log.py`）。

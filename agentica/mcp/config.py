@@ -24,6 +24,7 @@ class MCPServerConfig:
     timeout: float = 15.0
     read_timeout: float = 300.0
     enable: bool = True  # Whether to load this MCP server
+    defer_schema: bool = False
 
 
 class MCPConfig:
@@ -109,7 +110,8 @@ class MCPConfig:
                     headers=server_config.get('headers'),
                     timeout=server_config.get('timeout', 15.0),
                     read_timeout=server_config.get('read_timeout', 300.0),
-                    enable=enable
+                    enable=enable,
+                    defer_schema=server_config.get('defer_schema') is True,
                 )
         except ImportError as e:
             raise e

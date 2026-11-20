@@ -380,7 +380,7 @@ class McpTool(Tool):
                     async def _call_mcp_tool_async(**kwargs):
                         """Async implementation that creates a fresh connection"""
                         logger.debug(f"Creating new MCP connection for tool '{t_name}'")
-                        from agentica.mcp.client import MCPClient
+                        from agentica.mcp.client import MCPClient, to_agent_tool_result
                         from agentica.mcp.server import (
                             MCPServerSse,
                             MCPServerStdio,
@@ -432,40 +432,12 @@ class McpTool(Tool):
                             # Check if result is a string (error message) or a CallToolResult
                             if isinstance(result, str):
                                 return result  # Already an error message string
-                            return client.extract_result_text(result)
+                            return to_agent_tool_result(result)
 
-                    def tool_function(**kwargs):
-                        """Synchronous wrapper that handles async execution safely"""
-                        future = concurrent.futures.Future()
+                    _call_mcp_tool_async.__name__ = f"mcp_tool_{t_name}"
+                    _call_mcp_tool_async.__doc__ = f"Call the MCP tool '{t_name}'"
 
-                        def run_in_thread():
-                            try:
-                                # Create new event loop
-                                loop = asyncio.new_event_loop()
-                                asyncio.set_event_loop(loop)
-                                try:
-                                    # Run the async function
-                                    result = loop.run_until_complete(_call_mcp_tool_async(**kwargs))
-                                    future.set_result(result)
-                                finally:
-                                    loop.close()
-                            except Exception as e:
-                                future.set_exception(e)
-
-                        # Start thread and wait for result
-                        thread = threading.Thread(target=run_in_thread)
-                        thread.start()
-                        thread.join(timeout=60)
-
-                        if thread.is_alive():
-                            raise TimeoutError(f"Timeout calling MCP tool '{t_name}'")
-
-                        return future.result()
-
-                    tool_function.__name__ = f"mcp_tool_{t_name}"
-                    tool_function.__doc__ = f"Call the MCP tool '{t_name}'"
-
-                    return tool_function
+                    return _call_mcp_tool_async
 
                 # Create the function for this tool
                 entrypoint = create_tool_function(tool_name)
@@ -489,6 +461,7 @@ class McpTool(Tool):
                     entrypoint=entrypoint,
                     skip_entrypoint_processing=True,
                     deferred=self.defer_schema,
+                    timeout=60,
                     origin=ToolOrigin(
                         type="mcp",
                         provider_name=self.name,
@@ -558,7 +531,8 @@ class McpTool(Tool):
                     sse_headers=server.headers,
                     sse_timeout=server.timeout,
                     sse_read_timeout=server.read_timeout,
-                    terminate_on_close=True if is_streamable_http else None
+                    terminate_on_close=True if is_streamable_http else None,
+                    defer_schema=server.defer_schema,
                 )
 
                 logger.debug(f"Created {transport_type} tool for server '{name}' with URL: {server.url}")
@@ -581,7 +555,8 @@ class McpTool(Tool):
                 cmd = f"{server.command} {' '.join(resolved_args)}".strip()
                 tool = cls(
                     command=cmd,
-                    env=server.env
+                    env=server.env,
+                    defer_schema=server.defer_schema,
                 )
                 logger.debug(f"Created stdio tool for server '{name}' with command: {cmd}")
             tool._cache_identity = {
