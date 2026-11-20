@@ -1,10 +1,10 @@
-import { memo, type ReactNode } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { MarkdownCode } from "./CodeFrame";
 import { PreviewableImage } from "./ImageLightbox";
-import { GFM_PLUGINS } from "../lib/markdownPlugins";
+import { GFM_PLUGINS, markdownUrlTransform, localFileLinkTarget, openLocalFile } from "../lib/markdownPlugins";
 
 /**
  * Frozen plugin / component maps so a per-frame stream bump does not remount
@@ -31,6 +31,27 @@ const STREAMING_COMPONENTS = {
   table: MdTable,
 };
 
+type MarkdownLinkProps = {
+  href?: string;
+  children?: ReactNode;
+  onOpenFile?: (path: string) => void;
+};
+
+export function MarkdownLink({ href, children, onOpenFile }: MarkdownLinkProps) {
+  if (typeof href !== "string" || href === "") return <a aria-disabled="true">{children}</a>;
+  const target = localFileLinkTarget(href);
+  if (!target) return <a href={href}>{children}</a>;
+  return (
+    <a
+      href={href}
+      data-open-file={target.path}
+      onClick={(e) => { e.preventDefault(); openLocalFile(target, onOpenFile); }}
+    >
+      {children}
+    </a>
+  );
+}
+
 const SETTLED_COMPONENTS = {
   pre: ({ children }: { children?: ReactNode }) => <>{children}</>,
   code: MarkdownCode,
@@ -41,15 +62,26 @@ const SETTLED_COMPONENTS = {
 export const ChatMarkdown = memo(function ChatMarkdown({
   text,
   streaming = false,
+  onOpenFile,
 }: {
   text: string;
   streaming?: boolean;
+  onOpenFile?: (path: string) => void;
 }) {
+  const components = useMemo(() => {
+    const a = ({ href, children }: { href?: string; children?: ReactNode }) => (
+      <MarkdownLink href={href} onOpenFile={onOpenFile}>{children}</MarkdownLink>
+    );
+    return streaming
+      ? { ...STREAMING_COMPONENTS, a }
+      : { ...SETTLED_COMPONENTS, a };
+  }, [streaming, onOpenFile]);
   return (
     <Markdown
       remarkPlugins={streaming ? STREAM_REMARK : SETTLED_REMARK}
       rehypePlugins={streaming ? undefined : SETTLED_REHYPE}
-      components={streaming ? STREAMING_COMPONENTS : SETTLED_COMPONENTS}
+      components={components}
+      urlTransform={markdownUrlTransform}
     >
       {text}
     </Markdown>

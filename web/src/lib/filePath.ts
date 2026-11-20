@@ -94,6 +94,24 @@ const URL_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 const MAX_PATH_LEN = 512;
 const FILE_ARG_KEYS = ["file_path", "path", "target_file", "file"];
 
+/**
+ * Decode a structured `file:` / `computer:` URL into the local path it names.
+ * Percent escapes, Windows drive letters and `~/` references are normalized;
+ * every other URL is left to the Markdown sanitizer.
+ */
+export function parseLocalFileUrl(href: string): string | null {
+  let url: URL;
+  try { url = new URL(href); } catch { return null; }
+  if (url.protocol !== "file:" && url.protocol !== "computer:") return null;
+  let decoded: string;
+  try { decoded = decodeURIComponent(url.pathname); } catch { return null; }
+  const drive = /^\/[A-Za-z]:/.test(decoded) ? decoded.slice(1) : decoded;
+  const host = url.hostname && url.hostname !== "localhost" ? url.hostname : "";
+  if (host) return `//${host}${drive}`;
+  if (drive.startsWith("/~/")) return `~${drive.slice(2)}`;
+  return drive;
+}
+
 /** True when `path` is an absolute path (`/a/b`) or a home-relative path (`~` / `~/a/b`). */
 export function isAbsOrHomePath(path: string): boolean {
   const s = path.trim();

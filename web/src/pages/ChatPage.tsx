@@ -1141,7 +1141,7 @@ function CompactCard({ c, onOpenFile }: { c: NonNullable<ChatMsg["compact"]>; on
         ? (
           <div className="compact-body">
             <Suspense fallback={<pre className="markdown-fallback">{c.notes}</pre>}>
-              <ChatMarkdown text={c.notes} streaming={false} />
+              <ChatMarkdown text={c.notes} streaming={false} onOpenFile={onOpenFile} />
             </Suspense>
           </div>
         )
@@ -1293,7 +1293,7 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
           return (
             <div className={"bub" + (live && isLast ? " streaming-bub" : "")} key={i}>
               <Suspense fallback={<span className="markdown-fallback">{text}</span>}>
-                <ChatMarkdown text={text} streaming={!!live && isLast} />
+                <ChatMarkdown text={text} streaming={!!live && isLast} onOpenFile={onOpenFile} />
               </Suspense>
             </div>
           );

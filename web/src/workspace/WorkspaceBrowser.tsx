@@ -16,7 +16,8 @@ import { useStrings } from "../i18n";
 import { fmtFileSize, formatDateTime } from "../lib/format";
 import { languageFromFilename, HIGHLIGHT_LIMIT } from "../lib/highlight";
 import { classifyPreviewTarget, joinWorkspacePath, splitExternalTarget } from "../lib/filePath";
-import { GFM_PLUGINS } from "../lib/markdownPlugins";
+import { GFM_PLUGINS, markdownUrlTransform, localFileLinkTarget } from "../lib/markdownPlugins";
+import { MarkdownLink } from "../components/ChatMarkdown";
 import { askConfirm, showToast } from "../store";
 import { FileTypeIcon, IconChevronDown, IconCopy, IconFinder, IconFolder, IconRefresh, IconTerminal, IconUpload } from "../icons";
 import { PlainText, PreviewActions, type ViewMode } from "./PreviewActions";
@@ -66,17 +67,27 @@ const MarkdownDoc = memo(function MarkdownDoc({
   onOpenFile: (path: string) => void;
 }) {
   const components = useMemo(() => ({
-    img: ({ src: href, alt }: { src?: unknown; alt?: string }) => (
-      <img
-        src={typeof href === "string" && !EXTERNAL_REF_RE.test(href)
-          ? api.workspaceContentUrl(root, resolveRelative(dirOf(docPath), href))
-          : (href as string | undefined)}
-        alt={alt || ""}
-      />
-    ),
+    img: ({ src: href, alt }: { src?: unknown; alt?: string }) => {
+      if (typeof href !== "string" || href === "") return <img alt={alt || ""} />;
+      if (localFileLinkTarget(href)) return <img src={href} alt={alt || ""} />;
+      return (
+        <img
+          src={EXTERNAL_REF_RE.test(href)
+            ? href
+            : api.workspaceContentUrl(root, resolveRelative(dirOf(docPath), href))}
+          alt={alt || ""}
+        />
+      );
+    },
     a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
-      if (typeof href !== "string" || href.startsWith("#") || EXTERNAL_REF_RE.test(href)) {
-        return <a href={href} target={EXTERNAL_REF_RE.test(href || "") ? "_blank" : undefined} rel="noreferrer">{children}</a>;
+      if (typeof href !== "string" || href === "") {
+        return <MarkdownLink href={href}>{children}</MarkdownLink>;
+      }
+      if (localFileLinkTarget(href)) {
+        return <MarkdownLink href={href} onOpenFile={onOpenFile}>{children}</MarkdownLink>;
+      }
+      if (href.startsWith("#") || EXTERNAL_REF_RE.test(href)) {
+        return <a href={href} target={EXTERNAL_REF_RE.test(href) ? "_blank" : undefined} rel="noreferrer">{children}</a>;
       }
       const target = resolveRelative(dirOf(docPath), href);
       return <a href={api.workspaceContentUrl(root, target)} onClick={(e) => { e.preventDefault(); onOpenFile(target); }}>{children}</a>;
@@ -87,7 +98,7 @@ const MarkdownDoc = memo(function MarkdownDoc({
   }), [root, docPath, onOpenFile]);
   return (
     <div className="md-doc">
-      <Markdown remarkPlugins={MD_REMARK} rehypePlugins={MD_REHYPE} components={components}>{content}</Markdown>
+      <Markdown remarkPlugins={MD_REMARK} rehypePlugins={MD_REHYPE} components={components} urlTransform={markdownUrlTransform}>{content}</Markdown>
     </div>
   );
 });
