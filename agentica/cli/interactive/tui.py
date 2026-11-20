@@ -838,6 +838,8 @@ def _setup_tui(
         if state.input_request is not None:
             if state.input_request.kind == "approval":
                 opts = set(state.input_request.options or [])
+                if "allow_window" in opts:
+                    return "y allow this window for this turn · p only this step · esc/n deny"
                 parts = ["y proceed"]
                 if "allow_prefix" in opts:
                     parts.append("p don't ask again")

@@ -12,7 +12,7 @@ from tempfile import TemporaryDirectory
 from typing import Literal
 
 from agentica.model.media import get_image_type, multimodal_tool_result
-from agentica.tools.base import Tool
+from agentica.tools.base import LocalApprovalTarget, Tool, WindowApprovalKey
 
 # The host's approval UI and macOS security surfaces are not selectable targets.
 _UNAVAILABLE_APPS = frozenset({
@@ -28,6 +28,7 @@ class _Window:
     window_id: int
     title: str
     observation_capability: str
+    process_start: str | None
 
 
 async def _run_local(*argv: str) -> tuple[int, bytes]:
@@ -135,8 +136,19 @@ class ComputerUseTool(Tool):
         owner = data["target_application_info"]
         if owner["bundle_id"].casefold() != app_id.casefold():
             raise ValueError("Peekaboo did not resolve the selected application.")
+        if not data["windows"]:
+            return {}
+        # Window inventory identifies the owner by PID; its process inventory
+        # supplies a start identity that also distinguishes a reused PID.
+        running = await self._run("app", "list", "--include-hidden", "--include-background")
+        process_start = next((
+            app.get("process_start_identity_decimal") for app in running["apps"]
+            if app["pid"] == owner["pid"] and (app.get("bundle_id") or "").casefold() == app_id.casefold()
+        ), None)
         return {
-            row["window_id"]: _Window(owner["pid"], row["window_id"], row["window_title"], row["observation_capability"])
+            row["window_id"]: _Window(
+                owner["pid"], row["window_id"], row["window_title"], row["observation_capability"], process_start,
+            )
             for row in data["windows"]
         }
 
@@ -146,14 +158,17 @@ class ComputerUseTool(Tool):
             raise ValueError("Choose a window_id for this application from list_windows first.")
         return window
 
-    def _approval_target(self, args: dict) -> str:
+    def _approval_target(self, args: dict) -> LocalApprovalTarget:
         app = self._app(args.get("app_id", ""))
         app_id = app["app_id"]
         target = f'{app["name"]} ({app_id})'
+        window_key = None
         if args.get("action") in ("observe", "click", "set_value"):
             window = self._window(app_id, args.get("window_id", 0))
             target += f' — window {window.window_id} ({_label(window.title) or "untitled"})'
-        return target
+            if window.process_start:
+                window_key = WindowApprovalKey(app_id.casefold(), window.pid, window.process_start, window.window_id)
+        return LocalApprovalTarget(target, window_key)
 
     async def computer_use(
         self, action: Literal["list_apps", "launch", "list_windows", "observe", "click", "set_value"],

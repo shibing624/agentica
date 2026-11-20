@@ -10,6 +10,7 @@ import collections
 import queue
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -62,6 +63,7 @@ class CommandContext:
     # scrollback. Commands return compact inline output and send full history
     # through this callback when the interactive application is available.
     open_pager_callback: Any = None
+    on_permission_mode_change: Callable[[], None] | None = None
 
 
 

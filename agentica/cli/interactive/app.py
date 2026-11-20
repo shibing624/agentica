@@ -761,6 +761,7 @@ def run_interactive(
             worktree_binder=worktree_binder,
             ask_user_question_callback=_cli_ask_user_question_callback,
             open_pager_callback=_open_history_pager,
+            on_permission_mode_change=state.approval_registry.revoke_window_grants,
             approve=cli_approve,
         )
 

@@ -738,7 +738,10 @@ def _cmd_permissions(ctx: CommandContext, cmd_args: str = ""):
             con.print(f"[red]Invalid mode: {new_mode}. Use: {', '.join(PERMISSION_MODES)}[/red]")
             return
         if ctx.current_agent:
+            changed = new_mode != ctx.current_agent.tool_config.permission_mode
             ctx.current_agent.set_permission_mode(new_mode)
+            if changed and ctx.on_permission_mode_change is not None:
+                ctx.on_permission_mode_change()
             # Keep the tier on agent_config as well: every rebuild path
             # (`/resume`, `/model`, `/new`, `/clear`) builds the next agent
             # from that dict, and without this the tier silently snapped back

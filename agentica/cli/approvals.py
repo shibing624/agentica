@@ -67,7 +67,8 @@ def format_approval_prompt(pending: PendingApproval) -> str:
         allow_similar = f"Yes, and don't ask again for this {name} tool (p)"
         deny_similar = f"No, and don't ask again for this {name} tool (x)"
     labels = {
-        "allow": "Yes, proceed (y)",
+        "allow": "Only this step (p)" if "allow_window" in pending.options else "Yes, proceed (y)",
+        "allow_window": "Allow screenshots, clicks and input in this window until this turn ends (y)",
         "allow_prefix": allow_similar,
         "deny": "No, deny (esc/n)",
         "deny_prefix": deny_similar,
@@ -98,6 +99,8 @@ def format_approval_record(
         body = preview or pending.name
     if decision == "allow":
         verdict = "✓ allowed"
+    elif decision == "allow_window":
+        verdict = "✓ allowed this window for this turn"
     elif decision == "allow_prefix":
         verdict = "✓ allowed similar"
     elif decision == "deny_prefix":
@@ -430,7 +433,7 @@ def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
     def publish(pending: PendingApproval) -> None:
         loop = asyncio.get_running_loop()
         state.approval_loop = loop
-        request_id = str(uuid4())
+        request_id = None if pending.local_only else str(uuid4())
         req = _InputRequest(
             prompt=format_approval_prompt(pending),
             kind="approval",

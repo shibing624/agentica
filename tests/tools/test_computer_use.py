@@ -8,8 +8,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentica.agent.approvals import ApprovalRegistry, SessionGrants, classify, make_approve
-from agentica.cli.approvals import format_approval_prompt
+from agentica.agent.approvals import ApprovalRegistry, SessionGrants, approval_decision_from_key, classify, make_approve
+from agentica.cli.approvals import (
+    build_interactive_approve,
+    complete_approval,
+    format_approval_prompt,
+    interrupt_approvals,
+)
+from agentica.cli.interactive.session_state import SessionState
 from agentica.cli.runtime import parse_args
 from agentica.tools.base import Function, FunctionCall
 from agentica.tools.builtin.computer_use_tool import ComputerUseTool
@@ -21,7 +27,12 @@ PNG = b'\x89PNG\r\n\x1a\nfixture'
 
 
 @pytest.fixture
-def desktop(monkeypatch, tmp_path):
+def editor_process():
+    return {'bundle_id': EDITOR, 'name': '编辑器', 'pid': 100, 'process_start_identity_decimal': '12000001'}
+
+
+@pytest.fixture
+def desktop(monkeypatch, tmp_path, editor_process):
     tool = ComputerUseTool('/opt/homebrew/bin/peekaboo', TERMINAL)
     commands = []
     bundle = tmp_path / 'Music.app'
@@ -39,7 +50,7 @@ def desktop(monkeypatch, tmp_path):
         commands.append(argv)
         if argv[:2] == ('app', 'list'):
             return {'apps': [
-                {'bundle_id': EDITOR, 'name': '编辑器', 'pid': 100},
+                editor_process,
                 {'bundle_id': TERMINAL, 'name': '终端', 'pid': 200},
                 {'bundle_id': 'com.apple.systempreferences', 'name': '系统设置', 'pid': 300},
             ]}
@@ -102,7 +113,7 @@ async def test_approval_displays_discovered_window_and_tracks_permission_switch(
     pending, = cards
     prompt = format_approval_prompt(pending)
     assert all(value in prompt for value in ('编辑器', EDITOR, '测试文档', '42', 'model', 'observe'))
-    assert pending.options == ('allow', 'deny')
+    assert pending.options == ('allow_window', 'allow', 'deny')
     from agentica.agent.approvals import classify_pending
 
     assert classify_pending('allow-all', pending, SessionGrants(), work_dir=None) == 'allow'
@@ -113,7 +124,158 @@ async def test_approval_displays_discovered_window_and_tracks_permission_switch(
     assert await approve(invalid) == 'deny'
     assert 'list_windows' in invalid.denied_result
     assert len(cards) == 1
-    assert len(commands) == 2
+    assert not any(row[0] == 'see' for row in commands)
+
+
+@pytest.fixture
+def terminal_approval():
+    def unexpected_reviewer(_):
+        pytest.fail('LLM reviewer must not be consulted for a window grant')
+
+    agent = SimpleNamespace(
+        _cancelled=False, _run_automated_input=False, user_id=None, work_dir=None,
+        tool_config=SimpleNamespace(permission_mode='auto'), review_tool_call=unexpected_reviewer,
+    )
+    state = SessionState(current_agent=agent, agent_running=True)
+    approve = build_interactive_approve(state, {})
+    return state, approve
+
+
+async def answer_terminal_card(state, approve, call, key, *, expected_options=None):
+    task = asyncio.create_task(approve(call))
+    try:
+        await asyncio.sleep(0)
+        req = state.input_request
+        assert req is not None, 'Expected a terminal approval card'
+        if expected_options is not None:
+            assert tuple(req.options) == expected_options
+        if 'allow_window' in req.options:
+            assert '1. Allow screenshots, clicks and input in this window until this turn ends (y)' in req.prompt
+            assert '2. Only this step (p)' in req.prompt
+        assert complete_approval(state, approval_decision_from_key(key, req.options))
+        return await task
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_auto_grants_only_the_selected_window_until_turn_end(desktop, terminal_approval):
+    tool, _, _ = desktop
+    state, approve = terminal_approval
+    await tool.computer_use('list_apps')
+    await tool.computer_use('list_windows', app_id=EDITOR)
+    window_options = ('allow_window', 'allow', 'deny')
+    first = make_call(tool, 'observe', app_id=EDITOR, window_id=42)
+    assert await answer_terminal_card(state, approve, first, 'y', expected_options=window_options) == 'allow'
+    assert first.approval_trace['grant']['scope'] == 'turn'
+    assert state.approval_grants.durable_payload() == {}
+    for action in ('observe', 'click', 'set_value'):
+        call = make_call(tool, action, app_id=EDITOR, window_id=42, element_id='F1')
+        assert await asyncio.wait_for(approve(call), 1) == 'allow'
+        assert not call.approval_waited
+        assert call.approval_trace['reason'] == 'window_grant'
+    other = make_call(tool, 'observe', app_id=EDITOR, window_id=43)
+    assert await answer_terminal_card(state, approve, other, 'n', expected_options=window_options) == 'deny'
+    for action in ('launch', 'list_windows'):
+        call = make_call(tool, action, app_id=EDITOR)
+        assert await answer_terminal_card(state, approve, call, 'n', expected_options=('allow', 'deny')) == 'deny'
+    interrupt_approvals(state)
+    call = make_call(tool, 'observe', app_id=EDITOR, window_id=42)
+    assert await answer_terminal_card(state, approve, call, 'n', expected_options=window_options) == 'deny'
+
+
+@pytest.mark.parametrize('one_step_key', ['p', '2'])
+@pytest.mark.asyncio
+async def test_only_this_step_and_read_only_do_not_grant_the_window(desktop, terminal_approval, one_step_key):
+    tool, _, _ = desktop
+    state, approve = terminal_approval
+    await tool.computer_use('list_apps')
+    await tool.computer_use('list_windows', app_id=EDITOR)
+
+    def observe():
+        return make_call(tool, 'observe', app_id=EDITOR, window_id=42)
+
+    assert await answer_terminal_card(
+        state, approve, observe(), one_step_key, expected_options=('allow_window', 'allow', 'deny'),
+    ) == 'allow'
+    assert await answer_terminal_card(state, approve, observe(), 'n', expected_options=('allow_window', 'allow', 'deny')) == 'deny'
+    state.current_agent.tool_config.permission_mode = 'read-only'
+    assert await answer_terminal_card(state, approve, observe(), 'y', expected_options=('allow', 'deny')) == 'allow'
+    assert await answer_terminal_card(state, approve, observe(), 'n', expected_options=('allow', 'deny')) == 'deny'
+
+
+@pytest.mark.asyncio
+async def test_changing_cli_permissions_revokes_the_grant_even_if_switching_back(desktop, terminal_approval, monkeypatch):
+    from agentica.cli.commands.context import CommandContext
+    from agentica.cli.commands.tools_skills import _cmd_permissions
+
+    tool, _, _ = desktop
+    state, approve = terminal_approval
+    agent = state.current_agent
+    agent.set_permission_mode = lambda mode: setattr(agent.tool_config, 'permission_mode', mode)
+    monkeypatch.setattr('agentica.config.prefs.record_cli_prefs', lambda *_: None)
+    ctx = CommandContext(
+        agent_config={}, current_agent=agent,
+        on_permission_mode_change=state.approval_registry.revoke_window_grants,
+    )
+    await tool.computer_use('list_apps')
+    await tool.computer_use('list_windows', app_id=EDITOR)
+    first = make_call(tool, 'observe', app_id=EDITOR, window_id=42)
+    assert await answer_terminal_card(state, approve, first, '1') == 'allow'
+    _cmd_permissions(ctx, 'read-only')
+    _cmd_permissions(ctx, 'auto')
+    later = make_call(tool, 'observe', app_id=EDITOR, window_id=42)
+    assert await answer_terminal_card(state, approve, later, 'n') == 'deny'
+
+
+@pytest.mark.asyncio
+async def test_window_answer_cannot_restore_a_revoked_turn_grant(desktop, terminal_approval):
+    tool, _, _ = desktop
+    state, approve = terminal_approval
+    await tool.computer_use('list_apps')
+    await tool.computer_use('list_windows', app_id=EDITOR)
+    call = make_call(tool, 'observe', app_id=EDITOR, window_id=42)
+    task = asyncio.create_task(approve(call))
+    await asyncio.sleep(0)
+    req = state.input_request
+    assert complete_approval(state, approval_decision_from_key('1', req.options))
+    # The terminal has posted the answer but permission was revoked before the
+    # agent coroutine resumed. The obsolete card must not allow this call.
+    state.approval_registry.revoke_window_grants()
+    assert await asyncio.wait_for(task, 1) == 'deny'
+    later = make_call(tool, 'observe', app_id=EDITOR, window_id=42)
+    assert await answer_terminal_card(state, approve, later, 'n') == 'deny'
+
+
+@pytest.mark.asyncio
+async def test_cached_window_grant_cannot_cross_a_restarted_process(desktop, terminal_approval, editor_process):
+    tool, commands, _ = desktop
+    state, approve = terminal_approval
+    await tool.computer_use('list_apps')
+    await tool.computer_use('list_windows', app_id=EDITOR)
+    call = make_call(tool, 'observe', app_id=EDITOR, window_id=42)
+    assert await answer_terminal_card(state, approve, call, 'y', expected_options=('allow_window', 'allow', 'deny')) == 'allow'
+    # Stronger than a PID change: macOS may reuse the old PID and window ID.
+    editor_process['process_start_identity_decimal'] = '16000002'
+    with pytest.raises(ValueError, match='window changed'):
+        await tool.computer_use('observe', app_id=EDITOR, window_id=42)
+    assert not any(row[0] == 'see' for row in commands)
+    await tool.computer_use('list_windows', app_id=EDITOR)
+    refreshed = make_call(tool, 'observe', app_id=EDITOR, window_id=42)
+    assert await answer_terminal_card(state, approve, refreshed, 'n', expected_options=('allow_window', 'allow', 'deny')) == 'deny'
+
+
+@pytest.mark.asyncio
+async def test_unattested_window_cannot_receive_a_turn_grant(desktop, terminal_approval, editor_process):
+    tool, _, _ = desktop
+    state, approve = terminal_approval
+    editor_process.pop('process_start_identity_decimal')
+    await tool.computer_use('list_apps')
+    await tool.computer_use('list_windows', app_id=EDITOR)
+    call = make_call(tool, 'observe', app_id=EDITOR, window_id=42)
+    assert await answer_terminal_card(state, approve, call, 'y', expected_options=('allow', 'deny')) == 'allow'
 
 
 @pytest.mark.asyncio

@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Sequence, Tuple
 
-from agentica.tools.base import Function, FunctionCall
+from agentica.tools.base import Function, FunctionCall, LocalApprovalTarget, WindowApprovalKey
 from agentica.tools.os_sandbox import repository_paths, writable_temp_roots
 from agentica.tools.safety import (
     check_command_safety,
@@ -29,7 +29,7 @@ from agentica.tools.safety import (
 )
 from agentica.utils.log import logger
 
-ApprovalDecision = Literal["allow", "allow_prefix", "deny", "deny_prefix"]
+ApprovalDecision = Literal["allow", "allow_window", "allow_prefix", "deny", "deny_prefix"]
 
 _DECISION_ORDER: Tuple[ApprovalDecision, ...] = (
     "allow",
@@ -53,9 +53,10 @@ _LETTER_TO_DECISION: Dict[str, ApprovalDecision] = {
 def visible_approval_decisions(
     options: Optional[Sequence[str]] = None,
 ) -> Tuple[ApprovalDecision, ...]:
-    """Stable allow → allow-similar → deny → deny-similar, omitting hidden ones."""
+    """Put the turn-scoped option first when offered, otherwise keep the usual order."""
     offered = set(options) if options is not None else set(_DECISION_ORDER)
-    return tuple(d for d in _DECISION_ORDER if d in offered)
+    order: tuple[ApprovalDecision, ...] = ("allow_window", *_DECISION_ORDER)
+    return tuple(d for d in order if d in offered)
 
 
 def approval_decision_from_key(
@@ -71,6 +72,11 @@ def approval_decision_from_key(
             return visible[idx]
         return None
     decision = _LETTER_TO_DECISION.get(k)
+    if "allow_window" in visible:
+        if decision == "allow":
+            return "allow_window"
+        if decision == "allow_prefix":
+            return "allow"
     if decision is None or decision not in visible:
         return None
     return decision
@@ -159,6 +165,7 @@ class ApprovalRegistry:
 
     def __init__(self) -> None:
         self._pending: Dict[str, _PendingEntry] = {}
+        self.window_grants: set[WindowApprovalKey] = set()
         # tool_call_id -> seconds waited, for waits that expired unanswered.
         self._expired: Dict[str, float] = {}
         # tool_call_ids resolved automatically when permission_mode changed mid-turn.
@@ -201,8 +208,13 @@ class ApprovalRegistry:
 
     def deny_all(self) -> None:
         """Resolve every pending wait as deny (interrupt / cancel)."""
+        self.revoke_window_grants()
         for tool_call_id in list(self._pending):
             self.decide(tool_call_id, "deny")
+
+    def revoke_window_grants(self) -> None:
+        # Replace rather than clear so a parked decision cannot add to a new epoch.
+        self.window_grants = set()
 
     def expire(self, tool_call_id: str, waited_seconds: float) -> bool:
         """Resolve a wait nobody answered: the call does not run, but no one refused it."""
@@ -711,15 +723,19 @@ def call_paths(fc: FunctionCall, *, work_dir: Optional[str]) -> List[str]:
     return [_resolve_tool_path(p, work_dir) for p in raw]
 
 
+def _describe_local_approval(target: LocalApprovalTarget, args: dict) -> tuple[str, str]:
+    return (
+        f"Allow Computer Use: {target.label}?",
+        "Window titles and screenshots can be sent to the model. " + json.dumps(args, ensure_ascii=False),
+    )
+
+
 def describe_approval(fc: FunctionCall, *, work_dir: Optional[str] = None) -> Tuple[str, str]:
     """``(question, preview)`` for an approval card. No extra LLM call."""
     name = fc.function.name
     args = fc.arguments or {}
     if fc.function.local_approval_context is not None:
-        return (
-            f"Allow Computer Use: {fc.function.local_approval_context(args)}?",
-            "Window titles and screenshots can be sent to the model. " + json.dumps(args, ensure_ascii=False),
-        )
+        return _describe_local_approval(fc.function.local_approval_context(args), args)
     if name in EXECUTE_TOOLS:
         preview = str(args.get("command") or "")
         if is_sandbox_escalation(fc):
@@ -768,7 +784,8 @@ def make_approve(
     """
 
     async def approve(fc: FunctionCall) -> ApprovalDecision:
-        local_only = fc.function.local_approval_context is not None
+        resolve_target = fc.function.local_approval_context
+        local_only = resolve_target is not None
         if local_only and get_registry() is None:
             return "deny"
         mode = get_mode()
@@ -893,17 +910,32 @@ def make_approve(
             if reviewer_trace is not None:
                 fc.denied_result = _reviewer_denied_result(reviewer_trace)
             return "deny"
-        try:
+        window_key = None
+        window_grants = registry.window_grants
+        if resolve_target is None:
             question, preview = describe_approval(fc, work_dir=work_dir)
-        except ValueError as exc:
-            if not local_only:
-                raise
-            fc.denied_result = str(exc)
-            return "deny"
+        else:
+            args = fc.arguments or {}
+            try:
+                target = resolve_target(args)
+            except ValueError as exc:
+                fc.denied_result = str(exc)
+                return "deny"
+            if mode == "auto":
+                window_key = target.window_key
+            if window_key is not None and window_key in window_grants:
+                fc.approval_trace = {
+                    "tool": fc.function.name, "arguments": _clip_trace_args(args),
+                    "mode": mode, "decision": "allow", "reason": "window_grant", "wait_s": 0,
+                }
+                return "allow"
+            question, preview = _describe_local_approval(target, args)
+            if window_key is not None:
+                preview += "\nThe turn grant covers the window, not just its current document or tab."
         if reviewer_note:
             preview = f"{preview}\n\n{reviewer_note}"
         similar_label = _similar_label_for(fc)
-        options = _approval_options(fc, work_dir=work_dir)
+        options = ("allow_window", "allow", "deny") if window_key is not None else _approval_options(fc, work_dir=work_dir)
         pending = PendingApproval(
             tool_call_id=fc.call_id or "",
             name=fc.function.name,
@@ -926,10 +958,17 @@ def make_approve(
             fc.denied_result = APPROVAL_TIMED_OUT_RESULT.format(
                 seconds=round(expired_after)
             )
-        if decision not in ("allow", "allow_prefix", "deny", "deny_prefix"):
+        if decision not in (options if local_only else _DECISION_ORDER):
             decision = "deny"
         grant: Optional[Dict[str, Any]] = None
-        if not mode_resolved:
+        if decision == "allow_window":
+            if window_key is None or get_mode() != "auto" or window_grants is not registry.window_grants or mode_resolved:
+                decision = "deny"
+            else:
+                window_grants.add(window_key)
+                grant = {"scope": "turn", "persisted": False, "kind": "window", "window_id": window_key.window_id}
+                decision = "allow"  # The execution protocol doesn't need a new decision.
+        elif not mode_resolved:
             if decision == "deny_prefix":
                 grant = _record_deny_grant(fc, grants, work_dir=work_dir)
                 persist_grants_to_project(grants, work_dir=work_dir, user_id=user_id)
