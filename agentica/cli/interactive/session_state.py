@@ -107,6 +107,7 @@ class SessionState:
 
     should_exit: bool = False
     agent_running: bool = False
+    local_user_turn: bool = False
     current_agent: Any = None
     image_counter: int = 0
     paste_counter: int = 0

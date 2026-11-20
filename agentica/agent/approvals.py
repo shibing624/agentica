@@ -29,7 +29,7 @@ from agentica.tools.safety import (
 )
 from agentica.utils.log import logger
 
-ApprovalDecision = Literal["allow", "allow_window", "allow_prefix", "deny", "deny_prefix"]
+ApprovalDecision = Literal["allow", "allow_window", "allow_file_edit", "allow_prefix", "deny", "deny_prefix"]
 
 _DECISION_ORDER: Tuple[ApprovalDecision, ...] = (
     "allow",
@@ -37,6 +37,7 @@ _DECISION_ORDER: Tuple[ApprovalDecision, ...] = (
     "deny",
     "deny_prefix",
 )
+_TURN_DECISIONS: tuple[ApprovalDecision, ...] = ("allow_window", "allow_file_edit")
 
 _LETTER_TO_DECISION: Dict[str, ApprovalDecision] = {
     "y": "allow",
@@ -55,7 +56,7 @@ def visible_approval_decisions(
 ) -> Tuple[ApprovalDecision, ...]:
     """Put the turn-scoped option first when offered, otherwise keep the usual order."""
     offered = set(options) if options is not None else set(_DECISION_ORDER)
-    order: tuple[ApprovalDecision, ...] = ("allow_window", *_DECISION_ORDER)
+    order = (*_TURN_DECISIONS, *_DECISION_ORDER)
     return tuple(d for d in order if d in offered)
 
 
@@ -72,11 +73,12 @@ def approval_decision_from_key(
             return visible[idx]
         return None
     decision = _LETTER_TO_DECISION.get(k)
-    if "allow_window" in visible:
-        if decision == "allow":
-            return "allow_window"
-        if decision == "allow_prefix":
-            return "allow"
+    for turn_decision in _TURN_DECISIONS:
+        if turn_decision in visible:
+            if decision == "allow":
+                return turn_decision
+            if decision == "allow_prefix":
+                return "allow"
     if decision is None or decision not in visible:
         return None
     return decision
@@ -89,6 +91,9 @@ ApprovalRoute = Literal["allow", "ask", "deny"]
 # ``BuiltinExecuteTool.execute`` keeps the default False.
 approved_by_user: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "agentica_approved_by_user", default=False,
+)
+approved_file_write: contextvars.ContextVar[Callable[[str], bool] | None] = contextvars.ContextVar(
+    "agentica_approved_file_write", default=None,
 )
 
 DENIED_TOOL_RESULT = "Tool call denied by user."
@@ -166,6 +171,7 @@ class ApprovalRegistry:
     def __init__(self) -> None:
         self._pending: Dict[str, _PendingEntry] = {}
         self.window_grants: set[WindowApprovalKey] = set()
+        self.file_edit_grants: set[str] = set()
         # tool_call_id -> seconds waited, for waits that expired unanswered.
         self._expired: Dict[str, float] = {}
         # tool_call_ids resolved automatically when permission_mode changed mid-turn.
@@ -208,13 +214,14 @@ class ApprovalRegistry:
 
     def deny_all(self) -> None:
         """Resolve every pending wait as deny (interrupt / cancel)."""
-        self.revoke_window_grants()
+        self.revoke_turn_grants()
         for tool_call_id in list(self._pending):
             self.decide(tool_call_id, "deny")
 
-    def revoke_window_grants(self) -> None:
+    def revoke_turn_grants(self) -> None:
         # Replace rather than clear so a parked decision cannot add to a new epoch.
         self.window_grants = set()
+        self.file_edit_grants = set()
 
     def expire(self, tool_call_id: str, waited_seconds: float) -> bool:
         """Resolve a wait nobody answered: the call does not run, but no one refused it."""
@@ -344,6 +351,9 @@ class SessionGrants:
             paths = call_paths(fc, work_dir=work_dir)
             if not paths:
                 return False
+            if name in WRITE_FILE_TOOLS:
+                # A patch can commit every listed path; one explicit denial stops it.
+                return any(self._path_denied(p) for p in paths)
             return all(self._path_denied(p) for p in paths)
         if name in EXECUTE_TOOLS:
             command = _call_command(fc)
@@ -692,7 +702,7 @@ def missing_call_work_dir(fc: FunctionCall, *, work_dir: Optional[str]) -> Optio
     return None if Path(resolved).is_dir() else resolved
 
 
-def call_paths(fc: FunctionCall, *, work_dir: Optional[str]) -> List[str]:
+def call_paths(fc: FunctionCall, *, work_dir: Optional[str], edits_only: bool = False) -> List[str]:
     """Resolved filesystem paths this file-tool call would touch. Empty = unknown."""
     args = fc.arguments or {}
     name = fc.function.name
@@ -717,7 +727,10 @@ def call_paths(fc: FunctionCall, *, work_dir: Optional[str]) -> List[str]:
         try:
             from agentica.tools.patch import parse_patch_envelope
 
-            raw.extend(op.path for op in parse_patch_envelope(patch))
+            operations = parse_patch_envelope(patch)
+            if edits_only and any(op.action == "delete" for op in operations):
+                return []
+            raw.extend(op.path for op in operations)
         except (ValueError, TypeError):
             return []
     return [_resolve_tool_path(p, work_dir) for p in raw]
@@ -767,6 +780,7 @@ def make_approve(
     apply_path_grant: Callable[[str, bool], None],
     get_user_id: Optional[Callable[[], Optional[str]]] = None,
     review: Optional[Callable[[FunctionCall], Awaitable[Any]]] = None,
+    local_file_scopes: Callable[[], bool] | None = None,
 ) -> Callable[[FunctionCall], Awaitable[ApprovalDecision]]:
     """Build the ``Agent.approve`` callback.
 
@@ -778,12 +792,12 @@ def make_approve(
     ``agentica.agent.reviewer``). It is consulted only in ``auto`` mode, only
     for a call the static classifier would park, and never for one that escapes
     the OS sandbox: an allow decision runs the call unasked, while deny or a
-    failed review falls through to the normal card. A reviewer allow adds the
-    same per-session path grant a human "allow once" does (exact paths, no
-    durable allow-similar entry).
+    failed review falls through to the normal card. On local file scope cards,
+    only a human can grant an edit for the turn; reviewer approval is per-call.
     """
 
     async def approve(fc: FunctionCall) -> ApprovalDecision:
+        fc.file_write_approval = None
         resolve_target = fc.function.local_approval_context
         local_only = resolve_target is not None
         if local_only and get_registry() is None:
@@ -832,6 +846,36 @@ def make_approve(
                 "grant": None,
             }
             return "deny"
+        file_policy = fc.function.file_edit_scope_allowed
+        file_registry = get_registry() if (
+            mode == "auto" and file_policy is not None and local_file_scopes is not None and local_file_scopes()
+        ) else None
+        file_grants = file_registry.file_edit_grants if file_registry is not None else None
+        file_paths = frozenset(call_paths(fc, work_dir=work_dir)) if file_grants is not None else frozenset()
+        edit_paths = call_paths(fc, work_dir=work_dir, edits_only=True) if file_paths else []
+        ordinary_files = bool(file_paths) and file_policy is not None and all(map(file_policy, file_paths))
+        file_edits = ordinary_files and file_paths == frozenset(edit_paths)
+
+        def file_scope_active() -> bool:
+            return (
+                file_registry is not None and file_registry.file_edit_grants is file_grants
+                and get_mode() == "auto" and local_file_scopes is not None and local_file_scopes()
+            )
+
+        def approve_file_write(*, turn: bool = False) -> None:
+            fc.file_write_approval = lambda path: (
+                path in file_paths and file_scope_active() and not grants._path_denied(path)
+                and (not turn or (file_policy is not None and file_policy(path)))
+            )
+
+        if file_edits and file_grants is not None and file_paths <= file_grants:
+            approve_file_write(turn=True)
+            fc.approval_trace = {
+                "tool": fc.function.name, "arguments": _clip_trace_args(fc.arguments or {}),
+                "mode": mode, "decision": "allow", "reason": "file_edit_grant", "wait_s": 0,
+            }
+            return "allow"
+
         reviewer_trace: Optional[Dict[str, Any]] = None
         reviewer_note = ""
         # Neither a sandbox escape nor a hard-unsafe call goes to the reviewer:
@@ -841,6 +885,7 @@ def make_approve(
             mode == "auto"
             and review is not None
             and fc.function.local_approval_context is None
+            and (file_grants is None or file_edits)
             and not is_sandbox_escalation(fc)
             and not _is_hard_unsafe(fc, work_dir=work_dir)
         ):
@@ -874,7 +919,11 @@ def make_approve(
                         route_now = "allow"
                     mode = mode_now
                     if route_now == "allow":
-                        if fc.function.name in FILE_TOOLS:
+                        if file_grants is not None:
+                            if not file_scope_active():
+                                return "deny"
+                            approve_file_write()
+                        elif fc.function.name in FILE_TOOLS:
                             for path in call_paths(fc, work_dir=work_dir):
                                 apply_path_grant(path, False)
                         fc.approval_waited = False
@@ -935,7 +984,17 @@ def make_approve(
         if reviewer_note:
             preview = f"{preview}\n\n{reviewer_note}"
         similar_label = _similar_label_for(fc)
-        options = ("allow_window", "allow", "deny") if window_key is not None else _approval_options(fc, work_dir=work_dir)
+        if window_key is not None:
+            options = ("allow_window", "allow", "deny")
+        elif file_edits:
+            options = ("allow_file_edit", "allow", "deny")
+            preview = "\n".join(sorted(file_paths)) + (f"\n\n{reviewer_note}" if reviewer_note else "")
+        elif file_grants is not None:
+            options = ("allow", "deny")
+            if file_paths and not edit_paths:
+                preview += "\nThis patch includes a file deletion."
+        else:
+            options = _approval_options(fc, work_dir=work_dir)
         pending = PendingApproval(
             tool_call_id=fc.call_id or "",
             name=fc.function.name,
@@ -944,7 +1003,7 @@ def make_approve(
             preview=preview,
             similar_label=similar_label,
             options=options,
-            local_only=local_only,
+            local_only=local_only or file_edits,
         )
         fc.approval_waited = True
         started = time.monotonic()
@@ -958,7 +1017,7 @@ def make_approve(
             fc.denied_result = APPROVAL_TIMED_OUT_RESULT.format(
                 seconds=round(expired_after)
             )
-        if decision not in (options if local_only else _DECISION_ORDER):
+        if decision not in (options if local_only or file_grants is not None else _DECISION_ORDER):
             decision = "deny"
         grant: Optional[Dict[str, Any]] = None
         if decision == "allow_window":
@@ -968,6 +1027,20 @@ def make_approve(
                 window_grants.add(window_key)
                 grant = {"scope": "turn", "persisted": False, "kind": "window", "window_id": window_key.window_id}
                 decision = "allow"  # The execution protocol doesn't need a new decision.
+        elif file_grants is not None and decision in ("allow_file_edit", "allow"):
+            sync_grants_from_project(grants, work_dir=work_dir, user_id=user_id)
+            if not file_scope_active() or mode_resolved or grants.denies(fc, work_dir=work_dir):
+                decision = "deny"
+            else:
+                turn = decision == "allow_file_edit"
+                if turn:
+                    file_grants.update(file_paths)
+                approve_file_write(turn=turn)
+                grant = {
+                    "scope": "turn" if turn else "once", "persisted": False,
+                    "kind": "file_edit" if turn else "path", "paths": sorted(file_paths),
+                }
+                decision = "allow"
         elif not mode_resolved:
             if decision == "deny_prefix":
                 grant = _record_deny_grant(fc, grants, work_dir=work_dir)

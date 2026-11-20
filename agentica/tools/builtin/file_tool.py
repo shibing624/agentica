@@ -576,6 +576,8 @@ class BuiltinFileTool(Tool):
         self.register(self.read_file, concurrency_safe=True, is_read_only=True)
         self.register(self.write_file, is_destructive=True)
         self.register(self.apply_patch, is_destructive=True)
+        for name in ("write_file", "apply_patch"):
+            self.functions[name].file_edit_scope_allowed = self._file_edit_scope_allowed
         self.register(self.glob, concurrency_safe=True, is_read_only=True)
         self.register(self.grep, concurrency_safe=True, is_read_only=True)
         # glob and grep enforce their own hardcoded timeouts on both fast
@@ -780,6 +782,20 @@ class BuiltinFileTool(Tool):
                 return True
         return False
 
+    def _file_edit_scope_allowed(self, resolved: str) -> bool:
+        path = Path(resolved)
+        if resolved in self.BLOCKED_DEVICE_FILES or is_sensitive_write_path(resolved):
+            return False
+        if path.exists() and not path.is_file():
+            return False
+        if self._sandbox_config is not None and self._sandbox_config.enabled:
+            if any(part in path.parts for part in self._sandbox_config.blocked_paths):
+                return False
+            _, read_only = self._policy_paths()
+            if any(_path_within(resolved, root) for root in read_only):
+                return False
+        return True
+
     def _component_blocked(self, resolved: str) -> bool:
         """Whether `resolved` has a path component matching sandbox_config.blocked_paths
         (e.g. `.ssh`, `.env`) and hasn't already been approved via grant_path_access."""
@@ -809,6 +825,10 @@ class BuiltinFileTool(Tool):
         """
         resolved = self._resolve_path(path, root=root).resolve()
 
+        self._validate_resolved_path(path, resolved)
+        return path
+
+    def _validate_resolved_path(self, path: str, resolved: Path, *, approved_write: bool = False) -> None:
         # Device-file guard: always active regardless of sandbox setting.
         # Reading /dev/zero or /dev/random hangs indefinitely or exhausts memory.
         if str(resolved) in self.BLOCKED_DEVICE_FILES:
@@ -818,8 +838,8 @@ class BuiltinFileTool(Tool):
             )
 
         if self._sandbox_config is None or not self._sandbox_config.enabled:
-            return path
-        if self._component_blocked(str(resolved)):
+            return
+        if not approved_write and self._component_blocked(str(resolved)):
             matched = next(
                 b for b in self._sandbox_config.blocked_paths if b in set(resolved.parts)
             )
@@ -827,7 +847,6 @@ class BuiltinFileTool(Tool):
                 f"Sandbox: access to path containing '{matched}' is blocked."
                 + self._escalation_hint("<the path>")
             )
-        return path
 
     def _is_write_allowed(
         self, resolved: str, policy: Optional[Tuple[List[str], Tuple[str, ...]]] = None,
@@ -898,7 +917,8 @@ class BuiltinFileTool(Tool):
         *,
         root: Optional[Path] = None,
         policy: Optional[Tuple[List[str], Tuple[str, ...]]] = None,
-    ) -> str:
+        canonical: bool = False,
+    ) -> Path:
         """Validate that a write operation is allowed under sandbox restrictions.
 
         Checks blocked_paths and the writable roots (see ``_is_write_allowed``).
@@ -908,18 +928,40 @@ class BuiltinFileTool(Tool):
         Raises:
             PermissionError: If write is not allowed
         """
-        self._validate_path(path, root=root)
+        from agentica.agent.approvals import approved_file_write
+
+        target = self._resolve_path(path, root=root)
+        resolved = target.resolve()
+        if canonical:
+            target = resolved
+        approval = approved_file_write.get()
+        approved = approval is not None
+        if approval is not None and not approval(str(resolved)):
+            raise PermissionError(f"Write no longer matches an active approved target: {path}")
+        self._validate_resolved_path(path, resolved, approved_write=approved)
+        if approved:
+            return resolved  # Use the same target that was approved, not the symlink spelling.
         if self._sandbox_config is None or not self._sandbox_config.enabled:
-            return path
-        resolved = str(self._resolve_path(path, root=root).resolve())
-        if self._sandbox_config.writable_dirs and not self._is_write_allowed(resolved, policy):
+            return target
+        if self._sandbox_config.writable_dirs and not self._is_write_allowed(str(resolved), policy):
             raise PermissionError(
                 f"Sandbox: write to '{path}' is not allowed in the current permission mode. "
                 f"Writable dirs: {self._sandbox_config.writable_dirs}; the platform temp "
                 f"directories are always writable."
                 + self._escalation_hint("<the directory>")
             )
-        return path
+        sensitive_err = self._sensitive_write_guard(str(target))
+        if sensitive_err:
+            raise PermissionError(sensitive_err)
+        return target
+
+    @staticmethod
+    def _recheck_approved_write(path: Path) -> None:
+        from agentica.agent.approvals import approved_file_write
+
+        approval = approved_file_write.get()
+        if approval is not None and (path != path.resolve() or not approval(str(path))):
+            raise PermissionError(f"Write no longer matches an active approved target: {path}")
 
     # Maximum size (bytes) of what one front-paged read_file returns.
     # Mirrors CC's FileReadTool maxSizeBytes (256KB).
@@ -1118,22 +1160,17 @@ class BuiltinFileTool(Tool):
             Operation result message containing the actual absolute path of the file
         """
         root = self._call_root(work_dir)
-        self._validate_write_path(file_path, root=root)
-        path = self._resolve_path(file_path, root=root)
+        path = self._validate_write_path(file_path, root=root)
 
-        # ── Sensitive path guard ──────────────────────────────────
-        if self._sandbox_config is not None and self._sandbox_config.enabled:
-            sensitive_err = self._sensitive_write_guard(str(path))
-            if sensitive_err:
-                raise PermissionError(sensitive_err)
+        # Recheck after the diagnostic await, before any filesystem mutation.
+        await self._diagnostics_snapshot(path)
+        self._recheck_approved_write(path)
 
         # Ensure directory exists
         path.parent.mkdir(parents=True, exist_ok=True)
         action = "Created" if not path.exists() else "Updated"
         old_content = None
 
-        # ── Snapshot for diagnostics ──────────────────────────────
-        await self._diagnostics_snapshot(path)
         if path.exists() and path.is_file():
             try:
                 old_content = path.read_text(encoding='utf-8', errors='ignore')
@@ -1147,6 +1184,7 @@ class BuiltinFileTool(Tool):
             async with aiofiles.open(tmp_path, 'w', encoding='utf-8') as f:
                 await f.write(content)
             # Atomic rename
+            self._recheck_approved_write(path)
             os.replace(tmp_path, str(path))
         except Exception:
             # Clean up temp file on error
@@ -1240,8 +1278,7 @@ class BuiltinFileTool(Tool):
             else None
         )
         for operation in operations:
-            self._validate_write_path(operation.path, root=root, policy=policy)
-            path = self._resolve_path(operation.path, root=root).resolve()
+            path = self._validate_write_path(operation.path, root=root, policy=policy, canonical=True)
             path_key = str(path)
             if path_key in seen_paths:
                 raise ValueError(
@@ -1249,10 +1286,6 @@ class BuiltinFileTool(Tool):
                 )
             seen_paths.add(path_key)
 
-            if self._sandbox_config is not None and self._sandbox_config.enabled:
-                sensitive_err = self._sensitive_write_guard(path_key)
-                if sensitive_err:
-                    raise PermissionError(sensitive_err)
             resolved.append((operation, path, path_key))
 
         # Acquire every target lock in stable order so no same-tool edit can
@@ -1355,9 +1388,12 @@ class BuiltinFileTool(Tool):
             for operation, path, path_key, old_content, *_ in prepared:
                 await self._diagnostics_snapshot(path)
 
+            for _, path, *_ in prepared:
+                self._recheck_approved_write(path)
             applied = []
             try:
                 for operation, path, _, _, new_content, result_path, _, _ in prepared:
+                    self._recheck_approved_write(path)
                     new_text = new_content or ""
                     if operation.action == "delete":
                         path.unlink()
@@ -1368,6 +1404,7 @@ class BuiltinFileTool(Tool):
                             os.close(tmp_fd)
                             async with aiofiles.open(tmp_path, "w", encoding="utf-8") as handle:
                                 await handle.write(new_text)
+                            self._recheck_approved_write(path)
                             os.replace(tmp_path, str(path))
                         except Exception:
                             try:

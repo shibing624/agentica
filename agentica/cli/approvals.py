@@ -67,8 +67,12 @@ def format_approval_prompt(pending: PendingApproval) -> str:
         allow_similar = f"Yes, and don't ask again for this {name} tool (p)"
         deny_similar = f"No, and don't ask again for this {name} tool (x)"
     labels = {
-        "allow": "Only this step (p)" if "allow_window" in pending.options else "Yes, proceed (y)",
+        "allow": (
+            "Only this step (p)" if "allow_window" in pending.options or "allow_file_edit" in pending.options
+            else "Yes, proceed (y)"
+        ),
         "allow_window": "Allow screenshots, clicks and input in this window until this turn ends (y)",
+        "allow_file_edit": "Allow editing the listed files until this turn ends (y)",
         "allow_prefix": allow_similar,
         "deny": "No, deny (esc/n)",
         "deny_prefix": deny_similar,
@@ -101,6 +105,8 @@ def format_approval_record(
         verdict = "✓ allowed"
     elif decision == "allow_window":
         verdict = "✓ allowed this window for this turn"
+    elif decision == "allow_file_edit":
+        verdict = "✓ allowed editing the listed files for this turn"
     elif decision == "allow_prefix":
         verdict = "✓ allowed similar"
     elif decision == "deny_prefix":
@@ -481,6 +487,7 @@ def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
         ),
         get_user_id=lambda: _agent().user_id if _agent() is not None else None,
         review=_review,
+        local_file_scopes=lambda: state.agent_running and state.local_user_turn and not _agent()._cancelled,
     )
 
     async def approve(fc) -> ApprovalDecision:

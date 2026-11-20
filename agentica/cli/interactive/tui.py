@@ -550,6 +550,7 @@ def _setup_tui(
                 except Exception:
                     pass
             state.current_agent.cancel()
+            state.approval_registry.revoke_turn_grants()
             # Pause any active standing goal so the post-turn hook doesn't
             # auto-requeue a continuation right after the user cancelled.
             if state.goal_manager is not None and state.goal_manager.is_active():
@@ -840,6 +841,8 @@ def _setup_tui(
                 opts = set(state.input_request.options or [])
                 if "allow_window" in opts:
                     return "y allow this window for this turn · p only this step · esc/n deny"
+                if "allow_file_edit" in opts:
+                    return "y allow editing these files for this turn · p only this step · esc/n deny"
                 parts = ["y proceed"]
                 if "allow_prefix" in opts:
                     parts.append("p don't ask again")

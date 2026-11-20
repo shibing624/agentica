@@ -13,6 +13,7 @@ from agentica.cli.approvals import (
     approval_decision_from_key,
     build_interactive_approve,
     build_noninteractive_approve,
+    complete_approval,
     format_approval_prompt,
     format_approval_record,
     interrupt_approvals,
@@ -46,6 +47,204 @@ def _agent(*, mode="read-only", work_dir="/tmp/work", cancelled=False):
         model=None,
         session_log=None,
     )
+
+
+@pytest.fixture
+def file_approval_cli(tmp_path, monkeypatch):
+    from agentica.agent import Agent
+    from agentica.agent.config import SandboxConfig
+    from agentica.model.openai import OpenAIChat
+    from agentica.tools.builtin.file_tool import BuiltinFileTool
+
+    work, outside = tmp_path / "work", tmp_path / "outside"
+    work.mkdir()
+    outside.mkdir()
+    monkeypatch.setattr("agentica.agent.approvals.writable_temp_roots", tuple)
+    monkeypatch.setattr("agentica.tools.builtin.file_tool.writable_temp_roots", tuple)
+    sandbox = SandboxConfig(enabled=True, writable_dirs=[str(work)])
+    tool = BuiltinFileTool(work_dir=str(work), sandbox_config=sandbox)
+    agent = Agent(model=OpenAIChat(id="gpt-4o-mini"), tools=[tool], work_dir=str(work), sandbox_config=sandbox)
+    agent.set_permission_mode("auto")
+    state = SessionState(current_agent=agent, agent_running=True)
+    state.local_user_turn = True
+    reviews = []
+
+    async def review(call):
+        reviews.append(call.function.name)
+        return None
+
+    monkeypatch.setattr(agent, "review_tool_call", review)
+    monkeypatch.setattr("agentica.cli.approvals._print_approval_record", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("agentica.cli.approvals._offer_approval_to_hook", lambda *_: None)
+    agent.approve = build_interactive_approve(state, {})
+    agent.update_model()
+
+    async def run(name, arguments, *, key=None, options=None, before_answer=None):
+        call = FunctionCall(function=agent.model.functions[name], arguments=arguments, call_id="file-call")
+
+        async def invoke():
+            async for _ in agent.model.run_function_calls([call], []):
+                pass
+
+        task = asyncio.create_task(invoke())
+
+        async def await_card():
+            while state.input_request is None and not task.done():
+                await asyncio.sleep(0)
+            return state.input_request
+
+        try:
+            if key is not None:
+                card = await asyncio.wait_for(await_card(), 1)
+                assert card is not None
+                assert tuple(card.options) == options
+                if "allow_file_edit" in options:
+                    assert "1. Allow editing the listed files until this turn ends (y)" in card.prompt
+                    assert "2. Only this step (p)" in card.prompt
+                    assert card.hook_request_id is None
+                if before_answer is not None:
+                    before_answer()
+                assert complete_approval(state, approval_decision_from_key(key, card.options))
+            await asyncio.wait_for(task, 1)
+            return call
+        finally:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    return state, outside, tool, run, reviews
+
+
+_FILE_EDIT_OPTIONS = ("allow_file_edit", "allow", "deny")
+
+
+def _update_patch(*changes):
+    return "\n".join(["*** Begin Patch", *(line for p, a, b in changes for line in (
+        f"*** Update File: {p}", "@@", f"-{a}", f"+{b}",
+    )), "*** End Patch"])
+
+
+@pytest.mark.asyncio
+async def test_auto_file_grant_is_exact_shared_and_expires(file_approval_cli):
+    state, outside, tool, run, reviews = file_approval_cli
+    target, neighbor = outside / "a.txt", outside / "b.txt"
+    neighbor.write_text("untouched\n")
+    first = await run("write_file", {"file_path": str(target), "content": "before\n"}, key="1", options=_FILE_EDIT_OPTIONS)
+    assert first.approval_trace["grant"] == {"scope": "turn", "persisted": False, "kind": "file_edit", "paths": [str(target.resolve())]}
+    patched = await run("apply_patch", {"patch": _update_patch((target, "before", "after"))})
+    assert patched.approval_trace["reason"] == "file_edit_grant"
+    assert target.read_text() == "after\n"
+    assert reviews == ["write_file"]
+    mixed = _update_patch((target, "after", "wrong"), (neighbor, "untouched", "wrong"))
+    await run("apply_patch", {"patch": mixed}, key="n", options=_FILE_EDIT_OPTIONS)
+    assert (target.read_text(), neighbor.read_text()) == ("after\n", "untouched\n")
+    assert state.approval_grants.durable_payload() == {}
+    with pytest.raises(PermissionError):
+        await tool.write_file(str(target), "not going through approval")
+    interrupt_approvals(state)
+    await run("write_file", {"file_path": str(target), "content": "denied"}, key="n", options=_FILE_EDIT_OPTIONS)
+    assert target.read_text() == "after\n"
+
+
+@pytest.mark.asyncio
+async def test_auto_file_single_step_never_grants_the_next_write(file_approval_cli):
+    state, outside, _, run, reviews = file_approval_cli
+    target = outside / "once.txt"
+    write = {"file_path": str(target), "content": "once"}
+    await run("write_file", write, key="p", options=_FILE_EDIT_OPTIONS)
+    await run("write_file", {**write, "content": "denied"}, key="n", options=_FILE_EDIT_OPTIONS)
+    assert target.read_text() == "once"
+    assert reviews == ["write_file", "write_file"]
+    assert not state.approval_grants.path_exact
+
+
+@pytest.mark.asyncio
+async def test_auto_file_grant_does_not_authorize_delete_or_sensitive_path(file_approval_cli):
+    _, outside, _, run, _ = file_approval_cli
+    target = outside / "edit.txt"
+    await run("write_file", {"file_path": str(target), "content": "keep"}, key="y", options=_FILE_EDIT_OPTIONS)
+    await run("apply_patch", {"patch": f"*** Delete File: {target}\n"}, key="n", options=("allow", "deny"))
+    await run("write_file", {"file_path": str(outside / ".env"), "content": "test"}, key="n", options=("allow", "deny"))
+    assert target.read_text() == "keep"
+    assert not (outside / ".env").exists()
+
+
+@pytest.mark.asyncio
+async def test_auto_file_approval_refuses_symlink_retargeted_after_prompt(file_approval_cli):
+    _, outside, _, run, _ = file_approval_cli
+    before, after, alias = (outside / name for name in ("approved.txt", "other.txt", "alias.txt"))
+    before.write_text("approved")
+    after.write_text("other")
+    alias.symlink_to(before)
+
+    def retarget():
+        alias.unlink()
+        alias.symlink_to(after)
+
+    call = await run("write_file", {"file_path": str(alias), "content": "unexpected"}, key="p", options=_FILE_EDIT_OPTIONS, before_answer=retarget)
+    assert "approved target" in str(call.error)
+    assert (before.read_text(), after.read_text()) == ("approved", "other")
+
+
+@pytest.mark.asyncio
+async def test_auto_file_turn_grant_cannot_override_one_denied_path_in_patch(file_approval_cli):
+    state, outside, _, run, _ = file_approval_cli
+    first, second = outside / "first.txt", outside / "second.txt"
+    for path in (first, second):
+        await run("write_file", {"file_path": str(path), "content": "before\n"}, key="y", options=_FILE_EDIT_OPTIONS)
+    state.approval_grants.add_deny_path(str(second.resolve()))
+    call = await run("apply_patch", {"patch": _update_patch((first, "before", "changed"), (second, "before", "changed"))})
+    assert call.approval_trace["reason"] == "deny_grant"
+    assert first.read_text() == second.read_text() == "before\n"
+
+
+@pytest.mark.asyncio
+async def test_auto_file_grant_is_revoked_at_write_commit(file_approval_cli, monkeypatch):
+    state, outside, tool, run, _ = file_approval_cli
+    target = outside / "switch.txt"
+    target.write_text("before\n")
+
+    async def switch_modes(_):
+        from agentica.cli.commands.context import CommandContext
+        from agentica.cli.commands.tools_skills import _cmd_permissions
+
+        monkeypatch.setattr("agentica.config.prefs.record_cli_prefs", lambda *_: None)
+        ctx = CommandContext(
+            agent_config={}, current_agent=state.current_agent,
+            on_permission_mode_change=state.approval_registry.revoke_turn_grants,
+        )
+        _cmd_permissions(ctx, "read-only")
+        _cmd_permissions(ctx, "auto")
+
+    monkeypatch.setattr(tool, "_diagnostics_snapshot", switch_modes)
+    call = await run("apply_patch", {"patch": _update_patch((target, "before", "after"))}, key="y", options=_FILE_EDIT_OPTIONS)
+    assert "active approved target" in str(call.error)
+    assert target.read_text() == "before\n"
+    await run("write_file", {"file_path": str(target), "content": "denied"}, key="n", options=_FILE_EDIT_OPTIONS)
+    assert list(outside.iterdir()) == [target]
+
+
+@pytest.mark.asyncio
+async def test_auto_file_reviewer_approval_is_per_call(file_approval_cli, monkeypatch):
+    state, outside, tool, run, _ = file_approval_cli
+    target = outside / "reviewed.txt"
+    write = {"file_path": str(target), "content": "once"}
+    calls = []
+
+    async def review(call):
+        calls.append(call.arguments["content"])
+        if len(calls) == 1:
+            return SimpleNamespace(decision="allow", trace=lambda: {"decision": "allow"}, note=lambda: "")
+        return None
+
+    monkeypatch.setattr(state.current_agent, "review_tool_call", review)
+    first = await run("write_file", write)
+    assert first.approval_trace["reason"] == "reviewer_allow"
+    with pytest.raises(PermissionError):
+        await tool.write_file(str(target), "not going through approval")
+    await run("write_file", {**write, "content": "denied"}, key="n", options=_FILE_EDIT_OPTIONS)
+    assert calls == ["once", "denied"]
+    assert target.read_text() == "once"
 
 
 class TestApprovalKeyRouting:

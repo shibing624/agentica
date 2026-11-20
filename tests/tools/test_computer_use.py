@@ -218,7 +218,7 @@ async def test_changing_cli_permissions_revokes_the_grant_even_if_switching_back
     monkeypatch.setattr('agentica.config.prefs.record_cli_prefs', lambda *_: None)
     ctx = CommandContext(
         agent_config={}, current_agent=agent,
-        on_permission_mode_change=state.approval_registry.revoke_window_grants,
+        on_permission_mode_change=state.approval_registry.revoke_turn_grants,
     )
     await tool.computer_use('list_apps')
     await tool.computer_use('list_windows', app_id=EDITOR)
@@ -243,7 +243,7 @@ async def test_window_answer_cannot_restore_a_revoked_turn_grant(desktop, termin
     assert complete_approval(state, approval_decision_from_key('1', req.options))
     # The terminal has posted the answer but permission was revoked before the
     # agent coroutine resumed. The obsolete card must not allow this call.
-    state.approval_registry.revoke_window_grants()
+    state.approval_registry.revoke_turn_grants()
     assert await asyncio.wait_for(task, 1) == 'deny'
     later = make_call(tool, 'observe', app_id=EDITOR, window_id=42)
     assert await answer_terminal_card(state, approve, later, 'n') == 'deny'

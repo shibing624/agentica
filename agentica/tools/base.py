@@ -209,6 +209,8 @@ class Function(BaseModel):
     description: Optional[str] = None
     # Resolves a host-verified target for a tool restricted to the local terminal.
     local_approval_context: Callable[[dict[str, Any]], LocalApprovalTarget] | None = Field(default=None, exclude=True)
+    # Built-in file writers can attest that a resolved path supports a turn grant.
+    file_edit_scope_allowed: Callable[[str], bool] | None = Field(default=None, exclude=True)
     # The parameters the functions accepts, described as a JSON Schema object.
     # To describe a function that accepts no parameters, provide the value {"type": "object", "properties": {}}.
     parameters: Dict[str, Any] = Field(
@@ -507,6 +509,7 @@ class FunctionCall(BaseModel):
     # blocks (``rm -rf /``, sandbox ``blocked_commands``) do not contradict
     # the card. Direct ``tool.execute`` keeps the default False.
     skip_hard_safety: bool = False
+    file_write_approval: Callable[[str], bool] | None = Field(default=None, exclude=True)
 
     def is_concurrency_safe(self) -> bool:
         """Whether this call may overlap with the rest of its batch.

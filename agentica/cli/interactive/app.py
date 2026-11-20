@@ -761,7 +761,7 @@ def run_interactive(
             worktree_binder=worktree_binder,
             ask_user_question_callback=_cli_ask_user_question_callback,
             open_pager_callback=_open_history_pager,
-            on_permission_mode_change=state.approval_registry.revoke_window_grants,
+            on_permission_mode_change=state.approval_registry.revoke_turn_grants,
             approve=cli_approve,
         )
 
@@ -1098,6 +1098,7 @@ def run_interactive(
                 continue
 
             # Run agent
+            state.local_user_turn = not (already_shown or queued.is_automated)
             state.agent_running = True
             # Publish what this terminal is working on so another session's
             # agent can pick it as a message target without guessing.
@@ -1115,6 +1116,7 @@ def run_interactive(
                 ticket_id=queued.ticket_id,
             )
             state.agent_running = False
+            state.local_user_turn = False
             tui_state["spinner_text"] = ""
             # Belt-and-braces: if an ask-user-question request is still armed
             # when the agent turn returns (e.g. an unusual error path in a
@@ -1280,6 +1282,7 @@ def run_interactive(
             return
         logger.info("[attach] cancel requested by an external client")
         agent.cancel()
+        state.approval_registry.revoke_turn_grants()
 
     def _last_answer_text(session_state) -> Optional[str]:
         """This session's last answer, or None.
@@ -1539,6 +1542,8 @@ def run_interactive(
             return None
         req_id = req.hook_request_id or req.approval_id or ""
         if is_approval_request(req):
+            if req.approval_pending.local_only:
+                return None
             options = list(visible_approval_decisions(req.options))
         else:
             options = list(req.options) if req.options else []
@@ -1557,6 +1562,8 @@ def run_interactive(
         if request_id and current_id and request_id != current_id:
             return False
         if is_approval_request(req):
+            if req.approval_pending.local_only:
+                return False
             decision = approval_decision_from_key(answer_text, req.options)
             if decision is None:
                 return False

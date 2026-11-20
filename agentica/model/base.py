@@ -1111,7 +1111,7 @@ class Model(ABC):
         else:
             _has_guardrails = False
 
-        from agentica.agent.approvals import DENIED_TOOL_RESULT, approved_by_user
+        from agentica.agent.approvals import DENIED_TOOL_RESULT, approved_by_user, approved_file_write
 
         def _notify_tool_event(event: str, idx: int) -> None:
             if tool_event_callback is None:
@@ -1135,12 +1135,14 @@ class Model(ABC):
             started_indices.add(idx)
             _notify_tool_event("started", idx)
             token = approved_by_user.set(fc.skip_hard_safety)
+            file_token = approved_file_write.set(fc.file_write_approval)
             try:
                 if fc.function.manages_own_timeout:
                     return await fc.execute()
                 _timeout = fc.function.timeout or _DEFAULT_TOOL_TIMEOUT
                 return await asyncio.wait_for(fc.execute(), timeout=_timeout)
             finally:
+                approved_file_write.reset(file_token)
                 approved_by_user.reset(token)
 
         def _cancelled_before_start(fc: FunctionCall) -> bool:

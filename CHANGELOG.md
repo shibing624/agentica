@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **CLI `auto` 支持本轮文件编辑授权**：工作区外的普通文件被要求确认时，可以选择仅本次，或允许 `write_file` / `apply_patch` 在本轮编辑列出的精确路径。授权不写入项目配置；删除、不受信任的目标和敏感路径不沿用这项授权。LLM 审核通过只适用于当前调用。
+
 - **未知模型的默认上下文从 200K 提升到 300K**。能查到模型目录时仍使用目录值；显式设置的 `context_window` 优先，即使它恰好是 300K。
 
 - **本机 Computer Use 试验版**：在 macOS 终端用 `agentica --computer-use --permissions auto` 开启。模型通过 Peekaboo 和 Spotlight 发现应用、选择精确窗口，不需要手输 bundle ID。`auto` 可在确认页授权指定窗口直到本轮结束，也可仅允许当前一步；启动应用、列窗口仍单独确认。`read-only` 保持逐次确认，`allow-all` 在明确开启后不再逐次确认。仍需 macOS 的屏幕录制和辅助功能权限；窗口标题和截图可能发给当前模型。不向 Desktop、Web、IM 或后台任务开放。
