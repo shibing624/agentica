@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **DeepSeek 开思考时，工具循环后的新回合不再丢前缀缓存**：OpenAI 兼容线路原先在发送前删掉历史 assistant 的 `reasoning_content`。DeepSeek 思考模式带 `tools` 时会把历届推理拼回上下文；字段缺失时，服务端对刚结束的工具循环换一种渲染，于是新 user 回合（人工提问或后台任务通知）的第一次请求从上一轮开头起全部重算。实测 `deepseek-flash`（官方）在 97K 上下文时新回合复用率只剩 0.18。现在 `reasoning_content` 按模型返回的原样回传：同一场景 6/6 次新回合复用 ≥ 0.99，`venus-ds-v4-1-flash` 同样；另 14 个 chat profile（Claude / GPT / Gemini / GLM / Kimi / hy4）冒烟均正常。换模型时 `ensure_history_portable` 仍会去掉旧模型的推理内容（`agentica/model/openai/chat.py`）。
+
+- **会话日志 `token_usage` 记录本次请求是否完整沿用上一次请求的前缀**：新增 `prefix_intact`，不一致时给出 `prefix_diverged_at`（第一处不同的消息序号）。`cache_cliff` 与 `prefix_intact: true` 同时出现即为上游丢缓存，不是 agentica 改了请求（`agentica/runner/persist.py`、`agentica/session/log.py`）。
+
 ## [1.6.1] - 2026-11-19
 
 - **上传上限默认改为 1GB，右侧栏不再因为文件超过 50MB 打不开**：流式写盘之后上传不占内存，`UPLOAD_MAX_SIZE_MB` 默认从 50 改为 1024。右侧栏预览的几种情况：文本、代码、Markdown、CSV 一直只读文件开头 256KB 并提示「预览已截断」，与文件多大无关；图片和 PDF 由网关直接从磁盘按范围发送，原来 50MB 的上限没有保护作用，只是让超过的文件显示成坏图 / 空白，现在放宽到 1GB；Excel 在浏览器里整个解析，仍保留 20MB 的上限并提示「请下载后查看」；下载始终不受限（`gateway/src/agentica_gateway/config.py`、`workspace_files.py`）。

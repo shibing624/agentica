@@ -884,13 +884,15 @@ class OpenAIChat(Model):
             message = self.add_audio_to_message(message=message, audio=message.audio)
 
         wire = message.to_model_dict()
-        # reasoning_content is response-only: providers accept it on input but
-        # ignore it (Taiji/hy4 measured: prompt_tokens unchanged with 215KB of
-        # it; DeepSeek documents the same). History messages carrying it would
-        # ship megabytes of dead weight every request, so strip it at the wire
-        # boundary. Persistence/replay keep it via to_replay_dict().
-        if "reasoning_content" in wire:
-            del wire["reasoning_content"]
+        # reasoning_content goes back exactly as the model returned it. DeepSeek
+        # thinking mode with tools concatenates every earlier turn's reasoning
+        # into the context and requires it on input; stripping it made the
+        # server render a finished tool loop differently from the request that
+        # cached it, so the first request of each new turn lost the cache from
+        # the start of the previous loop on. Endpoints that ignore the field
+        # (Taiji/hy4: prompt_tokens unchanged) pay request bytes, not tokens.
+        # A history switched to another model has it removed by
+        # ``ensure_history_portable``.
         # A thinking block without a signature is never valid to replay
         # (the signer is gone). Drop it regardless of model id.
         content = wire.get("content")

@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """Wire format of history messages on the OpenAI-compatible chat path.
 
-``reasoning_content`` is a response-only field: providers accept it on input
-but ignore it (Taiji/hy4 measured: 215KB of reasoning_content changed
-prompt_tokens by 0; DeepSeek documents the same). Sending it back on every
-history message is pure request-body dead weight — 85K tokens of it on a long
-reasoning-model session — so the chat wire format must strip it. Persistence
-and replay keep it via ``to_replay_dict``.
+``reasoning_content`` goes back as the model returned it. DeepSeek thinking
+mode with tools concatenates every earlier turn's reasoning into the context;
+with it stripped, the first request of each new user turn re-rendered the
+previous tool loop and lost the cache from there on (measured on
+api.deepseek.com, deepseek-flash: new-turn reuse 0.83 stripped vs 0.99 kept;
+0.18 on a 97K agent session). Endpoints that ignore the field on input
+(Taiji/hy4) pay request bytes, not tokens.
 """
 import asyncio
 import unittest
@@ -17,26 +18,37 @@ from agentica.model.openai import OpenAIChat
 
 
 class TestReasoningContentNotSentOnWire(unittest.TestCase):
-    def test_format_message_strips_reasoning_content(self):
+    def test_format_message_replays_reasoning_content_verbatim(self):
         model = OpenAIChat(id="hy4-preview", api_key="fake")
+        reasoning = "private chain of thought " * 100
         msg = Message(
             role="assistant",
             content="answer",
-            reasoning_content="private chain of thought " * 100,
+            reasoning_content=reasoning,
         )
         wire = model.format_message(msg)
-        self.assertNotIn("reasoning_content", wire)
+        self.assertEqual(wire["reasoning_content"], reasoning)
         self.assertEqual(wire["content"], "answer")
 
-    def test_format_message_keeps_reasoning_out_of_tool_round_history(self):
-        model = OpenAIChat(id="hy4-preview", api_key="fake")
+    def test_a_finished_tool_loop_is_sent_the_same_way_in_the_next_turn(self):
+        """The new turn must start with the exact bytes the last loop request sent."""
+        model = OpenAIChat(id="deepseek-flash", api_key="fake")
+        call = {"id": "t1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}
         msgs = [
             Message(role="user", content="q"),
-            Message(role="assistant", content="a1", reasoning_content="thinking"),
-            Message(role="user", content="next"),
+            Message(role="assistant", content="", reasoning_content="read it first", tool_calls=[call]),
+            Message(role="tool", tool_call_id="t1", content="file body"),
         ]
-        wire = [model.format_message(m) for m in msgs]
-        self.assertTrue(all("reasoning_content" not in d for d in wire))
+        in_loop = model.format_messages(msgs)
+        next_turn = model.format_messages(
+            msgs + [
+                Message(role="assistant", content="done", reasoning_content="summarise"),
+                Message(role="user", content="next"),
+            ]
+        )
+        self.assertEqual(next_turn[: len(in_loop)], in_loop)
+        self.assertEqual(next_turn[1]["reasoning_content"], "read it first")
+        self.assertEqual(next_turn[3]["reasoning_content"], "summarise")
 
     def test_replay_dict_still_carries_reasoning_for_persistence(self):
         msg = Message(role="assistant", content="a", reasoning_content="kept")
