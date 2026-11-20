@@ -5,6 +5,7 @@ import { sessionStatsCache, type SessionStats } from "./lib/sessionCache";
 import { createViewStore } from "./lib/sessionView";
 import { readBusyEnter, type BusyEnterBehavior } from "./lib/composerSubmission";
 import { normalizeApprovalMode } from "./lib/approvalMode";
+import type { QuestionRequest } from "./lib/questionComposer";
 
 /** Ordered stream of one assistant turn (text interleaves with tool groups). */
 export type MsgPart =
@@ -34,15 +35,6 @@ export type ApprovalRequest = {
   preview: string;
   similarLabel?: string;
   options: ApprovalDecision[];
-};
-
-/** SSE `question_request`: an open `ask_user_question`. */
-export type QuestionRequest = {
-  questionId: string;
-  prompt: string;
-  options: string[];
-  /** The model asked for one-or-more; the card shows checkboxes. */
-  multiSelect?: boolean;
 };
 
 export type ChatMsg = {
@@ -680,7 +672,9 @@ export function enqueueQuestion(sessId: string, q: QuestionRequest) {
   const live = state.streams[sessId];
   if (!live) return;
   const list = live.pendingQuestions || (live.pendingQuestions = []);
-  if (!list.some((x) => x.questionId === q.questionId)) list.push(q);
+  const i = list.findIndex((x) => x.questionId === q.questionId);
+  if (i >= 0) list[i] = q;
+  else list.push(q);
   bump();
 }
 

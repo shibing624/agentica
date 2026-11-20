@@ -443,7 +443,7 @@ class ImTurnsMixin:
             # its numbered reply must not take a second answer.
             card = self._cards.find_open(request_id=question_id)
             if card is not None:
-                self._cards.expire(card.token, reason=f"已在 {by} 处理" if by else "该提问已超时关闭")
+                self._cards.expire(card.token, reason=f"已在 {by} 处理" if by and by != "timeout" else "该提问已超时关闭")
             if state.pending is not None and state.pending.request_id == question_id:
                 state.clear_pending()
 

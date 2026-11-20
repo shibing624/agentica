@@ -3,7 +3,8 @@ import { Link } from "react-router";
 import * as api from "../api";
 import { ChatNav } from "../components/ChatNav";
 import { ComposerDir } from "../components/ComposerDir";
-import { SteerChip, WorkGroup, ApprovalCard, QuestionCard } from "../components/WorkGroup";
+import { SteerChip, WorkGroup, ApprovalCard } from "../components/WorkGroup";
+import { QuestionComposer } from "../components/QuestionComposer";
 import { RenameInput } from "../components/SessionTree";
 import { CommandMenu, ComposerPicker, invocableSkills, slashQuery, type PickerGroup } from "../components/SlashMenu";
 import { flatItems, plusMenuGroups, slashMenuGroups, type MenuItem } from "../lib/composerCommands";
@@ -56,6 +57,7 @@ import { WorktreePanel } from "../components/WorktreePanel";
 import type { FileEdits } from "../lib/fileDiff";
 import { useFilesPanel } from "../workspace/useFilesPanel";
 import { isImeKey } from "../lib/ime";
+import { parseQuestionRequest, type QuestionAnswer } from "../lib/questionComposer";
 
 const ChatMarkdown = lazy(() => import("../components/ChatMarkdown").then((m) => ({ default: m.ChatMarkdown })));
 /** Start fetching the previous page this far before the reader reaches the top. */
@@ -151,7 +153,9 @@ export function ChatPage() {
   const queued = s.messageQueue.filter((q) => q.sessionId === s.curSess);
   const pendingImages = s.pendingFiles.filter((f) => f.type.startsWith("image/"));
   const pendingApprovals = s.curSess ? (s.streams[s.curSess]?.pendingApprovals || []) : [];
-  const pendingQuestion = s.curSess ? s.streams[s.curSess]?.pendingQuestions?.[0] : undefined;
+  const questionSessionId = s.curSess;
+  const questionStream = questionSessionId ? s.streams[questionSessionId] : undefined;
+  const pendingQuestion = questionStream?.pendingQuestions?.[0];
   // An open approval or question owns the composer until it is answered.
   const pendingReq = pendingApprovals[0];
   const composerLocked = !!pendingReq || !!pendingQuestion;
@@ -424,11 +428,11 @@ export function ChatPage() {
 
   useEffect(() => {
     const ta = taRef.current;
-    if (!ta) return;
+    if (!ta || (!pendingReq && pendingQuestion)) return;
     ta.style.height = "auto";
     ta.style.height = Math.min(ta.scrollHeight, 220) + "px";
     if (skillHlRef.current) skillHlRef.current.scrollTop = ta.scrollTop;
-  }, [s.inputText]);
+  }, [s.inputText, !!pendingReq, !!pendingQuestion]);
 
   useEffect(() => { setSlashActive(0); }, [s.inputText]);
 
@@ -615,12 +619,15 @@ export function ChatPage() {
               onDecide={(d) => void decideCurrentApproval(d)}
             />
           )}
-          {!pendingReq && pendingQuestion && (
-            <QuestionCard
+          {!pendingReq && pendingQuestion && questionSessionId && (
+            <QuestionComposer
               key={pendingQuestion.questionId}
               q={pendingQuestion}
-              busy={!!(s.curSess && s.streams[s.curSess]?.answeringQuestion)}
-              onAnswer={(a) => void answerCurrentQuestion(a)}
+              busy={!!questionStream?.answeringQuestion}
+              stopping={!!questionStream?.cancelling}
+              onAnswer={(a) => void answerCurrentQuestion(questionSessionId, pendingQuestion.questionId, a)}
+              onEngage={async () => (await api.engageSessionQuestion(questionSessionId, pendingQuestion.questionId)).ok}
+              onStop={() => void stopGen()}
             />
           )}
           {cur && <TodoDock todos={dockTodos(cur.msgs, busy)} live={streaming} />}
@@ -633,7 +640,7 @@ export function ChatPage() {
           {!!queued.length && (
             <QueueDock queued={queued} streaming={streaming} />
           )}
-          <div className={"input-box" + (composerLocked ? " approval-locked" : "")} onPaste={(e) => {
+          <div hidden={!pendingReq && !!pendingQuestion} className={"input-box" + (composerLocked ? " approval-locked" : "")} onPaste={(e) => {
             if (composerLocked) return;
             const files = imageFilesFromClipboard(e.clipboardData);
             if (!files.length) return;
@@ -772,7 +779,7 @@ export function ChatPage() {
               className="input-ta"
               rows={1}
               disabled={composerLocked}
-              placeholder={compacting ? S.chat.placeholderCompacting : s.goalCompose ? S.chat.placeholderGoal : pendingReq ? S.chat.placeholderApproval : pendingQuestion ? S.chat.placeholderQuestion : busy ? S.chat.placeholderStreaming : S.chat.placeholder}
+              placeholder={compacting ? S.chat.placeholderCompacting : s.goalCompose ? S.chat.placeholderGoal : pendingReq ? S.chat.placeholderApproval : busy ? S.chat.placeholderStreaming : S.chat.placeholder}
               value={s.inputText}
               onChange={(e) => setState({ inputText: e.target.value })}
               onScroll={(e) => { if (skillHlRef.current) skillHlRef.current.scrollTop = e.currentTarget.scrollTop; }}
@@ -1460,19 +1467,16 @@ async function decideCurrentApproval(decision: ApprovalDecision) {
   }
 }
 
-async function answerCurrentQuestion(answer: string) {
-  const st = getState();
-  const sessId = st.curSess || "";
-  const live = st.streams[sessId];
-  const q = live?.pendingQuestions?.[0];
-  if (!sessId || !live || !q || live.answeringQuestion) return;
+async function answerCurrentQuestion(sessId: string, questionId: string, answer: QuestionAnswer) {
+  const live = getState().streams[sessId];
+  if (!live || live.pendingQuestions?.[0]?.questionId !== questionId || live.answeringQuestion) return;
   live.answeringQuestion = true;
   bump();
-  const res = await api.postSessionAnswer(sessId, q.questionId, answer);
+  const res = await api.postSessionAnswer(sessId, questionId, answer);
   const again = getState().streams[sessId];
   if (again) again.answeringQuestion = false;
   if (res.ok || res.status === 404) {
-    dequeueQuestion(sessId, q.questionId);
+    dequeueQuestion(sessId, questionId);
   } else {
     bump();
     showToast(getStrings().chat.questionFailed);
@@ -2047,20 +2051,17 @@ function applyLiveSseEvent(aiMsg: ChatMsg, evt: any, sessId?: string): boolean {
     return true;
   }
   if (evt.event === "question_request" && sessId) {
-    const qid = String(evt.data?.question_id || "");
-    if (qid) {
-      enqueueQuestion(sessId, {
-        questionId: qid,
-        prompt: String(evt.data?.prompt || ""),
-        options: Array.isArray(evt.data?.options) ? evt.data.options.map(String) : [],
-        ...(evt.data?.multi_select === true ? { multiSelect: true } : {}),
-      });
-    }
+    const question = parseQuestionRequest(evt.data);
+    if (question) enqueueQuestion(sessId, question);
     flushStream();
     return true;
   }
   if (evt.event === "question_resolved" && sessId) {
     const qid = String(evt.data?.question_id || "");
+    if (evt.data?.by === "timeout" && sessId === getState().curSess &&
+        getState().streams[sessId]?.pendingQuestions?.some((q) => q.questionId === qid)) {
+      showToast(getStrings().chat.questionTimedOut, 6000);
+    }
     if (qid) dequeueQuestion(sessId, qid);
     flushStream();
     return true;

@@ -394,11 +394,17 @@ export const postSessionApproval = (
     { decision },
   );
 
-export const postSessionAnswer = (sessionId: string, questionId: string, answer: string) =>
+const sessionQuestionUrl = (sessionId: string, questionId: string) =>
+  `/api/sessions/${encodeURIComponent(sessionId)}/questions/${encodeURIComponent(questionId)}`;
+
+export const postSessionAnswer = (sessionId: string, questionId: string, answer: import("./lib/questionComposer").QuestionAnswer) =>
   postJson<{ status?: string }>(
-    `/api/sessions/${encodeURIComponent(sessionId)}/questions/${encodeURIComponent(questionId)}`,
+    sessionQuestionUrl(sessionId, questionId),
     { answer },
   );
+
+export const engageSessionQuestion = (sessionId: string, questionId: string) =>
+  postJson<{ status?: string }>(`${sessionQuestionUrl(sessionId, questionId)}/engage`, {});
 
 export const cancelChatApi = (session_id: string) =>
   postJson<{ status?: string; cancelled: boolean }>("/api/chat/cancel", { session_id, message: "" });

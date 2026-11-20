@@ -5,7 +5,6 @@
 import asyncio
 import base64
 import json
-import shutil
 import time
 from pathlib import Path
 from typing import Optional
@@ -957,7 +956,16 @@ async def decide_session_approval(
 
 
 class QuestionAnswerRequest(BaseModel):
-    answer: str
+    answer: live_turn.QuestionAnswer
+
+
+@router.post("/api/sessions/{session_id}/questions/{question_id}/engage")
+async def engage_session_question(session_id: str, question_id: str, request: Request):
+    """Keep an active Web/Desktop question open once the user starts answering."""
+    turn = live_turn.active(session_id, _account(request))
+    if turn is None or not turn.engage_question(question_id):
+        raise HTTPException(status_code=404, detail="Question not found")
+    return {"status": "ok", "question_id": question_id}
 
 
 @router.post("/api/sessions/{session_id}/questions/{question_id}")
@@ -969,7 +977,11 @@ async def answer_session_question(
 ):
     """Answer an open ``ask_user_question``. Already answered, unknown, or another account's → 404."""
     turn = live_turn.active(session_id, _account(request))
-    if turn is None or not turn.answer_question(question_id, body.answer, by="Web"):
+    try:
+        answered = turn is not None and turn.answer_question(question_id, body.answer, by="Web")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    if not answered:
         raise HTTPException(status_code=404, detail="Question not found")
     return {"status": "ok", "question_id": question_id}
 

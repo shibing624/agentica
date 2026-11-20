@@ -55,6 +55,7 @@ def get_builtin_tools(
         vision_model: Optional["Model"] = None,
         custom_skill_dirs: Optional[List[str]] = None,
         ask_user_question_callback=None,
+        ask_user_question_batch_callback=None,
         sandbox_config=None,
         background_process_registry: Optional[BackgroundProcessRegistry] = None,
         enable_diagnostics: bool = False,
@@ -90,6 +91,7 @@ def get_builtin_tools(
             that case — a vision-capable agent reads the image itself.
         custom_skill_dirs: Custom skill directories to load (optional)
         ask_user_question_callback: Custom callback for ask_user_question tool (optional)
+        ask_user_question_batch_callback: Callback for surfaces that display a whole batch (optional)
         sandbox_config: SandboxConfig instance for security isolation (optional)
         background_process_registry: Shared registry for execute(background=True) (optional)
         enable_diagnostics: When True, attach an LSP diagnostics checker to the
@@ -156,6 +158,9 @@ def get_builtin_tools(
 
     if include_ask_user_question:
         from agentica.tools.ask_user_question_tool import AskUserQuestionTool
-        tools.append(AskUserQuestionTool(input_callback=ask_user_question_callback))
+        tools.append(AskUserQuestionTool(
+            input_callback=ask_user_question_callback,
+            batch_input_callback=ask_user_question_batch_callback,
+        ))
 
     return tools

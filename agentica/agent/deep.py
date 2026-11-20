@@ -166,6 +166,7 @@ class DeepAgent(Agent):
         vision_model: Optional[Model] = None,
         custom_skill_dirs: Optional[List[str]] = None,
         ask_user_question_callback: Optional[Callable] = None,
+        ask_user_question_batch_callback: Optional[Callable] = None,
         # ---- Plain Agent parameters, forwarded unchanged ----
         # Declared one by one instead of collected in **kwargs. Agent.__init__
         # is keyword-only with no **kwargs of its own, so a forwarded typo (or
@@ -280,6 +281,7 @@ class DeepAgent(Agent):
                 vision_model=vision_model,
                 custom_skill_dirs=custom_skill_dirs,
                 ask_user_question_callback=ask_user_question_callback,
+                ask_user_question_batch_callback=ask_user_question_batch_callback,
                 sandbox_config=sandbox_config,
                 background_process_registry=background_process_registry,
                 enable_diagnostics=enable_diagnostics,

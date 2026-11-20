@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from agentica import DeepAgent
 from agentica.agent.approvals import (
@@ -167,6 +167,7 @@ class AgentBuilderMixin:
             # through the session's live turn instead of stdin.
             include_ask_user_question=True,
             ask_user_question_callback=self._make_ask_callback(session_id, owner),
+            ask_user_question_batch_callback=self._make_ask_batch_callback(session_id, owner),
             background_process_registry=self._background_registry(session_id, owner),
             permission_mode=permission_mode,
             sandbox=sandbox_mode,
@@ -313,15 +314,35 @@ class AgentBuilderMixin:
                         # send must not abandon the Web/Desktop card or fail
                         # the tool before anyone can answer.
                         logger.exception("ask_user_question notifier failed")
-                try:
-                    return await asyncio.wait_for(asyncio.shield(future), timeout=wait_s or None)
-                except asyncio.TimeoutError:
-                    turn.close_question(question.question_id)
-                    return None
+                answer = await turn.wait_for_question(question, future, wait_s)
+                assert answer is None or isinstance(answer, str)
+                return answer
 
             answer = asyncio.run_coroutine_threadsafe(open_and_wait(), loop).result()
             if answer is None:
                 raise AskUserQuestionTimeout(wait_s)
+            return answer
+
+        return ask
+
+    def _make_ask_batch_callback(
+        self, session_id: str, owner: Optional[str],
+    ) -> Callable[[list[dict]], Awaitable[dict[str, str] | None]]:
+        owner_id = self._owner(owner)
+
+        async def ask(questions: list[dict]) -> dict[str, str] | None:
+            turn = _pkg().live_turn.active(session_id, owner_id)
+            if turn is None or turn.done:
+                raise AskUserQuestionTimeout(0)
+            if turn.question_notifier is not None:
+                # IM capability cards still deliver one question at a time.
+                return None
+            wait_s = human_wait_timeout()
+            question, future = turn.open_question(questions=questions)
+            answer = await turn.wait_for_question(question, future, wait_s)
+            if answer is None:
+                raise AskUserQuestionTimeout(wait_s)
+            assert isinstance(answer, dict)
             return answer
 
         return ask

@@ -23,7 +23,7 @@ Example:
 """
 import asyncio
 import json
-from typing import Optional, List, Callable
+from typing import Awaitable, Callable, List, Optional
 
 from agentica.tools.base import Tool, StopAgentRun
 from agentica.model.message import Message
@@ -222,6 +222,7 @@ and make a recommendation for the ones that do not."""
     def __init__(
         self,
         input_callback: Optional[Callable[[str, Optional[List[str]]], str]] = None,
+        batch_input_callback: Optional[Callable[[list[dict]], Awaitable[dict[str, str] | None]]] = None,
     ):
         """
         Initialize AskUserQuestionTool.
@@ -229,9 +230,12 @@ and make a recommendation for the ones that do not."""
         Args:
             input_callback: Custom callback function for getting user input.
                            If None, uses console input.
+            batch_input_callback: Present all questions at once. Return None to
+                                  fall back to sequential prompts on that surface.
         """
         super().__init__(name="ask_user_question_tool")
         self.input_callback = input_callback
+        self.batch_input_callback = batch_input_callback
 
         self.register(self.ask_user_question, parameters_override=self._ASK_PARAMETERS)
         # Human-in-the-loop: wait indefinitely for the user (like CC/Cursor),
@@ -309,12 +313,8 @@ and make a recommendation for the ones that do not."""
         that the model settles every ambiguity it already knows about in one
         sitting, instead of interrupting the user again a minute later.
 
-        A batch is asked **one question at a time** through the same callback a
-        single question uses. That is deliberate: every surface already knows how
-        to show one question and take one answer (the terminal's inline prompt,
-        the Web/Desktop card, the IM link), so batching needs no new UI and no
-        new protocol — the *model's* turn gets the answers together, which is
-        what it asked for.
+        A surface can present the batch together; otherwise it asks one
+        question at a time through the same callback a single question uses.
 
         The reply comes back verbatim. A timed-out item carries ``timed_out``;
         the rest of the batch still returns, so a partial answer is usable
@@ -331,6 +331,30 @@ and make a recommendation for the ones that do not."""
                 items[0]["question"], items[0].get("options"), key=None, header=None,
                 multi_select=bool(items[0].get("multi_select")),
             )
+
+        if self.batch_input_callback is not None:
+            try:
+                replies = await self.batch_input_callback(items)
+            except AskUserQuestionTimeout as e:
+                return json.dumps({"answers": [
+                    {
+                        **self._result_shape(item, key=item["id"]), "response": "", "timed_out": True,
+                        "waited_seconds": round(e.waited_seconds), "note": TIMED_OUT_NOTE,
+                    }
+                    for item in items
+                ]}, ensure_ascii=False)
+            if replies is not None:
+                answers = []
+                for item in items:
+                    response = replies[item["id"]]
+                    result = {**self._result_shape(item, key=item["id"]), "response": response}
+                    if item.get("multi_select"):
+                        result["multi_select"] = True
+                    if not response:
+                        result["skipped"] = True
+                        result["note"] = "The user skipped this question. This is not consent."
+                    answers.append(result)
+                return json.dumps({"answers": answers}, ensure_ascii=False)
 
         answers = []
         for item in items:

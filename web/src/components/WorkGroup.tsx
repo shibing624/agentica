@@ -16,7 +16,7 @@ import {
   IconBook, IconBrain, IconChevronDown, IconCopy, IconFile, IconGlobe, IconListCheck, IconPencil, IconSearch,
   IconExternal, IconSpinner, IconTerminal, IconUser, IconUsers,
 } from "../icons";
-import { getState, showToast, type ApprovalDecision, type ApprovalRequest, type QuestionRequest } from "../store";
+import { getState, showToast, type ApprovalDecision, type ApprovalRequest } from "../store";
 import { useStrings } from "../i18n";
 import { CodeFrame } from "./CodeFrame";
 import { PreviewableImage } from "./ImageLightbox";
@@ -677,72 +677,6 @@ export function ApprovalCard({
             </>
           )}
         </div>
-      </div>
-    </div>
-  );
-}
-
-/** An open `ask_user_question`: pick an option or type a reply. Sits where the approval card does. */
-export function QuestionCard({ q, busy, onAnswer }: {
-  q: QuestionRequest;
-  busy: boolean;
-  onAnswer: (answer: string) => void;
-}) {
-  const S = useStrings();
-  const [text, setText] = useState("");
-  // Multi-select is a client-side accumulation, not a different protocol: the
-  // server still receives one answer string, so nothing downstream (the answer
-  // endpoint, the IM relay, the tool) needs to learn a new shape. Labels are
-  // joined with ", " — the same way the tool renders a set of choices.
-  const [picked, setPicked] = useState<string[]>([]);
-  const send = () => {
-    const answer = text.trim();
-    if (answer && !busy) onAnswer(answer);
-  };
-  const sendPicked = () => {
-    if (picked.length && !busy) onAnswer(picked.join(", "));
-  };
-  const toggle = (opt: string) => {
-    setPicked((prev) => (prev.includes(opt) ? prev.filter((x) => x !== opt) : [...prev, opt]));
-  };
-  return (
-    <div className="approval-card question-card" role="dialog" aria-label={q.prompt}>
-      <div className="approval-card-head">
-        <div className="approval-card-q">{q.prompt}</div>
-      </div>
-      {q.options.length > 0 && (
-        <div className="question-opts">
-          {q.options.map((opt, i) => (
-            q.multiSelect ? (
-              <button key={i} type="button" disabled={busy}
-                      className={"question-opt" + (i === 0 ? " first" : "") + (picked.includes(opt) ? " picked" : "")}
-                      aria-pressed={picked.includes(opt)}
-                      onClick={() => toggle(opt)}>
-                <span className="question-opt-n">{picked.includes(opt) ? "✓" : i + 1}</span>{opt}
-              </button>
-            ) : (
-              <button key={i} type="button" className={"question-opt" + (i === 0 ? " first" : "")}
-                      disabled={busy} onClick={() => onAnswer(opt)}>
-                <span className="question-opt-n">{i + 1}</span>{opt}
-              </button>
-            )
-          ))}
-        </div>
-      )}
-      {q.multiSelect && q.options.length > 0 && (
-        <button type="button" className="approval-allow question-send"
-                disabled={busy || !picked.length} onClick={sendPicked}>
-          {S.chat.questionSend}
-        </button>
-      )}
-      <div className="question-free">
-        <input value={text} disabled={busy} autoFocus={q.options.length === 0}
-               placeholder={q.options.length ? S.chat.questionOther : S.chat.questionReply}
-               onChange={(e) => setText(e.target.value)}
-               onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />
-        <button type="button" className="approval-allow question-send" disabled={busy || !text.trim()} onClick={send}>
-          {S.chat.questionSend}
-        </button>
       </div>
     </div>
   );

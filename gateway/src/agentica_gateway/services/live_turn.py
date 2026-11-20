@@ -40,6 +40,7 @@ _COALESCE_EVENTS = frozenset({"content", "thinking"})
 _TERMINAL = frozenset({"completed", "cancelled", "failed"})
 
 _SessionKey = Tuple[str, str]
+QuestionAnswer = str | dict[str, str]
 
 
 @dataclass
@@ -52,6 +53,9 @@ class PendingQuestion:
     # The model asked for one-or-more answers; the card offers checkboxes
     # instead of one-tap buttons.
     multi_select: bool = False
+    questions: list[dict] | None = None
+    can_engage: bool = False
+    engaged: bool = False
 
 
 def _event_chars(ev: dict) -> int:
@@ -87,7 +91,7 @@ class LiveTurn:
         self._buffer_chars = 0
         self.approvals = ApprovalRegistry()
         # ask_user_question: open questions and the futures their answers land in.
-        self._questions: Dict[str, Tuple[PendingQuestion, asyncio.Future]] = {}
+        self._questions: Dict[str, Tuple[PendingQuestion, asyncio.Future[QuestionAnswer | None]]] = {}
         # Set by the surface that started the turn when it can show the
         # question itself too (IM sends a /c/<token> card). Awaited on the loop.
         self.question_notifier: Optional[Callable[[PendingQuestion], Awaitable[None]]] = None
@@ -137,39 +141,77 @@ class LiveTurn:
 
     def open_question(
         self,
-        prompt: str,
-        options: List[str],
+        prompt: str = "",
+        options: List[str] | None = None,
         multi_select: bool = False,
-    ) -> Tuple[PendingQuestion, asyncio.Future]:
+        *,
+        questions: list[dict] | None = None,
+    ) -> Tuple[PendingQuestion, asyncio.Future[QuestionAnswer | None]]:
         """Register a question and publish it. Must run on the event loop."""
         question = PendingQuestion(
             question_id=f"q-{uuid.uuid4().hex[:10]}",
             prompt=prompt,
-            options=list(options),
+            options=list(options or []),
             multi_select=multi_select,
+            questions=questions,
+            can_engage=self.question_notifier is None,
         )
-        future: asyncio.Future = asyncio.get_running_loop().create_future()
+        future = asyncio.get_running_loop().create_future()
         self._questions[question.question_id] = (question, future)
         self.publish(question_event(question))
         return question, future
 
-    def answer_question(self, question_id: str, answer: str, by: str) -> bool:
+    def engage_question(self, question_id: str) -> bool:
+        """The user started answering in Web/Desktop; keep the card open."""
+        entry = self._questions.get(question_id)
+        if entry is None or not entry[0].can_engage:
+            return False
+        question = entry[0]
+        if not question.engaged:
+            question.engaged = True
+            self.publish(question_event(question))
+        return True
+
+    async def wait_for_question(
+        self, question: PendingQuestion, future: asyncio.Future[QuestionAnswer | None], timeout: float,
+    ) -> QuestionAnswer | None:
+        try:
+            if timeout and not question.engaged:
+                await asyncio.wait((future,), timeout=timeout)
+                if not future.done() and not question.engaged:
+                    self.close_question(question.question_id, by="timeout")
+            return await future
+        finally:
+            self.close_question(question.question_id)
+
+    def answer_question(self, question_id: str, answer: QuestionAnswer, by: str) -> bool:
         """First answer wins; every surface showing the question hears it closed."""
-        entry = self._questions.pop(question_id, None)
+        entry = self._questions.get(question_id)
         if entry is None or entry[1].done():
             return False
-        entry[1].set_result(answer)
+        question, future = entry
+        if question.questions is None:
+            if not isinstance(answer, str):
+                raise ValueError("A single question requires a text answer")
+        elif not isinstance(answer, dict) or answer.keys() != {item["id"] for item in question.questions}:
+            raise ValueError("Provide one answer for each question ID")
+        del self._questions[question_id]
+        future.set_result(answer)
         self.publish({"event": "question_resolved", "data": {"question_id": question_id, "answer": answer, "by": by}})
         if self.question_closed is not None:
             self.question_closed(question_id, by)
         return True
 
-    def close_question(self, question_id: str) -> None:
-        """Take an unanswered question down (timed out)."""
-        if self._questions.pop(question_id, None) is not None:
-            self.publish({"event": "question_resolved", "data": {"question_id": question_id, "answer": "", "by": ""}})
-            if self.question_closed is not None:
-                self.question_closed(question_id, "")
+    def close_question(self, question_id: str, by: str = "") -> None:
+        """Release an unanswered question and close its cards everywhere."""
+        entry = self._questions.pop(question_id, None)
+        if entry is None:
+            return
+        if not entry[1].done():
+            entry[1].set_result(None)
+        self.publish({"event": "question_resolved", "data": {"question_id": question_id, "answer": "", "by": by}})
+        if self.question_closed is not None:
+            self.question_closed(question_id, by)
 
     def release_questions(self) -> None:
         """Unblock every open question and take its cards down.
@@ -177,17 +219,10 @@ class LiveTurn:
         Stop and a turn that ends while a question is open both come through
         here. Setting the future is what lets the tool return; the resolved
         event and ``question_closed`` are what take the Web card and the IM
-        card down. Clearing first makes a late answer lose.
+        card down. Each question is removed before publishing its close event.
         """
-        pending = list(self._questions.items())
-        self._questions.clear()
-        for _qid, (_question, future) in pending:
-            if not future.done():
-                future.set_result(None)
-        for qid, _entry in pending:
-            self.publish({"event": "question_resolved", "data": {"question_id": qid, "answer": "", "by": ""}})
-            if self.question_closed is not None:
-                self.question_closed(qid, "")
+        for qid in list(self._questions):
+            self.close_question(qid)
 
     def progress_summary(self) -> Dict[str, Any]:
         """Current live step summary for IM /status and /ps."""
@@ -411,14 +446,18 @@ def approval_event(pending: PendingApproval) -> Dict[str, Any]:
 
 def question_event(question: PendingQuestion) -> Dict[str, Any]:
     """SSE envelope for one open ``ask_user_question``."""
+    data: Dict[str, Any] = {
+        "question_id": question.question_id,
+        "can_engage": question.can_engage,
+        "engaged": question.engaged,
+    }
+    if question.questions is not None:
+        data["questions"] = question.questions
+    else:
+        data.update(prompt=question.prompt, options=list(question.options), multi_select=question.multi_select)
     return {
         "event": "question_request",
-        "data": {
-            "question_id": question.question_id,
-            "prompt": question.prompt,
-            "options": list(question.options),
-            "multi_select": question.multi_select,
-        },
+        "data": data,
     }
 
 
