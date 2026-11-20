@@ -1175,14 +1175,11 @@ class Model(ABC):
             """
             approve_fn = _agent.approve if _agent is not None else None
             if approve_fn is None:
-                if fc.function.local_approval_context is None:
-                    return False
+                return False
+            try:
+                decision = await approve_fn(fc)
+            except Exception:
                 decision = "deny"
-            else:
-                try:
-                    decision = await approve_fn(fc)
-                except Exception:
-                    decision = "deny"
             if decision not in ("allow", "allow_prefix", "deny", "deny_prefix"):
                 decision = "deny"
             session_log = _agent._session_log if _agent is not None else None

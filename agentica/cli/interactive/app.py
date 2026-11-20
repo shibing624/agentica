@@ -540,36 +540,28 @@ def run_interactive(
             f"[dim]Worktree {bound.branch_short}: {bound.path}[/dim]"
         )
 
-    local_computer_use = bool(agent_config.get("computer_use"))
-    if local_computer_use:
-        get_console().print(
-            "Computer Use enabled for this terminal. Window titles and screenshots may be sent to the configured model. "
-            "Use /permissions to change approval mode.",
-            style="yellow",
-        )
-    else:
-        peer_cwd = agent_config.get("work_dir") or os.getcwd()
-        peer_user_id = agent_config.get("user_id") or (workspace.user_id if workspace else None)
-        peer_workspace_path = str(workspace.path) if workspace is not None else None
-        peer_memory_path = None
-        if workspace is not None:
-            peer_memory_path = str(workspace._get_user_memory_md())
-        peer_log_file, peer_log_level = _cli_log_file()
-        peer_profile, _ = session_profile(agent_config, peer_cwd)
-        state.peer_session = PeerSession(
-            cwd=peer_cwd,
-            git_branch=_read_git_branch(peer_cwd),
-            session_id=agent_config.get("session_id"),
-            user_id=peer_user_id,
-            workspace_path=peer_workspace_path,
-            memory_path=peer_memory_path,
-            log_file=peer_log_file,
-            log_level=peer_log_level,
-            profile_name=peer_profile or None,
-            model_provider=agent_config.get("model_provider"),
-            model_name=agent_config.get("model_name"),
-        )
-        state.peer_session.publish()
+    peer_cwd = agent_config.get("work_dir") or os.getcwd()
+    peer_user_id = agent_config.get("user_id") or (workspace.user_id if workspace else None)
+    peer_workspace_path = str(workspace.path) if workspace is not None else None
+    peer_memory_path = None
+    if workspace is not None:
+        peer_memory_path = str(workspace._get_user_memory_md())
+    peer_log_file, peer_log_level = _cli_log_file()
+    peer_profile, _ = session_profile(agent_config, peer_cwd)
+    state.peer_session = PeerSession(
+        cwd=peer_cwd,
+        git_branch=_read_git_branch(peer_cwd),
+        session_id=agent_config.get("session_id"),
+        user_id=peer_user_id,
+        workspace_path=peer_workspace_path,
+        memory_path=peer_memory_path,
+        log_file=peer_log_file,
+        log_level=peer_log_level,
+        profile_name=peer_profile or None,
+        model_provider=agent_config.get("model_provider"),
+        model_name=agent_config.get("model_name"),
+    )
+    state.peer_session.publish()
     # Per-task worktrees: built before the first agent (the tool is created
     # during create_agent) and shared with every rebuild. Isolation is a
     # directory other tools take as work_dir / path; this session stays put.
@@ -1325,8 +1317,6 @@ def run_interactive(
         instead; it is prepended to the next turn a person actually starts, so
         the model still sees it and nothing is dropped.
         """
-        if local_computer_use:
-            return  # Still display completions, but do not steer a desktop-enabled agent.
         if should_steer_report(state.agent_running, quiet_mode):
             _hand_to_agent(report, automated=True)
             return
@@ -1589,8 +1579,6 @@ def run_interactive(
 
         # No config dict passed: this is a global settings toggle, read the same
         # way the CLI's other toggles are (see _maybe_start_cron above).
-        if local_computer_use:
-            raise RuntimeError("Computer Use sessions accept input only from the local terminal")
         if not attach_enabled():
             raise RuntimeError("settings.attach_enabled is off")
 

@@ -13,7 +13,6 @@ import json
 import re
 import weakref
 from collections import OrderedDict
-from dataclasses import dataclass
 from typing import Callable, get_type_hints, Any, Dict, Union, Optional, Type, TypeVar, List
 from pydantic import BaseModel, Field, ValidationError, field_validator, validate_call
 from agentica.model.message import Message
@@ -179,20 +178,6 @@ def _safe_validate_call(c: Callable) -> Callable:
     return validate_call(c)
 
 
-@dataclass(frozen=True)
-class WindowApprovalKey:
-    app_id: str
-    pid: int
-    process_start: str
-    window_id: int
-
-
-@dataclass(frozen=True)
-class LocalApprovalTarget:
-    label: str
-    window_key: WindowApprovalKey | None = None
-
-
 class Function(BaseModel):
     """Model for storing functions that can be called by an agent."""
 
@@ -207,8 +192,6 @@ class Function(BaseModel):
         return v
     # A description of what the function does, used by the model to choose when and how to call the function.
     description: Optional[str] = None
-    # Resolves a host-verified target for a tool restricted to the local terminal.
-    local_approval_context: Callable[[dict[str, Any]], LocalApprovalTarget] | None = Field(default=None, exclude=True)
     # Built-in file writers can attest that a resolved path supports a turn grant.
     file_edit_scope_allowed: Callable[[str], bool] | None = Field(default=None, exclude=True)
     # The parameters the functions accepts, described as a JSON Schema object.

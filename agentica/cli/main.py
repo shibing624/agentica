@@ -346,8 +346,6 @@ def main():
         # Interactive mode
         from agentica.cli.interactive import run_interactive
 
-        if args.computer_use:
-            agent_config["computer_use"] = args.computer_use
         run_interactive(agent_config, extra_tool_names, workspace, skills_registry)
 
 

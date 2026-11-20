@@ -530,10 +530,6 @@ class SubagentRegistry:
 
         for tool in parent_tools:
             candidate_names = self._tool_names(tool)
-            if isinstance(tool, Tool):
-                candidate_names = [name for name in candidate_names if tool.functions[name].local_approval_context is None]
-            elif isinstance(tool, Function) and tool.local_approval_context is not None:
-                continue
             allowed_names = [
                 name
                 for name in candidate_names

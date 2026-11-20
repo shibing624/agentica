@@ -68,10 +68,9 @@ def format_approval_prompt(pending: PendingApproval) -> str:
         deny_similar = f"No, and don't ask again for this {name} tool (x)"
     labels = {
         "allow": (
-            "Only this step (p)" if "allow_window" in pending.options or "allow_file_edit" in pending.options
+            "Only this step (p)" if "allow_file_edit" in pending.options
             else "Yes, proceed (y)"
         ),
-        "allow_window": "Allow screenshots, clicks and input in this window until this turn ends (y)",
         "allow_file_edit": "Allow editing the listed files until this turn ends (y)",
         "allow_prefix": allow_similar,
         "deny": "No, deny (esc/n)",
@@ -103,8 +102,6 @@ def format_approval_record(
         body = preview or pending.name
     if decision == "allow":
         verdict = "✓ allowed"
-    elif decision == "allow_window":
-        verdict = "✓ allowed this window for this turn"
     elif decision == "allow_file_edit":
         verdict = "✓ allowed editing the listed files for this turn"
     elif decision == "allow_prefix":
@@ -501,11 +498,6 @@ def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
         async with state.approval_prompt_lock:
             agent = _agent()
             if agent is not None and agent._cancelled:
-                return "deny"
-            if fc.function.local_approval_context is not None and (
-                agent is None or not state.agent_running or agent._run_automated_input
-            ):
-                fc.denied_result = "Computer Use is available only in a turn started from the local terminal."
                 return "deny"
             try:
                 return await inner(fc)

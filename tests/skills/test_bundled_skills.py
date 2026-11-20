@@ -17,7 +17,7 @@ from agentica.skills.skill import Skill
 from agentica.skills.skill_loader import SkillLoader
 from agentica.skills.skill_registry import SkillRegistry
 
-BUNDLED = ("agentica", "browser", "cron", "long-running-jobs", "worktree")
+BUNDLED = ("agentica", "browser", "computer-use", "cron", "long-running-jobs", "worktree")
 
 
 class TestBundledSkillsShip(unittest.TestCase):
@@ -92,6 +92,10 @@ class TestSkillRegistrationLogging(unittest.TestCase):
         cmds = registry.auto_commands()
         self.assertEqual(cmds["/agentica"].name, "agentica")
         self.assertEqual(cmds["/browser"].name, "browser")
+        expanded = registry.expand_invocation("/computer-use 查验 TextEdit 临时文档")
+        self.assertIn("查验 TextEdit 临时文档", expanded)
+        self.assertIn("LCU", expanded)
+        self.assertIn("Peekaboo", expanded)
         self.assertEqual(cmds["/cron"].name, "cron")
         self.assertEqual(cmds["/worktree"].name, "worktree")
 

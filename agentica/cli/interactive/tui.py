@@ -839,8 +839,6 @@ def _setup_tui(
         if state.input_request is not None:
             if state.input_request.kind == "approval":
                 opts = set(state.input_request.options or [])
-                if "allow_window" in opts:
-                    return "y allow this window for this turn · p only this step · esc/n deny"
                 if "allow_file_edit" in opts:
                     return "y allow editing these files for this turn · p only this step · esc/n deny"
                 parts = ["y proceed"]
