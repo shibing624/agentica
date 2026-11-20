@@ -419,8 +419,8 @@ def parse_args():
         ),
     )
     parser.add_argument(
-        "--computer-use", nargs=2, metavar=("APP_BUNDLE_ID", "WINDOW_ID"),
-        help="Experimental: enable local macOS Computer Use for one TextEdit window (human approval per action)",
+        "--computer-use", action="store_true",
+        help="Experimental: enable local macOS Computer Use via Peekaboo; follows the CLI permission mode",
     )
     parser.add_argument(
         "--tools",
@@ -524,17 +524,10 @@ def parse_args():
             "SSH_CONNECTION" in os.environ or os.stat("/dev/console").st_uid != os.getuid()
         ):
             parser.error("--computer-use requires a terminal in the local macOS desktop session")
-        bundle_id, window_id = args.computer_use
-        if (
-            bundle_id != "com.apple.TextEdit"
-            or not (window_id.isascii() and window_id.isdecimal() and len(window_id) <= 10)
-            or not 0 < int(window_id) < 2**32
-        ):
-            parser.error("--computer-use currently requires com.apple.TextEdit and a valid window ID")
         executable = shutil.which("peekaboo")
         if executable is None:
             parser.error("--computer-use requires Peekaboo. Install with: brew install openclaw/tap/peekaboo")
-        args.computer_use = (os.path.abspath(executable), bundle_id, int(window_id))
+        args.computer_use = (os.path.abspath(executable), os.environ.get("__CFBundleIdentifier"))
     if args.command == "resume" and not args.resume_session_id:
         parser.error("agentica resume requires a session id")
     if args.command != "resume" and args.resume_session_id is not None:

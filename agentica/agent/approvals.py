@@ -145,7 +145,7 @@ class PendingApproval:
     preview: str
     similar_label: str = ""
     options: Tuple[ApprovalDecision, ...] = ("allow", "allow_prefix", "deny", "deny_prefix")
-    local_approval_context: str | None = None
+    local_only: bool = False
 
 
 @dataclass
@@ -486,6 +486,14 @@ def _coerce_command_prefix(item: Any) -> Optional[Tuple[str, ...]]:
     return tokens
 
 
+def _local_tool_route(mode: str, fc: FunctionCall, grants: SessionGrants, work_dir: str | None) -> ApprovalRoute:
+    if mode == "allow-all":
+        return "allow"
+    if grants.denies(fc, work_dir=work_dir):
+        return "deny"
+    return "allow" if (fc.arguments or {}).get("action") == "list_apps" else "ask"
+
+
 def classify(
     mode: str,
     fc: FunctionCall,
@@ -497,10 +505,10 @@ def classify(
 
     Modes nest: ``auto`` is a superset of ``ask``, ``allow-all`` is root.
     Project deny grants apply only in ``ask`` / ``auto``. ``allow-all``
-    never parks and never denies except for explicitly human-only tools.
+    never parks; a local-only tool still needs a live local approval context.
     """
     if fc.function.local_approval_context is not None:
-        return "deny" if mode != "allow-all" and grants.denies(fc, work_dir=work_dir) else "ask"
+        return _local_tool_route(mode, fc, grants, work_dir)
     if mode == "allow-all":
         return "allow"
     if grants.denies(fc, work_dir=work_dir):
@@ -551,10 +559,12 @@ def classify_pending(
 ) -> ApprovalRoute:
     """Re-classify an already-parked approval after a mid-turn mode change."""
     fc = FunctionCall(
-        function=Function(name=pending.name, local_approval_context=pending.local_approval_context),
+        function=Function(name=pending.name),
         arguments=dict(pending.arguments),
         call_id=pending.tool_call_id,
     )
+    if pending.local_only:
+        return _local_tool_route(mode, fc, grants, work_dir)
     return classify(mode, fc, grants, work_dir=work_dir)
 
 
@@ -707,8 +717,8 @@ def describe_approval(fc: FunctionCall, *, work_dir: Optional[str] = None) -> Tu
     args = fc.arguments or {}
     if fc.function.local_approval_context is not None:
         return (
-            f"Allow Computer Use in {fc.function.local_approval_context}?",
-            "Observe can send window contents to the model. " + json.dumps(args, ensure_ascii=False),
+            f"Allow Computer Use: {fc.function.local_approval_context(args)}?",
+            "Window titles and screenshots can be sent to the model. " + json.dumps(args, ensure_ascii=False),
         )
     if name in EXECUTE_TOOLS:
         preview = str(args.get("command") or "")
@@ -758,6 +768,9 @@ def make_approve(
     """
 
     async def approve(fc: FunctionCall) -> ApprovalDecision:
+        local_only = fc.function.local_approval_context is not None
+        if local_only and get_registry() is None:
+            return "deny"
         mode = get_mode()
         grants = get_grants()
         work_dir = get_work_dir()
@@ -880,7 +893,13 @@ def make_approve(
             if reviewer_trace is not None:
                 fc.denied_result = _reviewer_denied_result(reviewer_trace)
             return "deny"
-        question, preview = describe_approval(fc, work_dir=work_dir)
+        try:
+            question, preview = describe_approval(fc, work_dir=work_dir)
+        except ValueError as exc:
+            if not local_only:
+                raise
+            fc.denied_result = str(exc)
+            return "deny"
         if reviewer_note:
             preview = f"{preview}\n\n{reviewer_note}"
         similar_label = _similar_label_for(fc)
@@ -893,7 +912,7 @@ def make_approve(
             preview=preview,
             similar_label=similar_label,
             options=options,
-            local_approval_context=fc.function.local_approval_context,
+            local_only=local_only,
         )
         fc.approval_waited = True
         started = time.monotonic()

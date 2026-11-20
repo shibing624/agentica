@@ -192,8 +192,8 @@ class Function(BaseModel):
         return v
     # A description of what the function does, used by the model to choose when and how to call the function.
     description: Optional[str] = None
-    # Host-owned target for tools that require a local user's confirmation.
-    local_approval_context: str | None = None
+    # Resolves a host-verified target for a tool restricted to the local terminal.
+    local_approval_context: Callable[[dict[str, Any]], str] | None = Field(default=None, exclude=True)
     # The parameters the functions accepts, described as a JSON Schema object.
     # To describe a function that accepts no parameters, provide the value {"type": "object", "properties": {}}.
     parameters: Dict[str, Any] = Field(
