@@ -31,6 +31,23 @@ touching the desktop. Use the `browser` skill for ordinary browser tasks.
    Check `peekaboo permissions status --no-remote`. If neither driver is ready,
    report what is missing rather than silently switching to OS input scripts.
 
+## Install only when requested
+
+Do not install dependencies just because a desktop task needs them. If the user
+asks to install a missing driver, use its upstream route, then verify readiness:
+
+- **Peekaboo:** If Homebrew is installed, run `brew install openclaw/tap/peekaboo`,
+  then `peekaboo --version` and `peekaboo permissions status --no-remote`.
+- **LCU:** Follow the [official installation guide](https://github.com/amontlabs/lcu/blob/main/docs/INSTALLATION.md).
+  On Apple Silicon with the signed desktop app, verify the release archive's
+  SHA-256 before running its `./scripts/install.sh --runtime-only`. Then run
+  `~/.local/share/lcu/current/bin/lcu doctor`. This installs only the runtime;
+  it does not configure an Agentica adapter. Do not select another harness on
+  the user's behalf.
+
+Ask the user to grant missing macOS Accessibility or Screen Recording access
+in System Settings; do not change those permissions on their behalf.
+
 ## Peekaboo workflow
 
 Discover the app by name and select a specific window. Ask before reading its
