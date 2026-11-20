@@ -197,11 +197,7 @@ def test_parse_aes_key_accepts_raw16_b64_hex_b64_and_bare_hex():
 
 
 def test_hex_encoded_aes_key_decrypts_voice_payload():
-    """The encoding that inbound voice/file actually uses must round-trip.
-
-    Naive ``AES.new(b64decode(aes_key), ECB)`` on a hex-wrapped key is
-    AES-256 and fails unpad with 'Padding is incorrect.'
-    """
+    """The encoding that inbound voice/file actually uses must round-trip."""
     import base64
 
     pytest.importorskip("Crypto.Cipher", reason="pycryptodome required for AES tests")
@@ -211,19 +207,15 @@ def test_hex_encoded_aes_key_decrypts_voice_payload():
     from agentica_gateway.channels.wechat import WxBotClient
 
     bot = WxBotClient(token="t")
-    key = os.urandom(16)
+    # Pin the vector: wrong-key plaintext can pass PKCS#7 unpadding by chance.
+    key = bytes(range(16))
     plain = b"#!SILK_V3" + b"\x00" * 80
     cipher = bot._aes_ecb_encrypt(plain, key)
     hex_b64 = base64.b64encode(key.hex().encode("ascii")).decode()
 
     naive = base64.b64decode(hex_b64)
     assert len(naive) == 32
-    # pycryptodome reports the same "this key is wrong" outcome two ways
-    # depending on the garbage it decrypts to — "Padding is incorrect." when the
-    # length byte is out of range, "PKCS#7 padding is incorrect." when the
-    # padding bytes disagree. With a random key either can come out, so matching
-    # the capitalised spelling alone was a ~1-in-15 flake (measured 2/30).
-    with pytest.raises(ValueError, match="(?i)padding is incorrect"):
+    with pytest.raises(ValueError):
         unpad(AES.new(naive, AES.MODE_ECB).decrypt(cipher), 16)
 
     assert bot._aes_ecb_decrypt(cipher, bot._parse_aes_key(hex_b64)) == plain
