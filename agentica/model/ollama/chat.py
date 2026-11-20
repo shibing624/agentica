@@ -48,7 +48,6 @@ class Ollama(Model):
     id: str = "llama3.1"
     name: str = "Ollama"
     provider: str = "Ollama"
-    context_window: int = 200000
 
     # Request parameters
     format: Optional[Any] = None

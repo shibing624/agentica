@@ -279,9 +279,8 @@ def _load_cached(ignore_ttl: bool = False) -> Optional[Dict[str, ModelEntry]]:
 def _get_catalog() -> Dict[str, ModelEntry]:
     """Return the merged catalog (cached remote + hardcoded fallback).
 
-    Remote entries fill in the ~2000 models not in fallback.
-    Fallback is authoritative for models we've explicitly listed
-    (manually calibrated pricing / context_window).
+    Cached remote entries take precedence; built-in entries cover listings
+    absent from the cache or provide offline defaults when no cache exists.
 
     This function is used during Model construction, so it must never block on
     network I/O. A stale cache is good enough for startup; callers that want to
@@ -372,7 +371,7 @@ def _get_model_entry(model_id: str) -> Optional[ModelEntry]:
     return catalog[max(matching_keys, key=len)]
 
 
-def get_model_context_window(model_id: str, default: int = 128000) -> int:
+def get_model_context_window(model_id: str, default: int = 300_000) -> int:
     """Look up context window for a model from the catalog."""
     entry = _get_model_entry(model_id)
     if entry and entry.get("context_window", 0) > 0:

@@ -436,6 +436,30 @@ class TestGetModelContextWindow(unittest.TestCase):
         cw = get_model_context_window("totally-unknown-xyz", default=32000)
         self.assertEqual(cw, 32000)
 
+    def test_unknown_model_uses_300k_in_lookup_and_chat_models(self):
+        from agentica.model.anthropic.claude import Claude
+        from agentica.model.ollama.chat import Ollama
+        from agentica.model.openai.chat import OpenAIChat
+        from agentica.model.openai.responses import OpenAIResponses
+
+        model_id = "unlisted-context-window-fixture"
+        with unittest.mock.patch("agentica.model.cost._MODEL_CATALOG", {}):
+            self.assertEqual(get_model_context_window(model_id), 300_000)
+            for model_cls in (OpenAIChat, OpenAIResponses, Claude, Ollama):
+                with self.subTest(model=model_cls.__name__):
+                    self.assertEqual(model_cls(id=model_id).context_window, 300_000)
+
+    def test_explicit_window_wins_over_catalog_even_at_fallback_size(self):
+        from agentica.model.openai.responses import OpenAIResponses
+
+        catalog = {"context-window-fixture": {"context_window": 1_050_000}}
+        with unittest.mock.patch("agentica.model.cost._MODEL_CATALOG", catalog):
+            self.assertEqual(OpenAIResponses(id="context-window-fixture").context_window, 1_050_000)
+            for size in (200_000, 300_000):
+                with self.subTest(context_window=size):
+                    model = OpenAIResponses(id="context-window-fixture", context_window=size)
+                    self.assertEqual(model.context_window, size)
+
     def test_qwen_max_context(self):
         cw = get_model_context_window("qwen-max")
         self.assertEqual(cw, 32768)

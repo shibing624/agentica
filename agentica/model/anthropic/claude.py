@@ -214,7 +214,6 @@ class Claude(Model):
     id: str = "claude-3-5-sonnet-20241022"
     name: str = "Claude"
     provider: str = "Anthropic"
-    context_window: int = 200000
 
     # Request parameters
     # max_tokens is Anthropic's OUTPUT cap (not the context window). Required by

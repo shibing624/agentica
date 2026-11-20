@@ -316,7 +316,8 @@ class Model(ABC):
     response_format: Optional[Any] = None
 
     # -*- Model capability limits (not sent to the API) -*-
-    context_window: int = 200000
+    # None resolves from the model catalog (or its fallback) at construction.
+    context_window: int | None = None
     supports_images: Optional[bool] = None
     supports_native_compaction: bool = False
     # Ratio between this provider's own prompt count and the local estimate,
@@ -379,17 +380,13 @@ class Model(ABC):
     # Set by provider; consumed by Runner's agentic loop for max_tokens recovery.
     last_finish_reason: Optional[str] = field(init=False, repr=False, default=None)
 
-    _DEFAULT_CONTEXT_WINDOW: int = 200000
-
     def __post_init__(self):
         # Auto-set provider if not provided
         if self.provider is None:
             self.provider = f"{self.name} ({self.id})" if self.name else self.id
 
-        if self.context_window == self._DEFAULT_CONTEXT_WINDOW and self.id != "not-provided":
-            catalog_cw = get_model_context_window(self.id, default=0)
-            if catalog_cw > 0:
-                self.context_window = catalog_cw
+        if self.context_window is None:
+            self.context_window = get_model_context_window(self.id)
 
         if self.supports_images is None:
             self.supports_images = get_model_supports_images(self.id)
