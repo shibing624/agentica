@@ -215,7 +215,7 @@ from agentica.agent.config import PromptConfig
 | `guidelines` | `List[str]` | `None` | 行为准则 |
 | `expected_output` | `str` | `None` | 期望输出格式 |
 | `additional_context` | `str` | `None` | 额外上下文 |
-| `add_datetime_to_instructions` | `bool` | `True` | 注入当前时间 |
+| `add_datetime_to_instructions` | `bool` | `False` | 在会话首条用户消息里注入当天日期（`<session_date>`），不进 system prompt；DeepAgent 默认开启 |
 | `prevent_hallucinations` | `bool` | `False` | 添加防幻觉指令 |
 | `prevent_prompt_leakage` | `bool` | `False` | 防止 prompt 泄露 |
 | `enable_agentic_prompt` | `bool` | `False` | 启用增强 prompt（适合 DeepAgent） |

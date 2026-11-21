@@ -198,10 +198,8 @@ class PromptsMixin:
     def _get_config_directives(self) -> List[str]:
         """Return prompt directives from prompt_config flags.
 
-        NOTE: datetime is excluded here to avoid polluting the static Instructions
-        block.  It is appended at the *very end* of the system prompt (dynamic zone)
-        by get_system_message() — this preserves prefix-cache for all LLM providers
-        (OpenAI, Anthropic, vLLM, etc.) that cache from the start of the prompt.
+        The date is never in the system prompt: it rides the session's first
+        user message (``_get_date_block``), where it cannot void the prefix.
         """
         pc = self.prompt_config
         directives: List[str] = []
@@ -219,7 +217,6 @@ class PromptsMixin:
             directives.append("Only use the tools you are provided.")
         if pc.markdown and self.response_model is None:
             directives.append("Use markdown to format your answers.")
-        # datetime is now handled in the dynamic zone (end of system prompt)
         if self.name is not None and pc.add_name_to_instructions:
             directives.append(f"Your name is: {self.name}.")
         if pc.output_language is not None:
@@ -237,10 +234,6 @@ class PromptsMixin:
 
     def _current_runtime_state(self) -> Dict[str, str]:
         """Snapshot of volatile runtime facts that may drift across turns."""
-        pc = self.prompt_config
-        date_val = datetime.now().strftime("%Y-%m-%d") if (
-            pc.add_datetime_to_instructions or pc.minimal or bool(os.environ.get("AGENTICA_SIMPLE"))
-        ) else ""
         channel_val = str(self._run_channel) if self._run_channel else ""
         summary_val = (
             self.working_memory.summary.model_dump_json(indent=2)
@@ -248,7 +241,6 @@ class PromptsMixin:
             else ""
         )
         return {
-            "date": date_val,
             "channel": channel_val,
             "summary": summary_val,
         }
@@ -373,8 +365,6 @@ class PromptsMixin:
             return None
 
         sections: List[str] = []
-        if current["date"] != prev.get("date", "") and current["date"]:
-            sections.append(f"Today's date is {current['date']}.")
         if current["channel"] != prev.get("channel", ""):
             if current["channel"]:
                 sections.append(
@@ -437,7 +427,6 @@ class PromptsMixin:
             content = (
                 f"You are {name}, an AI assistant."
                 f"\n\nCWD: {os.getcwd()}"
-                f"\nDate: {datetime.now().strftime('%Y-%m-%d')}"
             )
             return Message(role=pc.system_message_role, content=content)
 
@@ -491,8 +480,8 @@ class PromptsMixin:
         #   │ workspace context (AGENTS.md etc.)               │  ← frozen once
         #   │ model system message, session guidance (skills) │     per session
         #   ├─ VOLATILE ZONE (after VOLATILE_SYSTEM_MARKER) ─┤
-        #   │ workspace memory, experiences (both frozen),    │  ← only the date
-        #   │ session summary, datetime, json output prompt   │     moves, per day
+        #   │ workspace memory, experiences (both frozen),    │  ← frozen per
+        #   │ session summary, json output prompt             │     window
         #   └────────────────────────────────────────────────┘
         #
         # The marker splits the system message into two cache blocks, so churn
@@ -714,9 +703,8 @@ class PromptsMixin:
         """Sections below ``VOLATILE_SYSTEM_MARKER``, shared by both system-prompt paths.
 
         Order: workspace memory, learned experiences, session summary, JSON
-        output instructions, date (last, day precision, for the prefix cache).
+        output instructions.
         """
-        pc = self.prompt_config
         lines: List[str] = []
         _query = self._get_anchor_query()
         workspace_memory = await self.get_workspace_memory_prompt(query=_query)
@@ -749,10 +737,6 @@ class PromptsMixin:
                 "delivered as chat messages."
             )
 
-        # Datetime at the very end — day precision for prefix-cache friendliness
-        # Mirrors CC's getLocalISODate(): only YYYY-MM-DD, no time component.
-        if pc.add_datetime_to_instructions:
-            lines.append(f"\nToday's date is {datetime.now().strftime('%Y-%m-%d')}.")
         return lines
 
     def convert_context_to_string(self, context: Any) -> str:
@@ -833,6 +817,18 @@ class PromptsMixin:
             role=pc.user_message_role, content=user_prompt,
             audio=audio, images=images, videos=videos, **kwargs,
         )
+
+    def _get_date_block(self) -> Optional[str]:
+        """The local date for a session's first turn, if enabled.
+
+        In the first user message, which is stored and replayed as sent, and
+        not in the system prompt: a date there changes at midnight and the
+        whole cached conversation behind it would be re-billed.
+        """
+        if not self.prompt_config.add_datetime_to_instructions:
+            return None
+        today = datetime.now().astimezone().date()
+        return f"<session_date>{today.isoformat()} ({today.strftime('%A')}), local time</session_date>"
 
     def _get_git_snapshot_block(self) -> Optional[str]:
         """``<git_snapshot>`` of ``work_dir`` for a session's first turn, if enabled."""
@@ -1058,8 +1054,9 @@ class PromptsMixin:
                 self._get_prompt_hook_block(recall_query),
             )
             git_block = self._get_git_snapshot_block() if first_turn else None
+            date_block = self._get_date_block() if first_turn else None
             original = user_messages[-1].content
-            stored = _join_prefix([git_block], original)
+            stored = _join_prefix([date_block, git_block], original)
             if stored != original:
                 # A ``messages=`` item may be the caller's own Message object,
                 # kept in its history and passed again next turn; rewrite a
@@ -1075,8 +1072,8 @@ class PromptsMixin:
             if note:
                 request_only.insert(0, note)
 
-        # Append volatile runtime deltas (date rollover, IM channel switch,
-        # updated session summary) in-history rather than mutating messages[0].
+        # Append volatile runtime deltas (IM channel switch, updated session
+        # summary) in-history rather than mutating messages[0].
         # The reminder stays in history: the next live turn and /resume must
         # both still see it.
         if (

@@ -53,7 +53,10 @@ class PromptConfig:
 
     # Prompt behavior switches
     add_name_to_instructions: bool = False
-    add_datetime_to_instructions: bool = True
+    # The current date in the user turn (never in the system prompt, where it
+    # would change at midnight and void the cached prefix). Off by default:
+    # a coding agent reads the clock with a tool when it needs it.
+    add_datetime_to_instructions: bool = False
     # Prefix the first user message of a session with a <git_snapshot> of
     # work_dir (branch, `git status --short`, last 3 commits). Not the system
     # prompt, so the cached prefix is untouched. DeepAgent turns it on.

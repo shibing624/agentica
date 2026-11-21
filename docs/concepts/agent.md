@@ -51,7 +51,7 @@ async def main():
         # Prompt 配置
         prompt_config=PromptConfig(
             markdown=True,               # 输出 Markdown 格式
-            add_datetime_to_instructions=True,  # 注入当前日期
+            add_datetime_to_instructions=True,  # 首条用户消息带当天日期（不进 system prompt）
         ),
 
         # 工具配置
@@ -229,7 +229,7 @@ agent = Agent(
         # 格式控制
         markdown=True,                # 要求 LLM 输出 Markdown
         output_language="中文",       # 强制中文输出
-        add_datetime_to_instructions=True,  # 注入当前日期
+        add_datetime_to_instructions=True,  # 首条用户消息带当天日期（不进 system prompt）
 
         # 安全开关
         prevent_hallucinations=True,  # 注入"不确定时说不知道"指令

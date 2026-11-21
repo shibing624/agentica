@@ -9,6 +9,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from agentica.agent import Agent
 from agentica.agent.config import PromptConfig
@@ -162,17 +163,18 @@ class TestGetSystemMessage:
         assert "Be accurate" in msg.content
 
     @pytest.mark.asyncio
-    async def test_system_message_includes_datetime(self):
+    async def test_the_date_is_in_the_first_user_message_not_the_system_prompt(self):
+        """A date in messages[0] changes at midnight and voids the cached prefix."""
         agent = Agent(
             name="A",
             model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
             prompt_config=PromptConfig(add_datetime_to_instructions=True),
         )
-        msg = await agent.get_system_message()
-        assert msg is not None
-        # Should include date/time info
-        content = msg.content
-        assert "UTC" in content or "20" in content  # Year prefix
+        today = datetime.now().astimezone().date().isoformat()
+        system, users, _ = await agent.get_messages_for_run(message="hi")
+        assert today not in system.content
+        assert users[0].content.startswith(f"<session_date>{today}")
+        assert users[0].content.endswith("hi")
 
     @pytest.mark.asyncio
     async def test_system_message_with_system_prompt(self):

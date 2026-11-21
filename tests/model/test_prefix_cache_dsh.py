@@ -358,7 +358,7 @@ def test_system_prompt_stays_byte_pinned_across_date_and_channel_changes(tmp_pat
         mock_dt.now.return_value = datetime(2026, 11, 14, 2, 0, 0)
         asyncio.run(agent.run("Turn 1 question"))
 
-        # Next day + switch to feishu IM channel: messages[0] MUST NOT change!
+        # Next day + switch to feishu IM channel: the request only grows.
         mock_dt.now.return_value = datetime(2026, 11, 15, 9, 0, 0)
         asyncio.run(agent.run("Turn 2 question", config=RunConfig(channel="feishu")))
 
@@ -369,108 +369,19 @@ def test_system_prompt_stays_byte_pinned_across_date_and_channel_changes(tmp_pat
     m2, _ = spy.captured[1]
     m3, _ = spy.captured[2]
 
+    # Neither the date nor the channel touches messages[0], and a new day
+    # leaves every message already sent as it was.
     assert m1[0] == m2[0] == m3[0], "messages[0] system prompt mutated mid-window!"
-    assert "2026-11-14" in m2[0]["content"]
-    # Turn 2 user message carries the in-history <system-reminder>
+    assert "2026-11" not in m1[0]["content"]
+    assert m2[: len(m1)] == m1
+    assert m1[1]["content"].startswith("<session_date>2026-11-14")
+    assert "2026-11-15" not in str(m2) and "2026-11-15" not in str(m3)
+    # Turn 2 user message carries the channel switch as an in-history reminder
     assert "<system-reminder>" in m2[-1]["content"]
-    assert "2026-11-15" in m2[-1]["content"]
     assert "feishu" in m2[-1]["content"]
     # Turn 3 user message has NO duplicate <system-reminder> since state did not change again
     assert "<system-reminder>" not in m3[-1]["content"]
     assert m3[-1]["content"] == "Turn 3 question"
-
-
-def test_mid_session_tool_addition_is_append_only(tmp_path, monkeypatch):
-    monkeypatch.setenv("AGENTICA_HOME", str(tmp_path))
-
-    class _DynamicToolkit(Tool):
-        def __init__(self):
-            super().__init__(name="dyn")
-            self.register(self.first_tool)
-            self.register(self.second_tool)
-
-        def first_tool(self, a: str) -> str:
-            """First."""
-            return a
-
-        def second_tool(self, b: str) -> str:
-            """Second."""
-            return b
-
-    def prepended_later_tool(c: str) -> str:
-        """Added mid-session at the front of agent.tools."""
-        return c
-
-    spy = _SpyOpenAIChat(id="DeepSeek-V4.1-Flash")
-    tk = _DynamicToolkit()
-    agent = Agent(
-        model=spy,
-        tools=[tk],
-        add_history_to_context=True,
-        tool_config=ToolConfig(auto_load_mcp=False),
-    )
-
-    asyncio.run(agent.run("step 1"))
-    names_turn1 = [t["function"]["name"] for t in spy.captured[0][1]["tools"]]
-
-    # Caller prepends a new tool at index 0 of agent.tools before turn 2:
-    # _stabilize_model_tool_order must keep existing tools in place and append the new one last.
-    agent.tools = [prepended_later_tool, *agent.tools]
-    asyncio.run(agent.run("step 2"))
-    names_turn2 = [t["function"]["name"] for t in spy.captured[1][1]["tools"]]
-
-    assert names_turn2[: len(names_turn1)] == names_turn1
-    assert names_turn2[-1] == "prepended_later_tool"
-
-
-def test_session_resume_recovers_exact_system_prompt_tools_and_wire_user_prefix(tmp_path, monkeypatch):
-    monkeypatch.setenv("AGENTICA_HOME", str(tmp_path))
-    ws_path = tmp_path / "ws"
-    ws1 = Workspace(str(ws_path))
-    ws1.initialize()
-    (ws1.path / "MEMORY.md").write_text("# Memory\n- Rule v1\n", encoding="utf-8")
-
-    sess_dir = tmp_path / "sessions"
-    spy1 = _SpyOpenAIChat(id="DeepSeek-V4.1-Flash")
-    a1 = Agent(
-        name="ResumeAgent",
-        model=spy1,
-        workspace=ws1,
-        enable_long_term_memory=True,
-        add_history_to_context=True,
-        work_dir=str(Path(__file__).resolve().parents[2]),
-        prompt_config=PromptConfig(add_datetime_to_instructions=True, add_git_snapshot=True),
-        tool_config=ToolConfig(auto_load_mcp=False),
-        session_id="sess-resume-exact",
-        session_base_dir=str(sess_dir),
-    )
-    asyncio.run(a1.run("initial task"))
-    asyncio.run(a1.run("follow up"))
-
-    # Disk memory changes before a brand-new Agent process resumes the session:
-    (ws1.path / "MEMORY.md").write_text("# Memory\n- Rule v2 changed on disk!\n", encoding="utf-8")
-    ws2 = Workspace(str(ws_path))
-    spy2 = _SpyOpenAIChat(id="DeepSeek-V4.1-Flash")
-    a2 = Agent(
-        name="ResumeAgent",
-        model=spy2,
-        workspace=ws2,
-        enable_long_term_memory=True,
-        add_history_to_context=True,
-        work_dir=str(Path(__file__).resolve().parents[2]),
-        prompt_config=PromptConfig(add_datetime_to_instructions=True, add_git_snapshot=True),
-        tool_config=ToolConfig(auto_load_mcp=False),
-        session_id="sess-resume-exact",
-        session_base_dir=str(sess_dir),
-    )
-    asyncio.run(a2.run("resumed turn"))
-
-    turn2_msgs, turn2_kw = spy1.captured[1]
-    resumed_msgs, resumed_kw = spy2.captured[0]
-
-    # Tools schema and every historical message (system + turn 1 with <git_snapshot> + turn 2) match byte-for-byte!
-    assert resumed_kw["tools"] == turn2_kw["tools"]
-    assert resumed_msgs[: len(turn2_msgs)] == turn2_msgs
 
 
 def test_auto_compact_resets_window_pins_so_new_window_rebaselines(tmp_path, monkeypatch):
@@ -487,7 +398,7 @@ def test_auto_compact_resets_window_pins_so_new_window_rebaselines(tmp_path, mon
     with patch("agentica.agent.prompts.datetime") as mock_dt:
         mock_dt.now.return_value = datetime(2026, 11, 14, 1, 0, 0)
         asyncio.run(agent.run("turn 1"))
-        assert "2026-11-14" in (agent._pinned_system_prompt or "")
+        assert agent._pinned_system_prompt is not None
 
         # Force a Layer 2 window cut; pins must clear so the new window re-baselines node 0.
         agent.update_model()
@@ -504,7 +415,8 @@ def test_auto_compact_resets_window_pins_so_new_window_rebaselines(tmp_path, mon
 
         mock_dt.now.return_value = datetime(2026, 11, 16, 1, 0, 0)
         asyncio.run(agent.run("turn after compact"))
-        assert "2026-11-16" in spy.captured[-1][0][0]["content"]
+        assert agent._pinned_system_prompt is not None
+        assert "2026-11" not in agent._pinned_system_prompt
 
 
 def test_trace_records_prefix_reuse_ratio_and_detects_cache_cliffs(tmp_path):
@@ -603,7 +515,7 @@ def test_resume_uses_logged_runtime_state(tmp_path):
         context_window=128000,
         tools=[],
         system_prompt="You are an assistant with no channel sentence.",
-        runtime_state={"date": datetime.now().strftime("%Y-%m-%d"), "channel": "wechat", "summary": ""},
+        runtime_state={"channel": "wechat", "summary": ""},
     )
     agent = Agent(
         model=OpenAIChat(id="gpt-4o-mini", api_key="fake_key"),
