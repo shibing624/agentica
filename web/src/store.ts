@@ -42,6 +42,8 @@ export type ChatMsg = {
   content: string;
   ts?: number;
   files?: string[];
+  /** Verified file mentions for a hydrated transcript; [] means no cards in this paint. */
+  mentionedFiles?: string[];
   steps?: Array<Record<string, any>>;
   parts?: MsgPart[];
   durationSec?: number;

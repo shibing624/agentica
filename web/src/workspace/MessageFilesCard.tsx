@@ -3,26 +3,19 @@ import * as api from "../api";
 import { useStrings } from "../i18n";
 import { FileTypeIcon, IconChevronDown, IconExternal, IconFileCode, IconFinder } from "../icons";
 import type { FileEdit } from "../lib/fileEdits";
-import { fileDiffsOf, type FileEdits } from "../lib/fileDiff";
+import { diffCounts, fileDiffsOf, type FileEdits } from "../lib/fileDiff";
 import { isAbsOrHomePath } from "../lib/filePath";
-import { messageEdits, messageFileCandidates } from "../lib/messageFiles";
-import { cachedExisting, statWorkspaceFilesBatched } from "../lib/workspaceStat";
+import { messageEdits, mentionedFileCandidates } from "../lib/messageFiles";
+import { baseName } from "../lib/panelTabs";
+import { statWorkspaceFilesBatched } from "../lib/workspaceStat";
 import { showToast } from "../store";
 
 const MAX_VISIBLE = 3;
 /** Edited rows shown before the fold (dsh's turn-changes card). */
 const MAX_VISIBLE_EDITED = 4;
 
-function PathLabel({ path }: { path: string }) {
-  const slash = path.lastIndexOf("/");
-  const dir = slash >= 0 ? path.slice(0, slash + 1) : "";
-  const name = slash >= 0 ? path.slice(slash + 1) : path;
-  return (
-    <span className="files-path">
-      {dir && <span className="files-path-dir">{dir}</span>}
-      <span className="files-path-name">{name}</span>
-    </span>
-  );
+function Counts({ added, removed }: { added: number; removed: number }) {
+  return <><span className="add">+{added.toLocaleString()}</span><span className="del">-{removed.toLocaleString()}</span></>;
 }
 
 function absPath(workspace: string, rel: string) {
@@ -31,17 +24,16 @@ function absPath(workspace: string, rel: string) {
 }
 
 /**
- * The files a reply touched, under the answer: what it edited (with +/- lines)
- * first, then other files it named. An edited row opens its diff in the side
- * panel (a file the reply only named opens its preview); the buttons open the
- * file with the OS default app or show it in its folder.
+ * Recorded edits belong to the turn, even if a file isn't there anymore.
+ * File mentions are independent and only shown after verifying the path.
  */
 export function MessageFilesCard({
-  text, steps, uploaded, workspace, sessionId, onOpenFile, onOpenDiff, live, role,
+  text, steps, uploaded, mentionedFiles, workspace, sessionId, onOpenFile, onOpenDiff, live, role,
 }: {
   text: string;
   steps?: Array<Record<string, any>>;
   uploaded?: string[];
+  mentionedFiles?: string[];
   workspace: string | null;
   sessionId: string | null;
   onOpenFile: (path: string) => void;
@@ -51,46 +43,43 @@ export function MessageFilesCard({
   role?: "user" | "assistant";
 }) {
   const S = useStrings();
-  const edits = useMemo(() => messageEdits(steps, workspace), [steps, workspace]);
-  const diffs = useMemo(() => fileDiffsOf(steps, workspace), [steps, workspace]);
+  const edits = useMemo(() => live ? [] : messageEdits(steps, workspace), [live, steps, workspace]);
+  const diffs = useMemo(() => edits.length ? fileDiffsOf(steps, workspace) : new Map<string, FileEdits>(), [edits, steps, workspace]);
   const candidates = useMemo(
-    () => messageFileCandidates({ content: text, steps, files: uploaded }, workspace),
-    [text, steps, uploaded, workspace],
+    () => live || mentionedFiles !== undefined ? [] : mentionedFileCandidates({ content: text, steps, files: uploaded }, workspace, edits),
+    [live, mentionedFiles, text, steps, uploaded, workspace, edits],
   );
-  const sig = candidates.join("\0");
-
-  // Drawn from the last lookup in the same render as the reply, so the card
-  // never appears a beat later and pushes the layout; the effect revalidates.
-  const cached = !live && workspace ? cachedExisting(workspace, candidates) : null;
+  const sig = JSON.stringify([sessionId, workspace, candidates]);
   const [fetched, setFetched] = useState<{ sig: string; found: string[] } | null>(null);
-  const existing = fetched?.sig === sig ? fetched.found : (cached ?? []);
-  const setExisting = (found: string[]) => setFetched({ sig, found });
+  const mentioned = mentionedFiles ?? (fetched?.sig === sig ? fetched.found : []);
   useEffect(() => {
-    // Streaming tokens rewrite `text` every frame; the extracted path set
-    // rarely changes, but a new array still retriggered POST /stat. Wait
-    // until the turn settles, then one batched lookup.
-    if (live) return;
-    if (!workspace || !sig) {
-      setExisting([]);
-      return;
-    }
+    // Hydrated messages already have a first-paint snapshot. Only newly sent
+    // messages need to resolve mentions here, once the turn settles.
+    if (live || mentionedFiles !== undefined || !workspace || !candidates.length) return;
     let cancelled = false;
-    void (sessionId ? api.fetchWorkspaceScope(sessionId) : Promise.resolve(null)).then((scope) => {
+    void (sessionId ? api.fetchWorkspaceScope(sessionId) : Promise.resolve(null)).then((result) => {
       if (cancelled) return [];
-      return statWorkspaceFilesBatched(workspace, candidates, scope?.ok && scope.data ? scope.data : undefined);
+      const scope = result?.ok && result.data ? result.data : undefined;
+      return statWorkspaceFilesBatched(workspace, candidates, scope);
     }).then((found) => {
-      if (!cancelled) setExisting(found);
+      if (!cancelled) setFetched({ sig, found });
     });
     return () => { cancelled = true; };
-  }, [live, workspace, sessionId, sig]);
+  }, [live, mentionedFiles, workspace, sessionId, sig, candidates]);
 
   const [expanded, setExpanded] = useState(false);
-  if (live || !workspace || existing.length === 0) return null;
+  const [mentionsExpanded, setMentionsExpanded] = useState(false);
+  if (live || !workspace || (!edits.length && !mentioned.length)) return null;
 
-  const present = new Set(existing);
-  const edited = edits.filter((e) => present.has(e.path));
-  const editedPaths = new Set(edited.map((e) => e.path));
-  const mentioned = existing.filter((p) => !editedPaths.has(p));
+  const edited = edits.map((edit) => {
+    const diff = diffs.get(edit.path);
+    return diff ? { ...edit, ...diffCounts(diff.edits) } : edit;
+  });
+  const reviewFiles = edited.flatMap(({ path }) => {
+    const diff = diffs.get(path);
+    return diff ? [diff] : [];
+  });
+  const pick = (path: string) => diffs.has(path) ? onOpenDiff(reviewFiles, path) : onOpenFile(path);
 
   const open = (rel: string, app: "finder" | "reveal") => {
     const path = absPath(workspace, rel);
@@ -100,90 +89,54 @@ export function MessageFilesCard({
 
   const row = (rel: string, edit?: FileEdit) => {
     const diff = edit ? diffs.get(rel) : undefined;
-    return (
-    <div key={rel} className="mfc-row">
-      <button type="button" className="mfc-path"
-              title={`${absPath(workspace, rel)}\n${diff ? S.chat.openDiff : S.chat.openPreview}`}
-              onClick={() => (diff ? onOpenDiff(reviewFiles, rel) : onOpenFile(rel))}>
-        <FileTypeIcon path={rel} size={15} />
-        <PathLabel path={rel} />
+    return <li key={rel} className="mfc-row">
+      <button type="button" className="mfc-path" title={absPath(workspace, rel)}
+              aria-label={`${diff ? S.chat.openDiff : S.chat.openPreview}: ${rel}`}
+              onClick={() => diff ? onOpenDiff(reviewFiles, rel) : onOpenFile(rel)}>
+        {!edit && <FileTypeIcon path={rel} size={15} />}
+        <span className="files-path">{rel}</span>
+        {edit && <span className="mfc-diff"><Counts added={edit.added} removed={edit.removed} /></span>}
       </button>
-      <span className="mfc-actions">
+      {!edit && <span className="mfc-actions">
         <button type="button" title={S.chat.openExternal} onClick={() => open(rel, "finder")}><IconExternal /></button>
         <button type="button" title={S.chat.revealInFolder} onClick={() => open(rel, "reveal")}><IconFinder /></button>
-      </span>
-      {edit && (
-        <span className="mfc-diff">
-          <span className="add">+{edit.added.toLocaleString()}</span>
-          <span className="del">-{edit.removed.toLocaleString()}</span>
-        </span>
-      )}
-    </div>
-    );
+      </span>}
+    </li>;
   };
 
-  // The review tab lists the edited files in the card's order.
-  const reviewFiles = edited.flatMap((e) => {
-    const d = diffs.get(e.path);
-    return d ? [d] : [];
-  });
-
-  const editedVisible = expanded ? edited : edited.slice(0, MAX_VISIBLE_EDITED);
-  const mentionedVisible = expanded ? mentioned : mentioned.slice(0, MAX_VISIBLE);
-  const foldable = edited.length > MAX_VISIBLE_EDITED || mentioned.length > MAX_VISIBLE;
-  const total = edited.length + mentioned.length;
-  // The round's whole edit volume, so the header says how big the turn was.
+  const single = edited.length === 1 ? edited[0] : undefined;
   const added = edited.reduce((n, e) => n + e.added, 0);
   const removed = edited.reduce((n, e) => n + e.removed, 0);
   const mentionedTitle = role === "user"
     ? S.chat.filesMentionedQuery(mentioned.length)
     : S.chat.filesMentioned(mentioned.length);
-  const headText = (
-    <span className="mfc-head-text">
-      <span className="mfc-title">
-        {edited.length ? S.chat.filesEdited(edited.length) : mentionedTitle}
-      </span>
-      <span className="mfc-sub">
-        {edited.length > 0 && (
-          <span className="mfc-total">
-            <span className="add">+{added.toLocaleString()}</span>
-            <span className="del">-{removed.toLocaleString()}</span>
-          </span>
-        )}
-        <span className="mfc-hint">{S.chat.filesPreviewHint}</span>
-      </span>
-    </span>
+  const fold = (open: boolean, toggle: () => void, count: number) => (
+    <button type="button" className={`msg-files-more${open ? " open" : ""}`} aria-expanded={open} onClick={toggle}>
+      <span>{open ? S.chat.showLess : S.chat.allFiles(count)}</span><IconChevronDown />
+    </button>
   );
 
-  return (
-    <div className="msg-files-card">
-      {reviewFiles.length > 0 ? (
-        // Like dsh, the header opens the round's review on its first file.
-        <button type="button" className="mfc-head mfc-head-btn" title={S.chat.openRoundReview}
-                onClick={() => onOpenDiff(reviewFiles, reviewFiles[0].path)}>
-          <span className="mfc-icon"><IconFileCode /></span>
-          {headText}
-        </button>
-      ) : (
-        <div className="mfc-head">
-          <span className="mfc-icon"><IconFileCode /></span>
-          {headText}
-        </div>
-      )}
-      <div className="mfc-body">
-        {editedVisible.map((e) => row(e.path, e))}
-        {edited.length > 0 && mentionedVisible.length > 0 && (
-          <div className="mfc-section">{mentionedTitle}</div>
-        )}
-        {mentionedVisible.map((p) => row(p))}
-        {foldable && (
-          <button type="button" className={`msg-files-more${expanded ? " open" : ""}`} aria-expanded={expanded}
-                  onClick={() => setExpanded((v) => !v)}>
-            <span>{expanded ? S.chat.showLess : S.chat.allFiles(total)}</span>
-            <IconChevronDown />
-          </button>
-        )}
-      </div>
-    </div>
-  );
+  return <>
+    {edited.length > 0 && <div className="msg-files-card mfc-edits">
+      <button type="button" className="mfc-head mfc-head-btn"
+              title={single ? absPath(workspace, single.path) : S.chat.openRoundReview}
+              onClick={() => pick(single?.path ?? reviewFiles[0]?.path ?? edited[0].path)}>
+        <span className="mfc-icon"><FileTypeIcon path={single?.path} kind={single ? undefined : "code"} size={20} /></span>
+        <span className="mfc-head-text">
+          <span className="mfc-title">{single ? S.chat.fileEdited(baseName(single.path)) : S.chat.filesEdited(edited.length)}</span>
+          <span className="mfc-sub">
+            <span className="mfc-total"><Counts added={added} removed={removed} /></span>
+            <span className="mfc-hint">{S.chat.filesPreviewHint}</span>
+          </span>
+        </span>
+      </button>
+      {!single && <ul className="mfc-body">{(expanded ? edited : edited.slice(0, MAX_VISIBLE_EDITED)).map((e) => row(e.path, e))}</ul>}
+      {edited.length > MAX_VISIBLE_EDITED && fold(expanded, () => setExpanded((v) => !v), edited.length)}
+    </div>}
+    {mentioned.length > 0 && <div className="msg-files-card mfc-mentions">
+      <div className="mfc-head"><span className="mfc-icon"><IconFileCode /></span><span className="mfc-title">{mentionedTitle}</span></div>
+      <ul className="mfc-body">{(mentionsExpanded ? mentioned : mentioned.slice(0, MAX_VISIBLE)).map((path) => row(path))}</ul>
+      {mentioned.length > MAX_VISIBLE && fold(mentionsExpanded, () => setMentionsExpanded((v) => !v), mentioned.length)}
+    </div>}
+  </>;
 }

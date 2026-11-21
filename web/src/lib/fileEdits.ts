@@ -21,8 +21,8 @@ export function fileEditsOf(steps?: Array<Record<string, any>>): FileEdit[] {
     byPath.set(path, cur);
   };
   for (const st of steps || []) {
-    if (st.type !== "tool" || !st.argsStr) continue;
-    if (typeof st.result === "string" && /^Error\b/.test(st.result)) continue;
+    if (st.type !== "tool" || !st.argsStr || typeof st.result !== "string") continue;
+    if (/^Error\b/.test(st.result)) continue;
     let args: Record<string, unknown>;
     try { args = JSON.parse(st.argsStr); } catch { continue; }
     if (st.name === "write_file" && typeof args.file_path === "string" && typeof args.content === "string") {

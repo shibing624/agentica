@@ -8,7 +8,8 @@ import {
 } from "./lib/hydrateMessages";
 import { emptyChatIds, localOnlySessionIds } from "./lib/sessionDrafts";
 import { shouldApplyDisplayTitle } from "./lib/sessionTitle";
-import { messageFileCandidates } from "./lib/messageFiles";
+import { mentionedFileCandidates } from "./lib/messageFiles";
+import { finalAnswerOf } from "./lib/msgParts";
 import { cachedExisting, statWorkspaceFilesBatched } from "./lib/workspaceStat";
 import { searchMsgsConversation, type SessionContentHit } from "./lib/sessionRows";
 import { normalizeApprovalMode, resolveChatTier } from "./lib/approvalMode";
@@ -323,17 +324,23 @@ function countUserTurns(msgs: Session["msgs"]): number {
 
 const FILE_CARD_PREFETCH_MS = 600;
 
-async function prefetchFileCards(msgs: Session["msgs"], workspace: string, sessionId: string) {
-  if (!workspace) return;
-  const paths = [...new Set(msgs.flatMap((m) => messageFileCandidates(m, workspace)))];
-  if (!paths.length) return;
-  await Promise.race([
+async function prepareFileMentions(msgs: Session["msgs"], workspace: string, sessionId: string) {
+  const candidates = msgs.map((m) => workspace ? mentionedFileCandidates({
+    ...m, content: m.role === "assistant" ? finalAnswerOf(m) : m.content,
+  }, workspace) : []);
+  const paths = [...new Set(candidates.flat())];
+  const found = new Set(paths.length ? await Promise.race([
     api.fetchWorkspaceScope(sessionId).then(({ ok, data }) => {
       const scope = ok && data ? data : undefined;
-      if (!cachedExisting(scope ?? workspace, paths)) return statWorkspaceFilesBatched(workspace, paths, scope);
+      const cached = cachedExisting(scope ?? workspace, paths);
+      const refresh = statWorkspaceFilesBatched(workspace, paths, scope);
+      return cached ?? refresh;
     }),
-    new Promise((resolve) => window.setTimeout(resolve, FILE_CARD_PREFETCH_MS)),
-  ]);
+    new Promise<string[]>((resolve) => window.setTimeout(() => resolve([]), FILE_CARD_PREFETCH_MS)),
+  ]) : []);
+  // Freeze optional mentions for this paint, even on timeout. A later stat
+  // can warm the cache for the next hydration, but must not insert a card here.
+  msgs.forEach((m, index) => { m.mentionedFiles = candidates[index].filter((path) => found.has(path)); });
 }
 
 /** Replay a session's transcript from the server log so a reload (or another
@@ -360,10 +367,8 @@ export async function hydrateSession(id: string, force = false, allowResuming = 
   }
   const olderTurns = data.older_turns ?? 0;
   const msgs = mergeClientSteers(id, eventsToChatMsgs(data.events), olderTurns);
-  // Look up the files cards' paths before the transcript is shown, so each
-  // reply and its card land in one paint. Bounded: a slow stat only brings
-  // back the late card, never a blank chat.
-  await prefetchFileCards(sess.running ? msgs.filter((m) => !m.inFlight) : msgs, sess.dir, id);
+  // Recorded changes are already in the transcript; only optional mentions need stat.
+  await prepareFileMentions(msgs.filter((m) => !m.inFlight), sess.dir, id);
   if (hydrateGenerations[id] !== generation || sessionIsLive(id, allowResuming) || getState().sessions[id] !== sess) return;
   sess.msgs = msgs;
   sess.hasOlder = !!data.has_more;
@@ -410,7 +415,7 @@ export async function loadOlderMessages(id: string, includeTurn?: number): Promi
     return false;
   }
   const older = eventsToChatMsgs(data.events);
-  await prefetchFileCards(older, cur.dir, id);
+  await prepareFileMentions(older, cur.dir, id);
   if ((hydrateGenerations[id] || 0) !== generation || getState().sessions[id] !== cur) {
     bump();
     return false;

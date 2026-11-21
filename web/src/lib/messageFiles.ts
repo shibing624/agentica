@@ -14,19 +14,19 @@ export function messageEdits(steps: Array<Record<string, any>> | undefined, work
   return out;
 }
 
-/** Every path a message's files card may list; the card shows the ones that exist. */
-export function messageFileCandidates(
+/** Only mentions need an existence check; edits are historical records. */
+export function mentionedFileCandidates(
   m: { content?: string; steps?: Array<Record<string, any>>; files?: string[] },
   workspace: string | null,
+  edits = messageEdits(m.steps, workspace),
 ): string[] {
   const raw = [
-    ...messageEdits(m.steps, workspace).map((e) => e.path),
     ...extractFilePaths(m.content || ""),
     ...extractToolPaths(m.steps),
     ...(m.files || []),
   ];
   const out: string[] = [];
-  const seen = new Set<string>();
+  const seen = new Set(edits.map((e) => e.path));
   for (const item of raw) {
     const rel = normalizeMentionedPath(item, workspace);
     if (rel === null || seen.has(rel)) continue;

@@ -577,7 +577,7 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .input-ta-hl{position:absolute;inset:0;padding:16px 20px 6px;font-family:var(--sans);font-size:15px;line-height:1.6;white-space:pre-wrap;overflow-wrap:break-word;color:transparent;overflow:hidden;pointer-events:none}
 .skill-ref-hl{color:transparent;background:var(--skill-ref-bg);border-radius:4px;box-shadow:0 0 0 2px var(--skill-ref-bg);text-decoration:underline;text-decoration-color:var(--skill-ref);text-decoration-thickness:1.5px;text-underline-offset:3px}
 /* SKILL.md in the right-hand panel */
-.files-panel-body{flex:1;min-height:0;display:flex;flex-direction:column}
+.files-panel-body{flex:1;min-height:0;min-width:0;display:flex;flex-direction:column}
 .files-panel-body[hidden]{display:none}
 .skill-pane-meta{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 16px;margin:0 0 14px;padding:10px 12px;border:var(--hair) solid var(--border);border-radius:10px;background:var(--bg2);font-size:12px;line-height:1.55}
 .skill-pane-field{display:contents}
@@ -1430,16 +1430,23 @@ a.side-nav-item{text-decoration:none;color:inherit}
 .files-resize:hover::before{background:var(--accent-soft)}
 .files-panel{height:100vh;flex-shrink:0;overflow:hidden;border-left:var(--hair) solid var(--border);background:var(--bg);display:flex;flex-direction:column}
 .files-panel:not(.open){border-left:none}
+.files-panel.open.floating{position:fixed;inset:0 0 0 auto;z-index:150;box-shadow:var(--elev-pop)}
 /* Fullscreen covers the whole window (sidebar included), like dsh's right
    panel; it sits above the collapsed-sidebar seat (z 120) but below modals. */
 .files-panel.fullscreen{position:fixed;inset:0;z-index:150;border-left:none}
 html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:84px;-webkit-app-region:drag}
 .files-panel-inner{height:100%;display:flex;flex-direction:column;min-width:0}
-.ws-panel-content{position:relative;display:flex;flex:1;min-height:0;min-width:0;container-type:inline-size}
+.ws-panel-content{--ws-preview-bar-height:38px;position:relative;isolation:isolate;display:flex;flex:1;min-height:0;min-width:0;container-type:inline-size}
 .ws-tree-column{display:flex;flex:1;min-width:0;min-height:0}
 .ws-tree-column[hidden]{display:none}
-.ws-tree-column.side{flex:0 0 min(38%,240px);border-right:1px solid var(--border);background:var(--bg)}
-@container (max-width:520px){.ws-tree-column.side{position:absolute;inset:0 auto 0 0;width:min(270px,70%);z-index:2;box-shadow:4px 0 14px #0002}}
+.ws-tree-column.side{flex:0 0 248px;margin:8px;background:var(--bg2);border:var(--hair) solid var(--border);border-radius:var(--radius-md);box-shadow:var(--elev-pop);z-index:2}
+@container (width < 560px){
+  .ws-tree-column.side{position:absolute;inset:var(--ws-preview-bar-height) 0 0 auto;width:248px}
+}
+@container (width < 400px){
+  .ws-tree-column.side{left:0;width:auto;margin:0;border:0;border-radius:0;background:var(--bg);box-shadow:none}
+  .ws-panel-content:has(> .ws-tree-column.side) > .files-panel-body .ws-preview-body{visibility:hidden}
+}
 .files-panel-head{display:flex;align-items:center;gap:4px;height:38px;padding:10px 8px 0 10px;flex-shrink:0;min-width:0;box-sizing:border-box}
 /* ===== PANEL TABS (dsh's dockkit strip, one pane) =====
    28px chips; the active one is filled, the rest are bare text with a hairline
@@ -1447,7 +1454,7 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
    over the title's end and shows on the active, hovered or focused chip, so a
    chip is the same width either way. Overflow scrolls with no scrollbar and
    fades at the hidden edge. */
-.pt-strip{display:flex;align-items:center;min-width:0;flex:0 1 auto;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;scroll-behavior:smooth}
+.pt-strip{display:flex;align-items:center;min-width:0;flex:1 1 0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;scroll-behavior:smooth}
 .pt-strip[data-scroll="start"]{mask-image:linear-gradient(to right,transparent,black 24px)}
 .pt-strip[data-scroll="end"]{mask-image:linear-gradient(to right,black calc(100% - 24px),transparent)}
 .pt-strip[data-scroll="start end"]{mask-image:linear-gradient(to right,transparent,black 24px,black calc(100% - 24px),transparent)}
@@ -1486,8 +1493,8 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .pt-menu-item[data-highlighted]{background:var(--bg3)}
 .pt-menu-item[data-disabled]{color:var(--fg3);cursor:default;pointer-events:none}
 .pt-menu-item kbd{font-family:var(--sans);font-size:11.5px;color:var(--fg3)}
-.pt-add{margin-left:2px}
-.pt-fill{flex:1 1 0;min-width:0}
+.pt-actions{display:flex;align-items:center;gap:4px;flex:none}
+.pt-actions .ib[aria-expanded="true"]{background:var(--bg3);color:var(--fg)}
 /* ===== START PAGE (dsh guide) ===== */
 /* Cards in one centred column, lifted above the middle by the ::after spacer;
    min-height centres a short guide and lets a tall one scroll. */
@@ -1509,7 +1516,8 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .term-screen .xterm-viewport{background:transparent !important}
 .term-banner{position:absolute;left:10px;right:10px;bottom:10px;display:flex;align-items:center;gap:10px;padding:8px 10px;border:var(--hair) solid var(--border);border-radius:var(--radius-sm);background:var(--bg2);font-size:12px;color:var(--fg2)}
 .term-banner span{flex:1}
-.ws-browser{flex:1;min-height:0;display:flex;flex-direction:column}
+.ws-browser{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
+.ws-tree-column .ws-browser{--tree-inset:8px}
 .ws-toolbar{display:flex;flex-wrap:nowrap;align-items:center;gap:4px;height:38px;padding:0 8px 0 12px;border-bottom:var(--hair) solid var(--border);flex-shrink:0;min-width:0;box-sizing:border-box}
 .ws-crumb{border:none;background:transparent;color:var(--fg2);font-size:12px;padding:2px 6px;border-radius:6px;cursor:pointer;max-width:8em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ws-crumb-root{display:inline-flex;align-items:center;gap:4px}
@@ -1541,19 +1549,31 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .ws-open-item svg{width:14px;height:14px;color:var(--fg2);flex:none}
 .ws-open-item:hover{background:var(--bg3)}
 .ws-open-item.on span::after{content:" ✓";color:var(--fg3)}
-.ws-list{flex:1;overflow:auto}
+.ws-list{flex:1;overflow:auto;overflow-x:hidden;padding:0 var(--tree-inset) 8px;scroll-padding-block:8px}
 .ws-list ul{list-style:none;margin:0;padding:0}
 .ws-list ul.busy{opacity:.55}
 .ws-list li{display:flex;align-items:center;border-bottom:var(--hair) solid var(--border2)}
 .ws-list .ws-tree-level>li{display:block;border:0}
-.ws-tree-row{display:flex;align-items:center;border-bottom:var(--hair) solid var(--border2)}
-.ws-tree-level .ws-tree-level{padding-left:13px}
-.ws-tree-caret{width:10px;color:var(--fg3)}
-.ws-row.selected{background:var(--bg3)}
-.ws-scope-title{min-width:0;text-align:left}
+.ws-tree-row{display:flex;align-items:center;min-width:0;border-radius:var(--radius-sm)}
+.ws-tree-row:hover,.ws-search-results .ws-row:hover{background:var(--hover)}
+.ws-tree-row.selected,.ws-tree-row.selected:hover{background:var(--selected)}
+.ws-tree-level .ws-tree-level{padding-left:min(16px,6%)}
+.ws-tree-caret{width:12px;flex:none;color:var(--fg3);display:inline-flex}
+.ws-tree-caret svg{width:12px;height:12px}
+.ws-scope-title{min-width:0;max-width:none;flex:0 1 auto;text-align:left}
 .ws-scope-title>span{display:flex;flex-direction:column;min-width:0}
-.ws-scope-title small{color:var(--fg3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ws-search{margin:7px 10px;padding:5px 7px;box-sizing:border-box}
+.ws-scope-title strong,.ws-scope-title small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ws-scope-title small{color:var(--fg3)}
+.ws-search-field{display:flex;align-items:center;gap:6px;min-width:0;min-height:30px;flex:none;margin:8px var(--tree-inset) 4px;padding:0 6px;border:var(--hair) solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input)}
+.ws-search-field:focus-within{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.ws-search-icon{display:inline-flex;flex:none;color:var(--fg3)}
+.ws-search-icon svg{width:14px;height:14px}
+.ws-search{display:block;flex:1;min-width:0;width:0;height:28px;background:transparent;color:var(--fg);border:0;outline:0;font:inherit;font-size:13px;appearance:none}
+.ws-search::placeholder{color:var(--fg3)}
+.ws-search::-webkit-search-cancel-button{display:none}
+.ws-search-clear.ws-tool{width:22px;height:22px}
+.ws-tree-row .ws-row,.ws-search-results .ws-row{gap:6px;padding:5px 7px;border-radius:var(--radius-sm)}
+.ws-tree-row .ws-row:hover{background:transparent}
 .ws-search-results .ws-row{width:100%}
 .ws-row{flex:1;min-width:0;display:flex;align-items:center;gap:8px;border:none;background:transparent;color:var(--fg);padding:7px 10px;text-align:left;cursor:pointer;font-size:13px}
 .ws-row:hover{background:var(--bg3)}
@@ -1566,7 +1586,7 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .ws-row-dl:hover{color:var(--fg)}
 .ws-muted,.ws-err{padding:14px 12px;font-size:13px;color:var(--fg3)}
 .ws-err{color:#c62828}
-.ws-preview-bar{display:flex;align-items:center;gap:6px;height:38px;padding:0 8px 0 12px;border-bottom:var(--hair) solid var(--border);flex-shrink:0;min-width:0;box-sizing:border-box}
+.ws-preview-bar{display:flex;align-items:center;gap:6px;height:var(--ws-preview-bar-height,38px);padding:0 8px 0 12px;border-bottom:var(--hair) solid var(--border);flex-shrink:0;min-width:0;box-sizing:border-box}
 .ws-preview-type-icon{width:15px;height:15px;flex-shrink:0}
 .ws-back{border:none;background:transparent;color:var(--fg2);font-size:12px;cursor:pointer;padding:4px 6px;border-radius:6px;flex-shrink:0;white-space:nowrap}
 .ws-back:hover{background:var(--bg3);color:var(--fg)}
@@ -1662,16 +1682,17 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .md-doc [align=left]{text-align:left}
 .md-doc .katex-display{max-width:100%;overflow-x:auto;overflow-y:hidden}
 .ws-trunc{font-size:11px;color:var(--fg3);margin-top:8px}
-/* Files a reply touched: full-width card, edited files with +/- first. */
-.msg-files-card{width:100%;box-sizing:border-box;margin:10px 0 0;border:var(--hair) solid var(--border);border-radius:14px;overflow:hidden;background:var(--bg)}
-.mfc-head{display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--bg2);border-bottom:var(--hair) solid var(--border2)}
-.mfc-icon{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:9px;background:var(--bg);border:var(--hair) solid var(--border2);color:var(--accent);flex-shrink:0}
-.mfc-icon svg{width:18px;height:18px}
-.mfc-head-btn{width:100%;border:none;border-bottom:var(--hair) solid var(--border2);font:inherit;text-align:left;cursor:pointer;color:inherit}
-.mfc-head-btn:hover{background:var(--bg3)}
-.mfc-head-text{min-width:0;display:flex;flex-direction:column}
-.mfc-title{font-size:14px;font-weight:600;color:var(--fg)}
-.mfc-sub{font-size:12px;color:var(--fg3);margin-top:1px;display:flex;align-items:center;gap:8px}
+/* dsh-style turn summary: a filled header, compact rows, and a bottom fold. */
+.msg-files-card{width:100%;min-width:0;margin:8px 0 0;border:var(--hair) solid var(--border);border-radius:var(--radius-md);overflow:hidden;background:var(--bg)}
+.mfc-head{display:flex;align-items:center;gap:10px;min-width:0;padding:8px 10px;background:var(--bg2)}
+.mfc-icon{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;background:var(--bg);border:var(--hair) solid var(--border2);color:var(--accent);flex:none}
+.mfc-icon svg{width:20px;height:20px}
+.mfc-head-btn{width:100%;min-height:60px;border:0;font:inherit;text-align:left;cursor:pointer;color:inherit}
+.mfc-head-btn:is(:hover,:focus-visible){background:var(--bg3)}
+.msg-files-card :is(.mfc-head-btn,.mfc-path,.msg-files-more):focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.mfc-head-text{flex:1;min-width:0;display:flex;flex-direction:column}
+.mfc-title{font-size:13px;font-weight:500;line-height:20px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mfc-sub{font-size:11px;line-height:16px;color:var(--fg3);display:flex;align-items:center;gap:6px}
 /* The round's total +/- (dsh): shown at rest, swapped for the hint on hover. */
 .mfc-total{display:inline-flex;gap:6px;font-family:var(--mono)}
 .mfc-total .add{color:#1a7f37}
@@ -1679,16 +1700,15 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 [data-theme="dark"] .mfc-total .add{color:#3fb950}
 [data-theme="dark"] .mfc-total .del{color:#f85149}
 .mfc-head-btn .mfc-hint{display:none}
-.mfc-head-btn:hover .mfc-total{display:none}
-.mfc-head-btn:hover .mfc-hint,.mfc-head-btn:focus-visible .mfc-hint{display:inline}
-.mfc-body{padding:4px 0}
-.mfc-section{padding:8px 16px 2px;font-size:11px;color:var(--fg3)}
-.mfc-row{display:flex;align-items:center;gap:10px;padding:0 10px 0 6px}
-.mfc-row:hover{background:var(--bg3)}
-.mfc-path{flex:1;min-width:0;display:flex;align-items:center;gap:8px;border:none;background:transparent;color:var(--fg);padding:8px 10px;cursor:pointer;text-align:left}
-.files-path{display:inline-flex;align-items:baseline;min-width:0;max-width:100%;font-family:var(--mono);font-size:12.5px}
-.files-path-dir{color:var(--fg3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:1}
-.files-path-name{color:var(--fg);font-weight:500;white-space:nowrap;flex-shrink:0}
+.mfc-head-btn:is(:hover,:focus-visible) .mfc-total{display:none}
+.mfc-head-btn:is(:hover,:focus-visible) .mfc-hint{display:inline}
+.mfc-body{list-style:none;border-top:var(--hair) solid var(--border2)}
+.mfc-row{display:flex;align-items:center;min-width:0}
+.mfc-row:hover{background:var(--hover)}
+.mfc-path{flex:1;min-width:0;display:flex;align-items:center;gap:10px;border:0;background:transparent;color:var(--fg2);padding:7px 14px;cursor:pointer;text-align:left;font:inherit;font-size:12px;line-height:18px}
+.files-path{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mfc-edits .mfc-path .mfc-diff{font-size:11px}
+.mfc-mentions .mfc-row{padding-right:8px}
 .mfc-diff{display:inline-flex;gap:6px;font-family:var(--mono);font-size:12px;flex-shrink:0}
 .mfc-diff .add{color:#1a7f37}
 .mfc-diff .del{color:#cf222e}
@@ -1749,6 +1769,7 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .fd-empty{background:var(--fd-empty)}
 .mfc-actions svg{width:14px;height:14px}
 .msg-files-more{width:100%;border:none;border-top:var(--hair) solid var(--border2);background:transparent;color:var(--fg3);font-size:12px;padding:9px 16px;cursor:pointer;text-align:left;display:flex;align-items:center;gap:4px}
+.mfc-edits .msg-files-more{border-top:0;padding-inline:14px}
 .msg-files-more svg{width:14px;height:14px;transition:transform .15s}
 .msg-files-more.open svg{transform:rotate(180deg)}
 .msg-files-more:hover{background:var(--bg3);color:var(--fg)}

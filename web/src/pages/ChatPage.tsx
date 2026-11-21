@@ -1321,6 +1321,7 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
           text={filesCardText}
           steps={m.steps}
           uploaded={m.files}
+          mentionedFiles={m.mentionedFiles}
           workspace={workspace || null}
           sessionId={sessionId}
           onOpenFile={onOpenFile}
