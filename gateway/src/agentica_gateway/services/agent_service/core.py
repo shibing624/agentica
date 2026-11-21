@@ -40,6 +40,7 @@ class AgentService(AgentModelMixin, AgentBuilderMixin, AgentExecutionMixin, Agen
 
         self._cache = LRUAgentCache(max_size=settings.agent_max_sessions)
         self._session_work_dirs: Dict[str, str] = {}
+        self._session_log_dirs: Dict[str, str] = {}
         self._session_approval_modes: Dict[str, str] = {}
         self._session_grants: Dict[str, SessionGrants] = {}
         self._session_preview_cache: OrderedDict[str, tuple[tuple[int, int], Dict[str, Any]]] = OrderedDict()
@@ -88,6 +89,7 @@ class AgentService(AgentModelMixin, AgentBuilderMixin, AgentExecutionMixin, Agen
         """Update the global work_dir and clear ALL cached agents."""
         self._cache.clear()
         self._session_work_dirs.clear()
+        self._session_log_dirs.clear()
         logger.info(f"Global work_dir updated to: {new_dir}, all agent instances cleared")
 
     def _auto_extract_for(self, owner: Optional[str]) -> bool:

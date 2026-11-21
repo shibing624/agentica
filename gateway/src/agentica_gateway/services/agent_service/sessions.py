@@ -165,9 +165,10 @@ class AgentSessionsMixin:
 
     def _locate_session(self, session_id: str, owner: Optional[str] = None) -> tuple[str, str]:
         """Find the project directory that actually holds this session's jsonl."""
-        remembered = self._session_work_dirs.get(self._sk(session_id, owner))
-        if remembered:
-            return self._session_base_dir(remembered, owner), remembered
+        key = self._sk(session_id, owner)
+        remembered = self._session_work_dirs.get(key)
+        if remembered and key in self._session_log_dirs:
+            return self._session_log_dirs[key], remembered
 
         fallback_work = str(settings.base_dir)
         fallback = self._session_base_dir(fallback_work, owner)
@@ -179,9 +180,9 @@ class AgentSessionsMixin:
         chosen = contentful or hits
         if chosen:
             hit = max(chosen, key=lambda h: int(h.get("size_bytes") or 0))
-            work_dir = hit.get("work_dir") or fallback_work
-            if work_dir:
-                self._session_work_dirs[self._sk(session_id, owner)] = work_dir
+            work_dir = hit.get("workspace_dir") or hit.get("work_dir") or fallback_work
+            self._session_work_dirs[key] = work_dir
+            self._session_log_dirs[key] = str(hit["base_dir"])
             keep = Path(hit["path"])
             for shadow in hits:
                 path = Path(shadow["path"])
@@ -190,7 +191,7 @@ class AgentSessionsMixin:
                         path.unlink()
                     except OSError:
                         pass
-            return str(hit["base_dir"]), work_dir
+            return self._session_log_dirs[key], work_dir
         return fallback, fallback_work
 
     def _drop_cached_agents(self) -> None:
@@ -220,6 +221,7 @@ class AgentSessionsMixin:
         removed = self._cache.delete(key)
         _pkg().live_turn.drop(session_id, owner=self._owner(owner))
         self._session_work_dirs.pop(key, None)
+        self._session_log_dirs.pop(key, None)
         self._session_approval_modes.pop(key, None)
         self._session_grants.pop(key, None)
         background = self._session_background.pop(key, None)
@@ -504,8 +506,7 @@ class AgentSessionsMixin:
             first_user=strip_image_markers(log.first_user_message() or ""),
         )
         SessionLog.rename_session(new_id, f"{title} (fork)", base_dir=str(log.base_dir))
-        if log._cwd:
-            self._session_work_dirs[self._sk(new_id, owner)] = log._cwd
+        branch.set_workspace_dir(self.get_session_work_dir(session_id, owner))
         return new_id
 
     def session_feedback(self, session_id: str, owner: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
@@ -585,8 +586,15 @@ class AgentSessionsMixin:
     def set_session_work_dir(
         self, session_id: str, work_dir: str, owner: Optional[str] = None,
     ) -> None:
-        """Set the working directory for a specific session."""
-        self._session_work_dirs[self._sk(session_id, owner)] = work_dir
+        """Set the effective directory, keeping existing history in place."""
+        key = self._sk(session_id, owner)
+        base_dir, current = self._locate_session(session_id, owner)
+        if key not in self._session_log_dirs:
+            base_dir = self._session_base_dir(work_dir, owner)
+        elif current != work_dir and (Path(base_dir) / f"{session_id}.jsonl").is_file():
+            SessionLog(session_id, base_dir=base_dir).set_workspace_dir(work_dir)
+        self._session_log_dirs[key] = base_dir
+        self._session_work_dirs[key] = work_dir
 
     def get_session_work_dir(self, session_id: str, owner: Optional[str] = None) -> str:
         """Get the working directory for a session (falls back to global base_dir)."""

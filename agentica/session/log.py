@@ -1733,7 +1733,7 @@ class SessionLog:
                     tail = fh.read(stat.st_size - offset).rstrip(b"\r\n")
                     if not tail:
                         break
-                    before, separator, last_line = tail.rpartition(b"\n")
+                    _, separator, last_line = tail.rpartition(b"\n")
                     if separator or not offset:
                         last_timestamp = json.loads(last_line).get("timestamp")
                         break
@@ -1751,6 +1751,7 @@ class SessionLog:
             "path": str(path),
             "base_dir": str(path.parent),
             "work_dir": work_dir,
+            "workspace_dir": cls._meta_workspace_dir(meta),
             "size_bytes": stat.st_size,
             "mtime": stat.st_mtime,
             "mtime_ns": stat.st_mtime_ns,
@@ -2365,6 +2366,15 @@ class SessionLog:
     def get_last_read_at(self) -> Optional[str]:
         """When the web UI last opened this session, or None if never marked."""
         return self._meta_last_read_at(self._read_meta(self.meta_path))
+
+    @staticmethod
+    def _meta_workspace_dir(meta: Dict[str, Any]) -> Optional[str]:
+        value = meta.get("workspace_dir")
+        return value if isinstance(value, str) and os.path.isabs(value) else None
+
+    def set_workspace_dir(self, work_dir: str) -> None:
+        """Persist a worktree binding without relocating the transcript."""
+        self._write_meta({"workspace_dir": work_dir})
 
     def set_last_read_at(self, when: Optional[str] = None) -> str:
         """Stamp the session as read. ``when`` defaults to now (ISO-8601)."""

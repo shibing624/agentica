@@ -38,6 +38,9 @@ class FakeAgentService:
     def invalidate_session_agent(self, session_id: str, owner: str) -> None:
         self.invalidated.append((session_id, owner))
 
+    def is_session_active(self, session_id: str, owner: str) -> bool:
+        return False
+
 
 @pytest.fixture()
 def gateway_repo(tmp_path: Path):
@@ -84,3 +87,11 @@ def test_worktree_api_binds_the_session_work_dir(gateway_repo):
     assert bound.json()["work_dir"] == expected
     assert service.get_session_work_dir("s1", "alice") == expected
     assert service.invalidated == [("s1", "alice")]
+
+
+def test_worktree_bind_refuses_to_change_a_running_session(gateway_repo, monkeypatch):
+    client, root, service = gateway_repo
+    monkeypatch.setattr(service, "is_session_active", lambda *_: True)
+    response = client.post("/api/worktrees", json={"session_id": "s1", "action": "bind", "name": "feature-x"})
+    assert response.status_code == 409
+    assert service.get_session_work_dir("s1", "alice") == str(root)

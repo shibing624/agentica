@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from agentica import DeepAgent
@@ -113,7 +114,9 @@ class AgentBuilderMixin:
         auxiliary_task_models = {"auto_review": review_model} if review_model is not None else None
         fallback_models = self._fallback_models(cfg)
         max_api_retry = int(cfg.get("max_api_retry") or 2)
-        work_dir = self.get_session_work_dir(session_id, owner)
+        log_dir, work_dir = self._locate_session(session_id, owner)
+        if not Path(work_dir).is_dir():
+            raise FileNotFoundError(f"Session working directory no longer exists: {work_dir}")
 
         from agentica.tools.product import PRODUCT_DESCRIPTION, PRODUCT_INSTRUCTIONS, build_product_tools
         from ..model_factory import _gateway_cron_job_runner
@@ -146,6 +149,7 @@ class AgentBuilderMixin:
         load_system_skills()
         agent = pkg.DeepAgent(
             session_id=session_id,
+            session_base_dir=log_dir,
             model=model,
             auxiliary_model=auxiliary_model,
             task_model=task_model,

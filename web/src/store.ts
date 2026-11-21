@@ -109,6 +109,7 @@ export type Session = {
   /** The user picked this title; the first message must not replace it. */
   named?: boolean;
   projectId?: string;
+  projectDir?: string;
   archived?: boolean;
   /** Kept at the top of its project in the sidebar (sidecar `pinned`). */
   pinned?: boolean;

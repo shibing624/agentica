@@ -90,7 +90,8 @@ export function loadSessions(scope: "recent" | "all" = getState().sessionScope):
         contextTokens: mem?.contextTokens || lc.contextTokens || 0,
         costUsd: mem?.costUsd || lc.costUsd || 0,
         dir,
-        projectId: projectIdForDir(dir),
+        projectDir: sv.project_dir || dir,
+        projectId: projectIdForDir(sv.project_dir || dir),
         archived: edit && edit.archived !== undefined ? edit.archived : !!sv.archived,
         pinned: !!sv.pinned,
         running: sessionIsLive(id) || !!sv.running,
@@ -568,7 +569,7 @@ export function createSession(dir: string) {
 export function newChat() {
   const st = getState();
   const cur = st.curSess ? st.sessions[st.curSess] : null;
-  const dir = (cur && cur.dir) || st.pendingNewChatDir || st.serverDir;
+  const dir = (cur && (cur.projectDir || cur.dir)) || st.pendingNewChatDir || st.serverDir;
   if (!dir) { setState({ dirModal: { open: true, forNewSession: true, value: st.serverDir } }); return; }
   // The top button and a workspace's + must land on the same unsent draft.
   // Otherwise the sidebar can show a "New Chat" row while the main pane shows

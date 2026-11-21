@@ -88,9 +88,10 @@ export function SessionTree() {
     for (const [id, sess] of Object.entries(s.sessions)) {
       if (sess.archived) continue;
       const pid = sess.projectId || projectIdForDir(sess.dir);
-      const name = labels[pid] || projectNameForDir(sess.dir);
+      const projectDir = sess.projectDir || sess.dir;
+      const name = labels[pid] || projectNameForDir(projectDir);
       if (!sessionMatches({ id, session: sess }, name, q, contentHits[id])) continue;
-      if (!by[pid]) by[pid] = { id: pid, name, dir: normDir(sess.dir), sessions: [] };
+      if (!by[pid]) by[pid] = { id: pid, name, dir: normDir(projectDir), sessions: [] };
       const running = !!(sess.running || s.streams[id] || s.goalRuns[id] || s.commandRuns[id]);
       by[pid].sessions.push({ id, session: { ...sess, running } });
     }

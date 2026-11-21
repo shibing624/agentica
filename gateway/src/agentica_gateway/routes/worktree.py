@@ -19,6 +19,7 @@ from agentica.git import worktree as worktrees
 from agentica.git.worktree import WorktreeError
 
 from .. import deps
+from ..services import live_turn
 
 router = APIRouter(prefix="/api/worktrees")
 
@@ -85,6 +86,8 @@ async def worktree_action(body: WorktreeRequest, request: Request):
         elif action == "bind":
             if not name:
                 raise WorktreeError("a worktree name is required")
+            if live_turn.active(body.session_id, owner) or service.is_session_active(body.session_id, owner):
+                raise HTTPException(status_code=409, detail="Cannot change the workspace while this session is running")
             entry = worktrees.find(binder.work_dir(), name)
             if entry is None:
                 raise WorktreeError(f"no worktree named {name!r}")

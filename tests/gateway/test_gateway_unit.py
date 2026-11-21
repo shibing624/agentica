@@ -644,6 +644,42 @@ class TestAgentServiceRunCron:
         assert found.path == log.path
         assert svc.get_session_work_dir("s_trace1") == str(other)
 
+    def test_rebinding_keeps_one_transcript_and_restores_workspace_after_restart(self, tmp_path):
+        from agentica_gateway.services.agent_service import AgentService
+
+        original = tmp_path / "original"
+        bound = tmp_path / "bound"
+        original.mkdir()
+        bound.mkdir()
+        owner = "default"
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc.set_session_work_dir("s-bind-history", str(original), owner)
+        first = svc.session_log_for("s-bind-history", owner)
+        first.set_source("gateway")
+        first.append("user", "old turn")
+        svc.set_session_work_dir("s-bind-history", str(bound), owner)
+        with patch("agentica_gateway.services.agent_service.create_model"), \
+             patch("agentica_gateway.services.agent_service.DeepAgent") as build:
+            build.return_value._session_log = None
+            svc._build_agent("s-bind-history", owner)
+        assert build.call_args.kwargs["session_base_dir"] == str(first.base_dir)
+        assert build.call_args.kwargs["work_dir"] == str(bound)
+        second = svc.session_log_for("s-bind-history", owner)
+        assert second.path == first.path
+        second.append("assistant", "new turn")
+
+        restarted = AgentService(workspace_path=str(tmp_path))
+        assert restarted.get_session_work_dir("s-bind-history", owner) == str(bound)
+        reloaded = restarted.session_log_for("s-bind-history", owner)
+        assert reloaded.path == first.path
+        assert [msg["content"] for msg in reloaded.load()] == ["old turn", "new turn"]
+        row = next(row for row in restarted.list_sessions(owner=owner) if row["session_id"] == "s-bind-history")
+        assert (row["project_dir"], row["work_dir"]) == (str(original), str(bound))
+        assert restarted.get_session_work_dir("s-bind-history", "another-account") != str(bound)
+        bound.rmdir()
+        with pytest.raises(FileNotFoundError, match="working directory no longer exists"):
+            restarted._build_agent("s-bind-history", owner)
+
     def test_session_log_for_skips_empty_stub_in_default_dir(self, tmp_path, monkeypatch):
         """A 0-byte jsonl in settings.base_dir is the pre-append touch stub, not
         the transcript. After restart, _locate_session used to return that stub
