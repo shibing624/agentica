@@ -22,7 +22,7 @@ import {
  *  tab so restoring a session there updates the tree without a reload. */
 
 let catalogGeneration = 0;
-let catalogFlight: { scope: "recent" | "all"; promise: Promise<void> } | null = null;
+let catalogFlight: { scope: "recent" | "all"; promise: Promise<boolean> } | null = null;
 let catalogAbort: AbortController | null = null;
 const hydrateGenerations: Record<string, number> = {};
 /** Names the user typed that the server has not confirmed yet: a catalog
@@ -46,7 +46,7 @@ function noteLocalEdit(id: string, edit: { deleted?: boolean; archived?: boolean
   localEdits.set(id, { at: Date.now(), ...edit });
 }
 
-export function loadSessions(scope: "recent" | "all" = getState().sessionScope): Promise<void> {
+export function loadSessions(scope: "recent" | "all" = getState().sessionScope): Promise<boolean> {
   if (catalogFlight?.scope === scope) return catalogFlight.promise;
   catalogAbort?.abort();
   const controller = new AbortController();
@@ -58,13 +58,13 @@ export function loadSessions(scope: "recent" | "all" = getState().sessionScope):
     const showSpinner = cur.sessionScope !== scope || Object.keys(cur.sessions).length === 0;
     if (showSpinner) setState({ sessionsLoading: true, sessionsError: "" });
     const { ok, data, error } = await api.fetchSessions(scope, controller.signal);
-    if (generation !== catalogGeneration) return;
+    if (generation !== catalogGeneration) return false;
     if (!ok || !Array.isArray(data?.sessions)) {
       setState({
         sessionsLoading: false,
         sessionsError: error instanceof Error ? error.message : "Could not load sessions",
       });
-      return;
+      return false;
     }
     lastCatalogLoadAt = Date.now();
     const local = readSessionCache();
@@ -135,6 +135,7 @@ export function loadSessions(scope: "recent" | "all" = getState().sessionScope):
     // Restore the last open chat on start-up only: on a later refresh this
     // key may hold what another tab opened since.
     if (last && merged[last] && !getState().curSess) switchTo(last);
+    return true;
   })().finally(() => {
     if (catalogFlight?.promise === promise) catalogFlight = null;
     if (catalogAbort === controller) catalogAbort = null;
@@ -265,13 +266,16 @@ export async function syncSessionStatus() {
  * in one window never showed in the other.
  */
 export async function syncFromServer(force = false) {
-  if (!force && Date.now() - lastCatalogLoadAt < FOCUS_SYNC_COOLDOWN_MS) return;
+  if (!force && Date.now() - lastCatalogLoadAt < FOCUS_SYNC_COOLDOWN_MS) return false;
+  // A completion pulse cannot be acknowledged by a catalog requested before it.
+  if (force && catalogFlight) await catalogFlight.promise;
   // A scheduled run starting or finishing moves the pulse too; its job's
   // "running" and next-run time come with the catalog.
-  await Promise.all([loadSessions(), loadCronJobs()]);
+  const [loaded] = await Promise.all([loadSessions(), loadCronJobs()]);
+  if (!loaded) return false;
   const id = getState().curSess;
   const sess = id ? getState().sessions[id] : null;
-  if (!id || !sess || sessionIsLive(id)) return;
+  if (!id || !sess || sessionIsLive(id)) return true;
   if (sess.sizeBytes && sess.hydratedSize !== sess.sizeBytes) {
     await hydrateSession(id, true);
   }
@@ -279,6 +283,7 @@ export async function syncFromServer(force = false) {
   if (getState().curSess === id && now?.running && !sessionIsLive(id)) {
     setState({ pendingResume: id });
   }
+  return true;
 }
 
 let lastPulseVer: number | null = null;
@@ -292,15 +297,10 @@ export async function pollSessionsPulse() {
   try {
     const { ok, data } = await api.fetchSessionsPulse();
     if (!ok || !data || typeof data.ver !== "number") return;
-    // The first reading is only a baseline: the catalog loaded at start-up
-    // already carries each session's ``running``.
-    if (lastPulseVer === null) {
+    // Startup has no shared snapshot between the catalog and the first pulse.
+    // Retry an unacknowledged pulse on the next tick if the refresh failed.
+    if (data.ver !== lastPulseVer && await syncFromServer(true)) {
       lastPulseVer = data.ver;
-      return;
-    }
-    if (data.ver !== lastPulseVer) {
-      lastPulseVer = data.ver;
-      await syncFromServer(true);
     }
   } finally {
     pulseInFlight = false;
