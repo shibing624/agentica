@@ -41,6 +41,7 @@ router = APIRouter()
 
 def _sse_stream_hooks(publish):
     """Same content/tool/thinking events for chat and /goal."""
+    last_browser_url = None
 
     def on_content(delta: str):
         publish({"event": "content", "data": delta})
@@ -52,10 +53,15 @@ def _sse_stream_hooks(publish):
         })
 
     def on_tool_result(name: str, result: str, extra: dict | None = None):
+        nonlocal last_browser_url
         data = {"name": name, "result": result}
         if extra:
             data.update(extra)
+        browser_url = data.pop("browser_url", None)
         publish({"event": "tool_result", "data": data})
+        if browser_url and browser_url != last_browser_url:
+            last_browser_url = browser_url
+            publish({"event": "browser_navigate", "data": {"url": browser_url}})
 
     def on_thinking(delta: str):
         publish({"event": "thinking", "data": delta})

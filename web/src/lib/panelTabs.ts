@@ -16,8 +16,9 @@ export type PanelTab =
   | { key: string; kind: "review"; turn: number; files: FileEdits[]; path: string }
   | { key: string; kind: "terminal"; id: string; ordinal: number }
   /** A web page. `url` is where the tab was last left (empty for a new tab);
-   *  `title` is whatever the page called itself. */
-  | { key: string; kind: "browser"; id: string; url: string; title: string };
+   *  `title` is whatever the page called itself. `pendingUrl` is a URL an agent
+   *  proposed: it is shown, never loaded, until the user confirms it. */
+  | { key: string; kind: "browser"; id: string; url: string; title: string; pendingUrl?: string };
 
 export type TabsState = { tabs: PanelTab[]; active: string };
 
@@ -50,6 +51,7 @@ export const skillKey = (name: string) => `skill:${name}`;
 export const reviewKey = (turn: number) => `review:${turn}`;
 export const terminalKey = (id: string) => `term:${id}`;
 export const browserKey = (id: string) => `browser:${id}`;
+const AGENT_BROWSER_ID = "agent";
 
 /** Open a tab, or focus it if one with the same key is already open. New tabs
  *  go right after the active one, as in a browser. */
@@ -59,6 +61,40 @@ export function openTab(state: TabsState, tab: PanelTab): TabsState {
   const tabs = [...state.tabs];
   tabs.splice(at < 0 ? tabs.length : at + 1, 0, tab);
   return { tabs, active: tab.key };
+}
+
+/** An agent's URL goes to a dedicated tab as a proposal, never as a load.
+ *  Later proposals leave the current page, manual tabs and focus intact. */
+export function requestBrowserNavigation(record: SessionPanelRecord, url: string): SessionPanelRecord {
+  const id = AGENT_BROWSER_ID;
+  const key = browserKey(id);
+  const existing = record.tabs.find((tab) => tab.kind === "browser" && tab.key === key);
+  if (existing?.kind === "browser") {
+    if (existing.pendingUrl === url || existing.url === url) return record;
+    return { ...record, tabs: record.tabs.map((tab) => tab === existing ? { ...existing, pendingUrl: url } : tab) };
+  }
+  const opened = openTab(record, { key, id, kind: "browser", url: "", title: "", pendingUrl: url });
+  return { ...record, ...opened, open: true, preferredActive: undefined };
+}
+
+/** The user accepted the proposal: only now does the tab navigate. */
+export function confirmBrowserNavigation(record: SessionPanelRecord, key: string): SessionPanelRecord {
+  return {
+    ...record,
+    tabs: record.tabs.map((tab) => tab.key === key && tab.kind === "browser" && tab.pendingUrl
+      ? { ...tab, url: tab.pendingUrl, title: "", pendingUrl: "" }
+      : tab),
+  };
+}
+
+/** The user declined the proposal; the current page stays as it is. */
+export function dismissBrowserNavigation(record: SessionPanelRecord, key: string): SessionPanelRecord {
+  return {
+    ...record,
+    tabs: record.tabs.map((tab) => tab.key === key && tab.kind === "browser" && tab.pendingUrl
+      ? { ...tab, pendingUrl: "" }
+      : tab),
+  };
 }
 
 /** Close a tab; the fixed file browser cannot be closed. Closing the active
@@ -145,7 +181,16 @@ export function adoptTerminals(state: TabsState, ids: string[]): TabsState {
  * are excluded from storage — live terminals are re-adopted from the gateway.
  */
 export function serializeSessionPanel(record: SessionPanelRecord): string {
-  const tabs = record.tabs.filter((t) => t.kind !== "terminal" && t.kind !== "guide");
+  const tabs = record.tabs
+    .filter((t) => t.kind !== "terminal" && t.kind !== "guide")
+    .map((t) => {
+      if (t.kind !== "browser") return t;
+      // A proposal is transient; a tampered localStorage entry must not be
+      // able to plant a URL that would load after a reload.
+      const stored = { ...t };
+      delete stored.pendingUrl;
+      return stored;
+    });
   const active = record.active === GUIDE_TAB.key ? FILES_TAB.key : record.active;
   return JSON.stringify({
     open: Boolean(record.open),

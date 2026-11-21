@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../api";
-import { useAppState, showToast } from "../store";
+import { getState, setState, useAppState, showToast } from "../store";
 import { uid } from "../lib/format";
 import { useStrings } from "../i18n";
+import { browserNavigationUrl } from "../lib/browserUrl";
 import {
-  activateTab, adoptTerminals, closeTab, browserKey, closeTabs, fileKey, reviewKey, FILES_TAB, GUIDE_TAB, initialSessionPanel,
+  activateTab, adoptTerminals, closeTab, browserKey, closeTabs, confirmBrowserNavigation, dismissBrowserNavigation,
+  fileKey, requestBrowserNavigation, reviewKey, FILES_TAB, GUIDE_TAB, initialSessionPanel,
   nextTerminalOrdinal, openTab, readSessionPanel, replaceTab, skillKey, tabsToClose, terminalKey, upsertTab, writeSessionPanel,
   type PanelTab, type SessionPanelRecord, type TabsState,
 } from "../lib/panelTabs";
@@ -52,6 +54,9 @@ export type FilesPanelState = {
   pickBrowser: () => void;
   /** The page in a browser tab moved or retitled; remembered for the next load. */
   updateBrowser: (key: string, patch: { url?: string; title?: string }) => void;
+  /** The agent's proposed URL is only loaded after the user confirms it. */
+  confirmBrowser: (key: string) => void;
+  dismissBrowser: (key: string) => void;
   /** The gateway no longer has this shell (closed elsewhere, or the gateway
    *  restarted): drop its tab without asking the gateway to close it. */
   terminalGone: (id: string) => void;
@@ -135,6 +140,17 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
       return next;
     });
   }, [sessionKey]);
+
+  const pendingBrowserUrl = s.pendingBrowserUrls.get(sessionKey);
+  useEffect(() => {
+    if (!pendingBrowserUrl) return;
+    const pending = getState().pendingBrowserUrls;
+    if (pending.get(sessionKey) !== pendingBrowserUrl) return;
+    const remaining = new Map(pending);
+    remaining.delete(sessionKey);
+    updateRecord((rec) => requestBrowserNavigation(rec, pendingBrowserUrl));
+    setState({ pendingBrowserUrls: remaining });
+  }, [sessionKey, pendingBrowserUrl, updateRecord]);
 
   const update = useCallback((fn: (st: TabsState) => TabsState) => {
     updateRecord((rec) => {
@@ -298,6 +314,23 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
     }));
   }, [update]);
 
+  const confirmBrowser = useCallback((key: string) => {
+    updateRecord((rec) => {
+      const tab = rec.tabs.find((t) => t.key === key);
+      if (tab?.kind !== "browser" || !tab.pendingUrl) return rec;
+      // The proposal came over SSE or a past session; validate again at the
+      // only point where it would actually be loaded.
+      if (!browserNavigationUrl(tab.pendingUrl, window.location.origin)) {
+        return dismissBrowserNavigation(rec, key);
+      }
+      return confirmBrowserNavigation(rec, key);
+    });
+  }, [updateRecord]);
+
+  const dismissBrowser = useCallback((key: string) => {
+    updateRecord((rec) => dismissBrowserNavigation(rec, key));
+  }, [updateRecord]);
+
   const terminalGone = useCallback((id: string) => update((st) => closeTab(st, terminalKey(id))), [update]);
 
   return {
@@ -305,6 +338,7 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
     open, setOpen, width, startResize, resetWidth, fullscreen, setFullscreen,
     tabs: state.tabs, active: state.active, activate, close, closeMany,
     dirPath, setDirPath,
-    browsePath, revealInFilesTab, openSkill, openReview, selectReviewFile, openGuide, pickFiles, canTerminal, pickTerminal, pickBrowser, updateBrowser, terminalGone,
+    browsePath, revealInFilesTab, openSkill, openReview, selectReviewFile, openGuide, pickFiles, canTerminal, pickTerminal, pickBrowser,
+    updateBrowser, confirmBrowser, dismissBrowser, terminalGone,
   };
 }

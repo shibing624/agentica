@@ -58,6 +58,7 @@ import type { FileEdits } from "../lib/fileDiff";
 import { useFilesPanel } from "../workspace/useFilesPanel";
 import { isImeKey } from "../lib/ime";
 import { parseQuestionRequest, type QuestionAnswer } from "../lib/questionComposer";
+import { browserNavigationUrl } from "../lib/browserUrl";
 
 const ChatMarkdown = lazy(() => import("../components/ChatMarkdown").then((m) => ({ default: m.ChatMarkdown })));
 /** Start fetching the previous page this far before the reader reaches the top. */
@@ -1987,6 +1988,15 @@ function markChatError(m: ChatMsg, text: string): void {
 }
 
 function applyLiveSseEvent(aiMsg: ChatMsg, evt: any, sessId?: string): boolean {
+  if (evt.event === "browser_navigate") {
+    // Only stage the address: the panel displays it and waits for an explicit
+    // "Open here" before the user's browser loads anything.
+    const url = browserNavigationUrl(evt.data?.url, window.location.origin);
+    if (sessId && url) {
+      setState({ pendingBrowserUrls: new Map(getState().pendingBrowserUrls).set(sessId, url) });
+    }
+    return true;
+  }
   if (evt.event === "thinking") {
     appendThink(aiMsg, evt.data);
     bumpStream();

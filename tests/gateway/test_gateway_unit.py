@@ -452,6 +452,150 @@ class TestAgentServiceStreamToolDispatch:
         assert extras[0]["diff"].startswith("diff -- hello.py")
         assert "+hi" in extras[0]["diff"]
 
+    def test_browser_navigation_uses_successful_structured_results_only(self):
+        from agentica_gateway.routes.chat import _sse_stream_hooks
+        from agentica_gateway.services.agent_service import dispatch_stream_chunk
+
+        from agentica.run.response import RunEvent, RunResponse, ToolCallInfo
+
+        events = []
+        _, _, on_result, _ = _sse_stream_hooks(events.append)
+
+        async def run():
+            for url, failed in [
+                (None, False),
+                ("about:blank", False),
+                ("https://user:secret@example.test/page", False),
+                ("https://example.test/start", True),
+                ("https://example.test/start", False),
+                ("https://example.test/start", False),
+                ("http://localhost:3000/done?mode=demo", False),
+                ("https://example.test/start", False),
+            ]:
+                await dispatch_stream_chunk(RunResponse(
+                    event=RunEvent.tool_call_completed.value,
+                    tool_call=ToolCallInfo(
+                        tool_name="browser_observe", content="url=https://ignored.test/",
+                        tool_display_meta={"browser_url": url}, is_error=failed,
+                    ),
+                ), on_tool_result=on_result)
+
+        asyncio.run(run())
+        assert [ev["data"] for ev in events if ev["event"] == "browser_navigate"] == [
+            {"url": "https://example.test/start"},
+            {"url": "http://localhost:3000/done?mode=demo"},
+            {"url": "https://example.test/start"},
+        ]
+        results = [ev["data"] for ev in events if ev["event"] == "tool_result"]
+        assert len(results) == 8
+        assert results[0]["result"] == "url=https://ignored.test/"
+        assert all("browser_url" not in result for result in results)
+
+
+def test_gateway_browser_tool_is_opt_in_and_isolated_by_owner_and_session(tmp_path, monkeypatch):
+    from agentica_gateway.config import Settings, settings
+    from agentica_gateway.services.agent_service import AgentService
+
+    from agentica.tools.browser_tool import BrowserTool
+
+    monkeypatch.delenv("GATEWAY_BROWSER_TOOL", raising=False)
+    assert Settings.from_env().browser_tool_enabled is False
+    monkeypatch.setenv("GATEWAY_BROWSER_TOOL", "true")
+    assert Settings.from_env().browser_tool_enabled is True
+
+    svc = AgentService(workspace_path=str(tmp_path))
+    svc._workspace = None
+    with patch("agentica_gateway.services.agent_service.create_model"), \
+         patch("agentica_gateway.services.agent_service.DeepAgent") as build:
+        build.return_value._session_log = None
+
+        def browser_tools(session_id, owner):
+            svc._build_agent(session_id, owner)
+            return [tool for tool in build.call_args.kwargs["tools"] if isinstance(tool, BrowserTool)]
+
+        monkeypatch.setattr(settings, "browser_tool_enabled", False)
+        assert browser_tools("s1", "owner1") == []
+        monkeypatch.setattr(settings, "browser_tool_enabled", True)
+        drivers = [browser_tools(sid, owner)[0].driver for sid, owner in [("s1", "owner1"), ("s2", "owner1"), ("s1", "owner2")]]
+        assert len({driver.session for driver in drivers}) == 3
+        assert all(len(driver.session.encode()) <= 32 for driver in drivers)
+        assert all(driver.isolated and not driver.restore and not driver.profile for driver in drivers)
+
+
+def test_browser_tool_url_reaches_the_frontend_as_a_navigation_event():
+    """display_meta -> format_tool_result -> SSE browser_navigate."""
+    from agentica.run.response import RunEvent, RunResponse, ToolCallInfo
+    from agentica.tools.browser_tool import BrowserTool
+    from agentica.tools.helpers import ToolDisplayOutput
+    from agentica_gateway.routes.chat import _sse_stream_hooks
+    from agentica_gateway.services.agent_service import dispatch_stream_chunk
+
+    class Driver:
+        async def run(self, *args):
+            return {
+                "open": "ok",
+                "snapshot": '- link "Next" [ref=e1]',
+                "get": "https://example.test/done",
+            }.get(args[0], "ok")
+
+        async def close(self):
+            pass
+
+    tool = BrowserTool(driver=Driver())
+    observed = asyncio.run(tool.browser_observe("https://example.test/start"))
+    assert isinstance(observed, ToolDisplayOutput)
+
+    events = []
+    _, _, on_result, _ = _sse_stream_hooks(events.append)
+    asyncio.run(dispatch_stream_chunk(RunResponse(
+        event=RunEvent.tool_call_completed.value,
+        tool_call=ToolCallInfo(
+            tool_name="browser_observe",
+            content=str(observed),
+            tool_display_meta=observed.display_meta,
+        ),
+    ), on_tool_result=on_result))
+
+    assert [ev["data"] for ev in events if ev["event"] == "browser_navigate"] == [
+        {"url": "https://example.test/done"}
+    ]
+    assert all("browser_url" not in ev["data"] for ev in events if ev["event"] == "tool_result")
+
+
+def test_browser_daemons_are_released_when_agents_leave_the_cache(tmp_path):
+    from agentica.tools.browser_tool import BrowserTool
+    from agentica_gateway.services.agent_service import AgentService
+    from agentica_gateway.services.agent_service.types import LRUAgentCache
+
+    # Fake agents carry no `tools` attribute; cleanup must not depend on it.
+    released = []
+    cache = LRUAgentCache(max_size=1, on_evict=released.append)
+    with patch("agentica_gateway.services.agent_service.types._cache_key_is_pinned", return_value=False):
+        cache.put("a", SimpleNamespace())
+        cache.put("b", SimpleNamespace())
+    assert released == ["a"]
+    assert cache.delete("b") is True
+    assert released == ["a", "b"]
+
+    def make_tool():
+        return BrowserTool(driver=MagicMock(close=AsyncMock()))
+
+    tool_a, tool_b, active_tool = make_tool(), make_tool(), make_tool()
+    svc = AgentService(workspace_path=str(tmp_path))
+    svc._browser_tools["a"] = tool_a
+    svc._browser_tools["b"] = tool_b
+    svc._released_agent_keys.extend(["a"])
+    asyncio.run(svc.close_browser_sessions())
+    tool_a.driver.close.assert_awaited_once()
+    tool_b.driver.close.assert_awaited_once()
+
+    # A rebuilt session keeps its daemon: the key is back in the cache.
+    svc._browser_tools["live"] = active_tool
+    svc._cache.put("live", SimpleNamespace())
+    svc._released_agent_keys.extend(["live"])
+    asyncio.run(svc._drain_released_agents())
+    active_tool.driver.close.assert_not_awaited()
+
 
 class TestAgentServiceCronUsesAuxiliaryModel:
     """A conversation runs on its own model whatever delivered the turn; the

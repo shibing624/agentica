@@ -10,6 +10,7 @@ making them easy to test and reuse across different response paths
 """
 import json
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
 
 from agentica.utils.timer import format_turn_clock
 from agentica.run.response import ToolCallInfo
@@ -126,6 +127,19 @@ def _format_task_result(raw: str) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _browser_preview_url(value: object) -> str | None:
+    """The driver's actual web URL, never a relative address or credentials."""
+    if not isinstance(value, str):
+        return None
+    try:
+        url = urlsplit(value)
+        if url.scheme in ("http", "https") and url.hostname and url.username is None and url.password is None:
+            return value
+    except ValueError:
+        pass
+    return None
+
+
 def format_tool_result(tool_call: ToolCallInfo) -> tuple[str, str, dict]:
     """Format a tool result for frontend display.
 
@@ -149,6 +163,8 @@ def format_tool_result(tool_call: ToolCallInfo) -> tuple[str, str, dict]:
         extra["tool_call_id"] = tool_call.tool_call_id
 
     meta = tool_call.tool_display_meta or {}
+    if not is_error and (browser_url := _browser_preview_url(meta.get("browser_url"))):
+        extra["browser_url"] = browser_url
     files = meta.get("files") if isinstance(meta, dict) else None
     if files:
         diff = files_unified_diff(files)

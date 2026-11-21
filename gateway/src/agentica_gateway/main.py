@@ -268,6 +268,7 @@ async def lifespan(app: FastAPI):
     if deps.channel_manager:
         await deps.channel_manager.disconnect_all()
     terminal_manager.close_all()
+    await deps.agent_service.close_browser_sessions()
     await asyncio.to_thread(deps.agent_service.stop_all_background_jobs)
     logger.info("Goodbye!")
 

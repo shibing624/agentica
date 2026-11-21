@@ -25,6 +25,17 @@ export function normalizeBrowserUrl(input: string): string | null {
   return url.toString();
 }
 
+/** An agent's proposed address: shown for confirmation, never auto-loaded. */
+export function browserNavigationUrl(value: unknown, appOrigin: string): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    if ((url.protocol === "http:" || url.protocol === "https:")
+      && !url.username && !url.password && url.origin !== appOrigin) return url.href;
+  } catch { /* not an absolute URL */ }
+  return null;
+}
+
 /** Storage partition of the browser tab's pages. The shell refuses any other one
  *  (`desktop/util.js`), so a page never shares cookies with the app itself. */
 export const BROWSER_PARTITION = "persist:agentica-browser";
