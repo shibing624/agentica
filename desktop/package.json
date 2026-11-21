@@ -40,7 +40,9 @@
       "util.js",
       "window-state.js",
       "cli-shim.js",
+      "dock-menu.js",
       "updater.js",
+      "smoke.js",
       "package.json",
       "build/icon.png"
     ],

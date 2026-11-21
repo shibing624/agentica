@@ -82,8 +82,9 @@ answering on that port.
 | `AGENTICA_DESKTOP_IGNORE_EXISTING=1` | Skip login-shell PATH / python; only env + managed runtime + bootstrap. |
 | `AGENTICA_DESKTOP_NO_BOOTSTRAP=1` | Never download uv/Python. Fail if nothing is already installed. |
 | `AGENTICA_HOME` | Data root. Must match the one your CLI uses, or the app sees a different set of sessions. |
+| `AGENTICA_DESKTOP_STATE_DIR` | Explicit dev/test isolation: keeps Electron, Gateway data and the managed runtime in separate subdirectories. Never migrates normal user data. |
 | `GATEWAY_AUTH=false` | Turns the auth gate off in the spawned gateway. |
-| `AGENTICA_DESKTOP_SMOKE=1` | Print one `DESKTOP-SMOKE-RESULT {json}` line describing what the window loaded, then quit through the normal quit path. |
+| `AGENTICA_DESKTOP_SMOKE=1` | Wait for the authenticated chat composer, print one `DESKTOP-SMOKE-RESULT {json}` line, then quit through the normal quit path. |
 | `AGENTICA_DESKTOP_SMOKE_SHOT` | With the above: also write a PNG of the window there. |
 
 `AGENTICA_DESKTOP_BUNDLED_RUNTIME` points at a runtime directory other than

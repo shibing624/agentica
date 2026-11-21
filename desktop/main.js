@@ -27,6 +27,7 @@
  *   5. stop what it started on the way out, gracefully.
  */
 
+const fs = require("node:fs");
 const path = require("node:path");
 const { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, screen, session, shell } = require("electron");
 const { GatewayProcess } = require("./gateway");
@@ -35,11 +36,22 @@ const { installCommand } = require("./cli-shim");
 const { buildDockMenuTemplate } = require("./dock-menu");
 const { startUpdates } = require("./updater");
 const { keepVisiblePosition, readWindowState, writeWindowState } = require("./window-state");
+const { desktopStatePaths, waitForChat } = require("./smoke");
 const {
   BROWSER_PARTITION, HEALTHY_AFTER_MS, MAX_GATEWAY_RESTARTS, hardenWebview, iconPath, isAppUrl, isBrowsableUrl, restartDelayMs,
 } = require("./util");
 
 const log = (msg) => console.log(`[desktop] ${msg}`);
+const smoke = process.env.AGENTICA_DESKTOP_SMOKE === "1";
+const isolatedRoot = process.env.AGENTICA_DESKTOP_STATE_DIR;
+if (isolatedRoot) {
+  const state = desktopStatePaths(isolatedRoot);
+  fs.mkdirSync(state.profile, { recursive: true });
+  app.setPath("userData", state.profile);
+  process.env.AGENTICA_HOME = state.home;
+  process.env.AGENTICA_CACHE_DIR = path.join(state.home, "cache");
+  process.env.AGENTICA_DESKTOP_RUNTIME = state.runtime;
+}
 
 /** The app icon, or null when the file is missing or unreadable. Loaded once:
  *  `nativeImage` decoding is disk I/O, and the window and the dock want the
@@ -68,6 +80,12 @@ let stopping = null;
 let restarts = 0;
 
 function fatal(context, err) {
+  if (smoke) {
+    process.stdout.write(`DESKTOP-SMOKE-RESULT ${JSON.stringify({ error: context, version: app.getVersion() })}\n`);
+    process.exitCode = 1;
+    app.quit();
+    return;
+  }
   const detail = err instanceof Error ? (err.stack || err.message) : String(err);
   log(`${context}: ${detail}`);
   dialog.showErrorBox("Agentica", `${context}\n\n${detail}`);
@@ -575,44 +593,39 @@ if (!app.requestSingleInstanceLock()) {
 // the check lives in the app: it reports what the window actually loaded and
 // then quits through `before-quit`, exercising the real teardown.
 
-const SMOKE_SETTLE_MS = 2500;
-
 function armSmokeProbe(target) {
-  if (process.env.AGENTICA_DESKTOP_SMOKE !== "1") return;
+  if (!smoke) return;
   target.webContents.once("did-finish-load", () => {
-    setTimeout(() => {
-      void (async () => {
-        try {
-          const result = {
-            url: target.webContents.getURL(),
-            title: target.webContents.getTitle(),
-            origin,
-            spawned: gateway ? gateway.spawned : false,
-            gatewayPid: gateway && gateway.child ? gateway.child.pid : null,
-            // Whether this platform's icon file decoded. An ICO handed to a
-            // non-Windows build decodes to an empty image, which looks exactly
-            // like having configured no icon at all.
-            iconSize: icon ? icon.getSize() : null,
-            // What the page can see of itself: a signed-in SPA renders the
-            // composer, the login page renders a password field.
-            probe: await target.webContents.executeJavaScript(
-              `({ composer: !!document.querySelector("textarea"),
-                  login: !!document.querySelector("input[type=password]"),
-                  sessions: document.querySelectorAll(".s-item").length })`
-            ),
-          };
-          const shot = process.env.AGENTICA_DESKTOP_SMOKE_SHOT;
-          if (shot) {
-            const image = await target.webContents.capturePage();
-            require("node:fs").writeFileSync(shot, image.toPNG());
-          }
-          process.stdout.write(`DESKTOP-SMOKE-RESULT ${JSON.stringify(result)}\n`);
-        } catch (err) {
-          process.stdout.write(`DESKTOP-SMOKE-RESULT ${JSON.stringify({ error: String(err) })}\n`);
-        } finally {
-          app.quit();
+    void (async () => {
+      try {
+        const probe = await waitForChat(() => target.webContents.executeJavaScript(
+          `({ composer: !!document.querySelector(".input-ta"),
+              login: !!document.querySelector("input[type=password]"),
+              sessions: document.querySelectorAll(".s-item").length })`
+        ));
+        const result = {
+          url: target.webContents.getURL(),
+          title: target.webContents.getTitle(),
+          origin,
+          version: app.getVersion(),
+          targetPid: gateway?.record?.pid ?? null,
+          spawned: gateway ? gateway.spawned : false,
+          gatewayPid: gateway && gateway.child ? gateway.child.pid : null,
+          iconSize: icon ? icon.getSize() : null,
+          probe,
+        };
+        const shot = process.env.AGENTICA_DESKTOP_SMOKE_SHOT;
+        if (shot) {
+          const image = await target.webContents.capturePage();
+          fs.writeFileSync(shot, image.toPNG());
         }
-      })();
-    }, SMOKE_SETTLE_MS);
+        process.stdout.write(`DESKTOP-SMOKE-RESULT ${JSON.stringify(result)}\n`);
+      } catch (err) {
+        process.stdout.write(`DESKTOP-SMOKE-RESULT ${JSON.stringify({ error: String(err), version: app.getVersion() })}\n`);
+        process.exitCode = 1;
+      } finally {
+        app.quit();
+      }
+    })();
   });
 }

@@ -28,6 +28,28 @@ const {
   selectRecentSessions,
 } = require("./dock-menu");
 const { TARGETS, parseTargets, sitePackages } = require("./scripts/prepare-runtime");
+const { desktopStatePaths, waitForChat } = require("./smoke");
+
+test("the packaged shell includes its native Dock menu", () => {
+  assert.ok(require("./package.json").build.files.includes("dock-menu.js"));
+});
+
+test("an isolated desktop launch separates its renderer, gateway and runtime state", () => {
+  const base = path.resolve("fixture-state");
+  assert.deepEqual(desktopStatePaths(base), {
+    profile: path.join(base, "electron"),
+    home: path.join(base, "gateway"),
+    runtime: path.join(base, "runtime"),
+  });
+});
+
+test("smoke waits for a real composer and reports a login-only timeout", async () => {
+  const loading = { composer: false, login: false };
+  const ready = { composer: true, login: false, sessions: 1 };
+  const snapshots = [loading, loading, ready];
+  assert.equal(await waitForChat(async () => snapshots.shift(), 500, 0), ready);
+  await assert.rejects(waitForChat(async () => ({ composer: false, login: true }), 0, 0), /login/);
+});
 
 const KEYS = [
   "AGENTICA_DESKTOP_BUNDLED_RUNTIME",

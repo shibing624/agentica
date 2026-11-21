@@ -33,6 +33,11 @@ on:
         type: boolean
         default: false
   workflow_dispatch:
+    inputs:
+      previous_windows_tag:
+        description: Optional earlier release tag to install before the Windows candidate
+        type: string
+        default: ""
 
 jobs:
   build:
@@ -112,6 +117,9 @@ jobs:
       - run: npm ci
         working-directory: desktop
 
+      - run: npm test
+        working-directory: desktop
+
       - name: Assemble the bundled runtime
         working-directory: desktop
         shell: bash
@@ -145,6 +153,48 @@ jobs:
             unset WIN_CSC_LINK WIN_CSC_KEY_PASSWORD
           fi
           npx electron-builder ${{ matrix.args }} --publish never
+
+      - name: Smoke the packaged macOS application
+        if: runner.os == 'macOS'
+        working-directory: desktop
+        shell: bash
+        run: |
+          if [ "$(uname -m)" = arm64 ]; then bundle=dist/mac-arm64; else bundle=dist/mac; fi
+          node scripts/check-packaged-app.js "$bundle/Agentica.app/Contents/MacOS/Agentica"
+
+      - name: Smoke the packaged Linux application
+        if: runner.os == 'Linux'
+        working-directory: desktop
+        run: xvfb-run -a node scripts/check-packaged-app.js dist/linux-unpacked/agentica-desktop
+
+      - name: Install and smoke the Windows candidate
+        if: runner.os == 'Windows'
+        working-directory: desktop
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_TAG: ${{ inputs.previous_windows_tag }}
+        run: |
+          $installDir = Join-Path $env:RUNNER_TEMP 'agentica-smoke-install'
+          $stateDir = Join-Path $env:RUNNER_TEMP 'agentica-smoke-state'
+          function Install-Desktop($file) {
+            $process = Start-Process -Wait -PassThru -FilePath $file -ArgumentList '/S', "/D=$installDir"
+            if ($process.ExitCode -ne 0) { throw "Installer exit code $($process.ExitCode)" }
+          }
+          $mode = 'clean'
+          if ($env:PREVIOUS_TAG) {
+            $previousDir = Join-Path $env:RUNNER_TEMP 'agentica-smoke-previous'
+            gh release download $env:PREVIOUS_TAG --pattern 'agentica-desktop-win32-x64.exe' --dir $previousDir
+            if ($LASTEXITCODE -ne 0) { throw 'Could not fetch the Windows predecessor' }
+            Install-Desktop (Join-Path $previousDir 'agentica-desktop-win32-x64.exe')
+            node scripts/check-packaged-app.js (Join-Path $installDir 'Agentica.exe') $stateDir seed
+            if ($LASTEXITCODE -ne 0) { throw 'Windows predecessor did not start' }
+            $mode = 'upgrade'
+          }
+          $candidate = Get-ChildItem dist -Filter 'agentica-desktop-win32-x64.exe' | Select-Object -First 1
+          if (-not $candidate) { throw 'No Windows candidate installer' }
+          Install-Desktop $candidate.FullName
+          node scripts/check-packaged-app.js (Join-Path $installDir 'Agentica.exe') $stateDir $mode
 
       - uses: actions/upload-artifact@v4
         with:
