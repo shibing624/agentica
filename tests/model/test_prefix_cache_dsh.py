@@ -1013,3 +1013,31 @@ def test_a_usage_read_before_the_first_resumed_turn_keeps_the_logged_prompt(tmp_
     asyncio.run(a2.run("resumed turn"))
 
     assert spy2.captured[0][0][0] == spy1.captured[0][0][0]
+
+
+def test_loading_a_skill_does_not_reorder_the_catalogue_in_the_next_process(tmp_path, monkeypatch):
+    """The catalogue sits in the cached head of messages[0]; its order must not
+    follow usage, or a rebuilt agent renders a different head."""
+    from agentica.tools.skill_tool import SkillTool
+
+    monkeypatch.setenv("AGENTICA_HOME", str(tmp_path))
+    skills_dir = tmp_path / "skills"
+    for name in ("alpha-skill", "zulu-skill"):
+        d = skills_dir / name
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {name} does things\n---\nbody\n", encoding="utf-8")
+    ws = Workspace(str(tmp_path / "ws"))
+    ws.initialize()
+
+    def catalogue():
+        tool = SkillTool(custom_skill_dirs=[str(d) for d in sorted(skills_dir.iterdir())], auto_load=False)
+        Agent(model=_SpyOpenAIChat(id="DeepSeek-V4.1-Flash"), workspace=ws, tools=[tool],
+              tool_config=ToolConfig(auto_load_mcp=False))
+        return tool, tool.get_system_prompt()
+
+    tool, before = catalogue()
+    tool.get_skill_info("zulu-skill")
+    tool.get_skill_info("zulu-skill")
+    _, after = catalogue()
+    assert before == after
+    assert before.index("alpha-skill") < before.index("zulu-skill")

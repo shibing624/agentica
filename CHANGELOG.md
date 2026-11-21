@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **系统提示里的 skills 目录改为按名字排序，去掉使用次数排序**：原先按「最近使用 + 使用次数」打分排序，每次 `get_skill_info` 都把计数写入 `users/{id}/skill_usage.json`。目录位于系统提示里带缓存断点的那一段，排序跟着使用情况变，重建 agent 时渲染出来的就不是上游缓存过的那份。这份排序本身用处不大：目录预算是上下文窗口的 2%，在实际用到的窗口（≥200K）下 29 个 skill 全部带描述放得下，排名不决定谁被截掉；dsh 也是按名字排。现在按名字排序，计数逻辑和文件都不再使用（`agentica/tools/skill_tool.py`）。旧的 `skill_usage.json` 可以直接删掉。
+
 - **网关重建会话后，第一轮不再整窗重算**：网关重启或会话被换出后重建 agent，history 灌回之后、下一轮之前，页面的用量轮询（`measure_context`）先调了 `get_system_message()`。那时日志里的旧系统提示还没恢复（只在 runner 开跑时恢复），于是钉住了一份现场渲染的新提示；skills 目录顺序和 Learned Experiences 在两次进程间会变，新提示与上游缓存的不一致，下一轮从头重算。实测 memhub 会话 `s_womdpzvrmwq7b57j` 一次多付 143K 未命中（整轮命中率 95.7%，其余每步都在 99% 以上）。现在 `get_system_message()` 在有历史时先从日志恢复，任何读取方都拿到同一份（`agentica/agent/prompts.py`）。
 
 - **CLI `auto` 支持本轮文件编辑授权**：工作区外的普通文件被要求确认时，可以选择仅本次，或允许 `write_file` / `apply_patch` 在本轮编辑列出的精确路径。授权不写入项目配置；删除、不受信任的目标和敏感路径不沿用这项授权。LLM 审核通过只适用于当前调用。

@@ -36,12 +36,9 @@ Usage:
     )
 """
 import json
-import math
 import threading
-import time
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Optional
 
 from agentica.tools.base import Tool
 from agentica.skills import (
@@ -58,194 +55,6 @@ from agentica.utils.log import logger
 # get_skill_info returns at most this much of a SKILL.md body; the rest is
 # pointed to by path and line offset.
 SKILL_INFO_MAX_CHARS = 20_000
-
-
-# Per-call score components for ranking skills in the system prompt.
-# Recency wins over raw frequency to keep the visible set adaptive.
-_USAGE_RECENCY_HALF_LIFE_DAYS = 14.0
-_USAGE_RECENCY_WEIGHT = 0.7
-_USAGE_FREQUENCY_WEIGHT = 0.3
-
-
-# Skill usage counters, keyed by (workspace_path, user_id, skill_name).
-#
-# Storage layout:
-#   * In-memory: ``_skill_usage_state`` module dict — the hot path reads
-#     and writes here under ``_skill_usage_lock``. Survives across turns
-#     in the same process but isolated by (workspace, user_id) so a
-#     shared SDK process never bleeds counts across tenants.
-#   * On disk: ``workspace/users/{user_id}/skill_usage.json`` — read once
-#     (lazy) on first access for a given (workspace, user_id), and
-#     rewritten after every bump. Same isolation as AGENTS.md routing:
-#     each tenant gets its own file under their own user dir.
-#
-# Without a workspace (e.g. raw ``SkillTool()`` with no agent), counters
-# stay in-memory only and vanish on process exit — that's the historical
-# behaviour for unbound tools and we don't try to invent a home directory
-# for them.
-#
-# The previous global ``~/.agentica/skill_usage.json`` is intentionally
-# abandoned: it leaked tenant A's usage into tenant B's prompt ranking
-# in a shared-process deployment.
-_skill_usage_state: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
-_skill_usage_lock = threading.Lock()
-_skill_usage_loaded: set = set()  # set of (ws_key, user_id) already disk-loaded
-_DEFAULT_USER_ID = "default"
-_NO_WORKSPACE_KEY = "__no_workspace__"
-_USAGE_FILENAME = "skill_usage.json"
-
-
-def _ws_key(workspace: Any) -> str:
-    """Stable string key for the workspace identity in the in-memory dict."""
-    if workspace is None:
-        return _NO_WORKSPACE_KEY
-    return str(workspace.path)
-
-
-def _usage_path(workspace: Any, user_id: str) -> Optional[Path]:
-    """Disk path for a (workspace, user_id) pair, or None when unbound.
-
-    Uses ``Workspace.sanitize_user_id`` so the dir matches what the rest
-    of the workspace writes under ``users/{user_id}/``.
-    """
-    if workspace is None:
-        return None
-    safe_id = workspace.sanitize_user_id(user_id)
-    return workspace.path / workspace.config.users_dir / safe_id / _USAGE_FILENAME
-
-
-def _load_from_disk_locked(workspace: Any, user_id: str) -> None:
-    """Lazy-load this (workspace, user) slice into the module cache.
-
-    Caller must hold ``_skill_usage_lock``. Idempotent: a (ws_key, user_id)
-    pair is loaded at most once per process; subsequent calls are no-ops.
-    File errors are swallowed (best-effort) since usage counters are a
-    prompt-ordering optimisation, not durable business data.
-    """
-    ws_key = _ws_key(workspace)
-    if (ws_key, user_id) in _skill_usage_loaded:
-        return
-    _skill_usage_loaded.add((ws_key, user_id))
-    path = _usage_path(workspace, user_id)
-    if path is None:
-        return
-    # Broad exception swallow: counters are a prompt-ordering
-    # optimisation. Any failure to read (missing file, malformed JSON,
-    # mock/duck-typed workspace in tests, exotic OS error) just leaves
-    # the in-memory slice empty for this user — which is the same
-    # behaviour as "first run for this user" and is always safe.
-    try:
-        if not path.exists():
-            return
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as e:
-        logger.debug(f"skill_usage: failed to load {path}: {e}")
-        return
-    if not isinstance(data, dict):
-        return
-    for name, entry in data.items():
-        if isinstance(entry, dict):
-            _skill_usage_state[(ws_key, user_id, name)] = dict(entry)
-
-
-def _flush_to_disk_locked(workspace: Any, user_id: str) -> None:
-    """Write this (workspace, user) slice back to disk. Caller holds lock."""
-    path = _usage_path(workspace, user_id)
-    if path is None:
-        return
-    ws_key = _ws_key(workspace)
-    slice_ = {
-        name: dict(entry)
-        for (wk, uid, name), entry in _skill_usage_state.items()
-        if wk == ws_key and uid == user_id
-    }
-    # Same broad-swallow rationale as the loader: a flush failure just
-    # means this user's ranking won't survive process restart, which is
-    # strictly equivalent to the old in-memory-only behaviour.
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(slice_, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-    except Exception as e:
-        logger.debug(f"skill_usage: failed to write {path}: {e}")
-
-
-def _bump_skill_usage(workspace: Any, user_id: Optional[str], name: str) -> None:
-    """Record one invocation of ``name`` for ``(workspace, user_id)``.
-
-    Updates the in-memory counter and persists the slice to
-    ``users/{user_id}/skill_usage.json`` when a workspace is bound. Best
-    effort: never raises on I/O failure.
-    """
-    uid = user_id or _DEFAULT_USER_ID
-    ws_key = _ws_key(workspace)
-    key = (ws_key, uid, name)
-    with _skill_usage_lock:
-        _load_from_disk_locked(workspace, uid)
-        entry = _skill_usage_state.get(key) or {"count": 0, "last_used": ""}
-        entry["count"] = int(entry.get("count", 0)) + 1
-        entry["last_used"] = datetime.now().isoformat(timespec="seconds")
-        _skill_usage_state[key] = entry
-        _flush_to_disk_locked(workspace, uid)
-
-
-def _load_skill_usage(
-    workspace: Any, user_id: Optional[str]
-) -> Dict[str, Dict[str, Any]]:
-    """Snapshot counters for ``(workspace, user_id)``: {skill_name: {count, last_used}}."""
-    uid = user_id or _DEFAULT_USER_ID
-    ws_key = _ws_key(workspace)
-    with _skill_usage_lock:
-        _load_from_disk_locked(workspace, uid)
-        # Copy out only this user's slice so callers can't mutate the live dict.
-        return {
-            name: dict(entry)
-            for (wk, uid_, name), entry in _skill_usage_state.items()
-            if wk == ws_key and uid_ == uid
-        }
-
-
-def _reset_skill_usage() -> None:
-    """Clear all in-memory counters AND the "already-loaded" marker set.
-
-    Test helper; not for production paths. Does NOT touch on-disk files —
-    tests that need a clean disk state should write to a temp workspace
-    and let it get cleaned up at teardown.
-    """
-    with _skill_usage_lock:
-        _skill_usage_state.clear()
-        _skill_usage_loaded.clear()
-
-
-def _parse_last_used(raw) -> float:
-    """Parse last_used into epoch seconds. Accepts ISO string or legacy float."""
-    if isinstance(raw, (int, float)):
-        return float(raw)
-    if isinstance(raw, str) and raw:
-        try:
-            return datetime.fromisoformat(raw).timestamp()
-        except ValueError:
-            return 0.0
-    return 0.0
-
-
-def _score_skill_usage(usage: dict, name: str, now: float) -> float:
-    """Composite ranking score: recency decay + log-frequency."""
-    entry = usage.get(name)
-    if not entry:
-        return 0.0
-    count = max(int(entry.get("count", 0)), 0)
-    last_used = _parse_last_used(entry.get("last_used"))
-    if last_used <= 0 or count <= 0:
-        return 0.0
-    age_days = max((now - last_used) / 86400.0, 0.0)
-    recency = 0.5 ** (age_days / _USAGE_RECENCY_HALF_LIFE_DAYS)
-    # Log so a single 100-call burst doesn't permanently freeze the top slot.
-    frequency = math.log1p(count) / math.log1p(50)  # normalises around 50 calls
-    frequency = min(frequency, 1.0)
-    return _USAGE_RECENCY_WEIGHT * recency + _USAGE_FREQUENCY_WEIGHT * frequency
 
 
 class SkillTool(Tool):
@@ -438,35 +247,6 @@ class SkillTool(Tool):
             return all_skills
         return [s for s in all_skills if self._agent._is_skill_enabled(s.name)]
 
-    def _current_workspace(self) -> Any:
-        """Workspace bound to this tool (via Agent), or None when standalone."""
-        if self._agent is None:
-            return None
-        return self._agent.workspace
-
-    def _current_user_id(self) -> Optional[str]:
-        """Resolve user_id from the bound agent's workspace, if any."""
-        workspace = self._current_workspace()
-        if workspace is None:
-            return None
-        return workspace.user_id
-
-    def _rank_skills_by_usage(self, skills: List[Skill]) -> List[Skill]:
-        """Order skills by composite recency+frequency score, ties → name.
-
-        Usage is scoped to the bound agent's (workspace, user_id), so one
-        tenant's skill traffic doesn't reshape another tenant's prompt.
-        Counters are persisted per user under
-        ``users/{user_id}/skill_usage.json``, so rankings survive a
-        process restart for the same user.
-        """
-        usage = _load_skill_usage(self._current_workspace(), self._current_user_id())
-        now = time.time()
-        return sorted(
-            skills,
-            key=lambda s: (-_score_skill_usage(usage, s.name, now), s.name),
-        )
-
     def list_skills(self) -> str:
         """
         List all available skills.
@@ -486,7 +266,7 @@ class SkillTool(Tool):
                 "- ~/.agentica/skills/ (user-level)"
             )
 
-        ranked = self._rank_skills_by_usage(skills)
+        ranked = sorted(skills, key=lambda s: s.name)
         result = f"Available Skills ({len(ranked)}):\n"
         result += "-" * 40 + "\n"
         for skill in ranked:
@@ -521,14 +301,6 @@ class SkillTool(Tool):
                 f"Skill '{skill_name}' not found.\n"
                 f"Available skills: {', '.join(available[:50]) if available else 'None'}"
             )
-
-        # Bump usage counter — this is how the system prompt decides which
-        # skills earn a full description slot vs name-only. Scoped per
-        # (workspace, user_id) and persisted to users/{user_id}/skill_usage.json
-        # so the next process startup remembers what this user actually uses.
-        _bump_skill_usage(
-            self._current_workspace(), self._current_user_id(), skill_obj.name,
-        )
 
         # Return full skill prompt with instructions
         result = f"=== Skill: {skill_obj.name} ===\n"
@@ -598,7 +370,10 @@ No skills are currently available.
 If a matching skill is later installed, load it with `get_skill_info(skill_name)` before acting on the task.
 """
 
-        ranked = self._rank_skills_by_usage(skills)
+        # Name order, not usage order: the catalogue sits in the cached head
+        # of the system prompt, and an order that follows usage re-renders
+        # differently in the next process (dsh sorts by name the same way).
+        ranked = sorted(skills, key=lambda s: s.name)
         context_window = None
         if self._agent is not None:
             model = self._agent.model
