@@ -7,12 +7,19 @@ pytest.importorskip("agentica_gateway")
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from agentica_gateway.auth import Principal
 from agentica_gateway.routes import settings as settings_routes
 
 
-def _client(host: str = "127.0.0.1", headers: dict | None = None) -> TestClient:
+def _client(host: str = "127.0.0.1", headers: dict | None = None, role: str = "admin") -> TestClient:
     app = FastAPI()
     app.include_router(settings_routes.router)
+
+    @app.middleware("http")
+    async def authenticate(request, call_next):
+        request.state.principal = Principal("fixture", "session", role)
+        return await call_next(request)
+
     return TestClient(app, client=(host, 50000), headers=headers or {})
 
 
@@ -50,6 +57,14 @@ def test_remote_client_never_opens_a_dialog(monkeypatch, host, headers):
 def test_no_chooser_on_this_system_is_501(monkeypatch):
     monkeypatch.setattr(settings_routes, "_pick_command", lambda platform=None: None)
     assert _client().post("/api/fs/pick").status_code == 501
+
+
+def test_local_non_admin_does_not_open_a_dialog(monkeypatch):
+    opened = []
+    monkeypatch.setattr(settings_routes, "_pick_command", lambda: ["chooser"])
+    monkeypatch.setattr(settings_routes, "_pick_directory_os", lambda cmd: opened.append(cmd))
+    assert _client(role="user").post("/api/fs/pick").status_code == 403
+    assert opened == []
 
 
 def test_pick_command_per_platform(monkeypatch):

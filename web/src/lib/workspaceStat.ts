@@ -31,7 +31,7 @@ const waiters: Waiter[] = [];
 let flushTimer = 0;
 
 function pathTarget(path: string, root: string, scope?: WorkspaceScope): [WorkspaceTarget, string] {
-  const rel = scope ? toWorkspaceRelative(path, scope.root) : null;
+  const rel = scope ? toWorkspaceRelative(path, scope.root.replaceAll("\\", "/")) : null;
   if (scope && rel !== null) return [scope, rel];
   const { targetRoot, targetRel } = splitExternalTarget(path, root);
   return [targetRoot, targetRel];

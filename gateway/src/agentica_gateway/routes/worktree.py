@@ -19,6 +19,7 @@ from agentica.git import worktree as worktrees
 from agentica.git.worktree import WorktreeError
 
 from .. import deps
+from ..config import settings
 from ..services import live_turn
 from ..workspace_files import WorkspacePathError, authorized_workspace_root
 
@@ -29,17 +30,19 @@ def _account(request: Request) -> str:
     return request.state.principal.user_id
 
 
+def _authorize_directory(request: Request, work_dir: str, owner: str) -> None:
+    if not request.state.principal.is_admin:
+        try:
+            authorized_workspace_root(work_dir, settings.workspace_path, owner, False)
+        except WorkspacePathError as err:
+            raise HTTPException(status_code=err.status, detail=err.detail) from err
+
+
 def _binder(request: Request, session_id: str) -> tuple[WorktreeBinder, object, str]:
     service = deps.get_agent_service()
     owner = _account(request)
     work_dir = service.get_session_work_dir(session_id, owner)
-    if not request.state.principal.is_admin:
-        try:
-            from ..config import settings
-
-            authorized_workspace_root(work_dir, settings.workspace_path, owner, False)
-        except WorkspacePathError as err:
-            raise HTTPException(status_code=err.status, detail=err.detail) from err
+    _authorize_directory(request, work_dir, owner)
     binder = WorktreeBinder(agent_config={"work_dir": work_dir})
     return binder, service, owner
 
@@ -102,8 +105,10 @@ async def worktree_action(body: WorktreeRequest, request: Request):
             path = Path(entry.path).expanduser().resolve()
             if not entry.exists or not path.is_dir():
                 raise WorktreeError(f"{entry.path} is not a usable checkout")
+            _authorize_directory(request, str(path), owner)
             service.set_session_work_dir(body.session_id, str(path), owner)
             service.invalidate_session_agent(body.session_id, owner)
+            live_turn.bump_pulse(owner)
             output = f"Bound session to {entry.name} at {path}."
         elif action == "merge":
             if not name:

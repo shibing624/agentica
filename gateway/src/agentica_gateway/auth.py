@@ -100,10 +100,9 @@ class Principal:
     # "open" (the gate is off). Only "session" is ambient, which is what the
     # CSRF check and the password rules turn on.
     kind: str
-    # "admin" or "user". Gates account management and nothing else: the rest of
-    # the gateway configures one machine, and this is that machine's owner's
-    # machine. Resolved from the account record on every request, so demoting
-    # somebody does not wait for their cookie to expire.
+    # "admin" or "user". Admin covers account management and host operations
+    # such as unrestricted filesystem access. Resolved on every request, so
+    # demoting somebody does not wait for their cookie to expire.
     role: str = accounts.ROLE_USER
 
     @property
