@@ -307,6 +307,11 @@ export function workspaceContentUrl(target: WorkspaceTarget, path: string, downl
 export const fetchWorkspaceFiles = (target: WorkspaceTarget, path: string, signal?: AbortSignal) =>
   request(`/api/workspace/files?${new URLSearchParams({ ...workspaceParams(target), path })}`, { signal });
 
+export const searchWorkspaceFiles = (scope: WorkspaceScope, q: string, signal: AbortSignal) =>
+  request<{ paths: string[]; truncated: boolean }>(
+    `/api/workspace/search?${new URLSearchParams({ ...workspaceParams(scope), q })}`, { signal },
+  );
+
 export const fetchWorkspacePreview = (target: WorkspaceTarget, path: string) =>
   request(`${workspaceContentUrl(target, path)}&preview=1`);
 

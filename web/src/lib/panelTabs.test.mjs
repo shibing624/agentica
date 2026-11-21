@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
-
 const vite = await createServer({
   root: fileURLToPath(new URL("../..", import.meta.url)),
   configFile: false,
@@ -13,9 +12,20 @@ const vite = await createServer({
 const T = await vite.ssrLoadModule("/src/lib/panelTabs.ts");
 after(() => vite.close());
 
+test("collapsing one directory also removes its expanded descendants, not siblings", () => {
+  const opened = ["src", "src/api", "src/api/tests", "src2", "src2/lib"];
+  assert.deepEqual(T.toggleWorkspaceDirectory(opened, "src"), ["src2", "src2/lib"]);
+  assert.deepEqual(T.toggleWorkspaceDirectory([], "docs"), ["docs"]);
+});
+
 const file = (path) => ({ key: T.fileKey(path), kind: "file", path });
 const term = (id, ordinal) => ({ key: T.terminalKey(id), kind: "terminal", id, ordinal });
 const keys = (st) => st.tabs.map((t) => t.key);
+
+test("selecting the previewed file again from the tree keeps its tab open", () => {
+  const state = T.openTab(T.initialTabs(), file("README.md"));
+  assert.deepEqual(T.replaceTab(state, state.active, file("README.md")), state);
+});
 
 test("opening a file twice focuses the tab it already has", () => {
   let st = T.initialTabs();

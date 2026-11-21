@@ -1,5 +1,5 @@
 import * as ContextMenu from "@radix-ui/react-context-menu";
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   FileTypeIcon, IconClose, IconCompass, IconDiff, IconExitFullscreen, IconFullscreen, IconGlobe, IconPlus, IconSidebarRight, IconTerminal,
 } from "../icons";
@@ -126,6 +126,10 @@ export function FilesPanel({
   // panel can still be opened fullscreen there.
   const shown = panel.open && (panel.width > 0 || panel.fullscreen);
   const strip = useTabStrip(panel.active, panel.tabs);
+  const [showTree, setShowTree] = useState(false);
+  const onPreview = panel.tabs.some((tab) => tab.key === panel.active && tab.kind === "file");
+  const onFiles = panel.active === "files";
+  const sideTree = onPreview && showTree;
   return (
     <>
       {shown && !panel.fullscreen && (
@@ -200,6 +204,12 @@ export function FilesPanel({
               </button>
             )}
             <span className="pt-fill" />
+            {onPreview && panel.scope && (
+              <button type="button" className="ib" title={S.files.title} aria-label={S.files.title}
+                      aria-pressed={showTree} onClick={() => setShowTree(!showTree)}>
+                <FileTypeIcon kind="folder" size={16} />
+              </button>
+            )}
             <button type="button" className="ib" onClick={() => panel.setFullscreen(!panel.fullscreen)}
                     title={panel.fullscreen ? S.files.exitFullscreen : S.files.fullscreen}
                     aria-label={panel.fullscreen ? S.files.exitFullscreen : S.files.fullscreen}>
@@ -212,25 +222,23 @@ export function FilesPanel({
           </div>
           {/* Every tab stays mounted while it is open, so switching does not
               refetch a file or drop a terminal's screen. */}
-          {panel.tabs.map((tab) => {
+          <div className="ws-panel-content">
+          <div hidden={!onFiles && !sideTree} className={sideTree ? "ws-tree-column side" : "ws-tree-column"}>
+            {panel.scope ? (
+              <Suspense fallback={<p className="ws-muted">{S.common.loading}</p>}>
+                <WorkspaceBrowser key={`${panel.accountId}:${panel.sessionKey}:${panel.scope.binding}`} scope={panel.scope}
+                                  accountId={panel.accountId} isAdmin={panel.canTerminal} revision={panel.revision}
+                                  active={shown && (onFiles || sideTree)} revealDirectory={panel.revealDirectory}
+                                  projectDir={panel.projectDir}
+                                  onOpenFile={sideTree ? panel.replacePreview : panel.browsePath} />
+              </Suspense>
+            ) : <p className="ws-muted">{panel.scopeError ? S.files.loadFailed : panel.sessionKey && root ? S.common.loading : S.files.noRoot}</p>}
+          </div>
+          {panel.tabs.filter((tab) => tab.kind !== "files").map((tab) => {
             const active = tab.key === panel.active;
             const scopedKey = `${panel.sessionKey}:${tab.key}`;
             return (
               <div key={scopedKey} className="files-panel-body" hidden={!active} role="tabpanel">
-                {tab.kind === "files" && (panel.scope
-                  ? (
-                    <Suspense fallback={<p className="ws-muted">{S.common.loading}</p>}>
-                      <WorkspaceBrowser
-                        root={panel.scope.root}
-                        scope={panel.scope}
-                        active={panel.open && active}
-                        dirPath={panel.dirPath}
-                        onDirPathChange={panel.setDirPath}
-                        onOpenFile={panel.browsePath}
-                      />
-                    </Suspense>
-                  )
-                  : <p className="ws-muted">{panel.scopeError ? S.files.loadFailed : panel.sessionKey && root ? S.common.loading : S.files.noRoot}</p>)}
                 {tab.kind === "guide" && <GuidePage panel={panel} />}
                 {tab.kind === "file" && (panel.scope || isAbsOrHomePath(tab.path)) && (
                   <Suspense fallback={<p className="ws-muted">{S.common.loading}</p>}>
@@ -261,6 +269,7 @@ export function FilesPanel({
               </div>
             );
           })}
+          </div>
         </div>
       </aside>
     </>

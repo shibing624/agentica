@@ -8,7 +8,10 @@ symlink escapes are both refused.
 from __future__ import annotations
 
 import codecs
+import os
 from pathlib import Path, PureWindowsPath
+from threading import Event
+from time import monotonic
 
 from agentica.workspace import Workspace
 # 256 KiB preview cap; 50 MiB hard ceiling for a full inline read.
@@ -220,6 +223,36 @@ def stat_existing(root: str, paths: list[str]) -> list[str]:
         if p.is_file():
             found.append(rel)
     return found
+
+
+def search_workspace(root: str, query: str, cancelled: Event) -> dict:
+    """Bounded filename search (no file reads and no directory redirects)."""
+    base = resolve_root(root)
+    wanted = query.casefold()
+    pending = [base]
+    matches: list[str] = []
+    examined = 0
+    deadline = monotonic() + 1.5
+    while pending:
+        parent = pending.pop()
+        try:
+            with os.scandir(parent) as entries:
+                for entry in entries:
+                    if cancelled.is_set() or examined >= 20_000 or monotonic() >= deadline or len(matches) >= 200:
+                        return {"paths": sorted(matches), "truncated": True}
+                    examined += 1
+                    if entry.name == ".git" or entry.is_symlink():
+                        continue
+                    target = Path(entry.path)
+                    if entry.is_dir(follow_symlinks=False):
+                        # Windows junctions are not necessarily symlinks.
+                        if target.resolve() == target:
+                            pending.append(target)
+                    elif entry.is_file(follow_symlinks=False) and wanted in entry.name.casefold():
+                        matches.append(target.relative_to(base).as_posix())
+        except (OSError, RuntimeError):
+            continue
+    return {"paths": sorted(matches), "truncated": False}
 
 
 def read_preview_text(path: Path, *, limit: int = TEXT_PREVIEW_BYTES) -> tuple[str, bool]:

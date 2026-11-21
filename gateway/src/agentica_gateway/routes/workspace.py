@@ -6,9 +6,11 @@ available for the administrator's compatibility and artifact-opening flows.
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from hashlib import sha256
 from pathlib import Path
+from threading import Event
 from typing import List
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
@@ -30,6 +32,7 @@ from ..workspace_files import (
     require_relative_path,
     resolve_existing,
     resolve_write,
+    search_workspace,
     stat_existing,
 )
 
@@ -120,6 +123,27 @@ async def workspace_list(
         _raise(e)
         return
     return {"path": path, "root": str(Path(root).expanduser().resolve()), "entries": entries}
+
+
+@router.get("/api/workspace/search")
+async def workspace_search(request: Request, session_id: str, binding: str, q: str = Query(min_length=1, max_length=160)):
+    root = _root(request, None, session_id, binding)
+    query = q.strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Enter a filename")
+    cancelled = Event()
+    task = asyncio.create_task(asyncio.to_thread(search_workspace, root, query, cancelled))
+    try:
+        while not task.done():
+            await asyncio.wait({task}, timeout=0.1)
+            if not task.done() and await request.is_disconnected():
+                cancelled.set()
+                break
+        return await task
+    except WorkspacePathError as err:
+        raise HTTPException(status_code=err.status, detail=err.detail) from err
+    finally:
+        cancelled.set()
 
 
 @router.get("/api/workspace/content")

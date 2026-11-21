@@ -1435,6 +1435,11 @@ a.side-nav-item{text-decoration:none;color:inherit}
 .files-panel.fullscreen{position:fixed;inset:0;z-index:150;border-left:none}
 html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:84px;-webkit-app-region:drag}
 .files-panel-inner{height:100%;display:flex;flex-direction:column;min-width:0}
+.ws-panel-content{position:relative;display:flex;flex:1;min-height:0;min-width:0;container-type:inline-size}
+.ws-tree-column{display:flex;flex:1;min-width:0;min-height:0}
+.ws-tree-column[hidden]{display:none}
+.ws-tree-column.side{flex:0 0 min(38%,240px);border-right:1px solid var(--border);background:var(--bg)}
+@container (max-width:520px){.ws-tree-column.side{position:absolute;inset:0 auto 0 0;width:min(270px,70%);z-index:2;box-shadow:4px 0 14px #0002}}
 .files-panel-head{display:flex;align-items:center;gap:4px;height:38px;padding:10px 8px 0 10px;flex-shrink:0;min-width:0;box-sizing:border-box}
 /* ===== PANEL TABS (dsh's dockkit strip, one pane) =====
    28px chips; the active one is filled, the rest are bare text with a hairline
@@ -1540,6 +1545,16 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .ws-list ul{list-style:none;margin:0;padding:0}
 .ws-list ul.busy{opacity:.55}
 .ws-list li{display:flex;align-items:center;border-bottom:var(--hair) solid var(--border2)}
+.ws-list .ws-tree-level>li{display:block;border:0}
+.ws-tree-row{display:flex;align-items:center;border-bottom:var(--hair) solid var(--border2)}
+.ws-tree-level .ws-tree-level{padding-left:13px}
+.ws-tree-caret{width:10px;color:var(--fg3)}
+.ws-row.selected{background:var(--bg3)}
+.ws-scope-title{min-width:0;text-align:left}
+.ws-scope-title>span{display:flex;flex-direction:column;min-width:0}
+.ws-scope-title small{color:var(--fg3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ws-search{margin:7px 10px;padding:5px 7px;box-sizing:border-box}
+.ws-search-results .ws-row{width:100%}
 .ws-row{flex:1;min-width:0;display:flex;align-items:center;gap:8px;border:none;background:transparent;color:var(--fg);padding:7px 10px;text-align:left;cursor:pointer;font-size:13px}
 .ws-row:hover{background:var(--bg3)}
 .ws-row-icon{width:16px;height:16px;flex-shrink:0;color:var(--fg3);display:inline-flex}

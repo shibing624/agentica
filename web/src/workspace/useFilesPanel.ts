@@ -16,6 +16,8 @@ export type FilesPanelState = {
   sessionKey: string;
   scope: api.WorkspaceScope | null;
   scopeError: boolean;
+  accountId: string;
+  revision: string;
   open: boolean;
   setOpen: (open: boolean) => void;
   width: number;
@@ -32,10 +34,11 @@ export type FilesPanelState = {
   /** Close every other tab / every tab to the right of `key` (never the file browser). */
   closeMany: (key: string, scope: "others" | "right") => void;
   /** Current directory path in the `files` tab for this session. */
-  dirPath: string;
-  setDirPath: (dirPath: string) => void;
+  revealDirectory: { path: string } | null;
+  projectDir: string;
   /** Open a workspace file in its own tab (or focus the tab it already has). */
   browsePath: (path: string) => void;
+  replacePreview: (path: string) => void;
   /** Reveal `path`'s parent directory in the `files` tab. */
   revealInFilesTab: (path: string) => void;
   /** Open an installed skill's SKILL.md in a tab. */
@@ -146,6 +149,7 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
   }, [updateRecord]);
 
   const open = state.open;
+  const revision = String(sessionId ? s.sessions[sessionId]?.sizeBytes ?? 0 : 0);
   const scopeKey = JSON.stringify([s.accountId, sessionKey, workspace]);
   const [scoped, setScoped] = useState<{ key: string; scope: api.WorkspaceScope | null } | null>(null);
   useEffect(() => {
@@ -164,10 +168,9 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
     updateRecord((rec) => ({ ...rec, open: nextOpen }));
   }, [updateRecord]);
 
-  const dirPath = state.dirPath;
-  const setDirPath = useCallback((nextDir: string) => {
-    updateRecord((rec) => (rec.dirPath === nextDir ? rec : { ...rec, dirPath: nextDir }));
-  }, [updateRecord]);
+  const [reveal, setReveal] = useState<{ key: string; path: string } | null>(null);
+  const revealKey = resolvedScope?.scope ? JSON.stringify([s.accountId, sessionKey, resolvedScope.scope.binding]) : null;
+  const projectDir = sessionId ? s.sessions[sessionId]?.projectDir || "" : "";
 
   // After a reload the tab list is gone but the shells are not.
   useEffect(() => {
@@ -233,19 +236,23 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
     });
   }, [updateRecord]);
 
+  const replacePreview = useCallback((path: string) => {
+    update((record) => replaceTab(record, record.active, { key: fileKey(path), kind: "file", path }));
+  }, [update]);
+
   const revealInFilesTab = useCallback((path: string) => {
     const rel = isAbsOrHomePath(path) ? (toWorkspaceRelative(path, workspace) || "") : path;
     const norm = rel.replace(/\/+$/, "");
     const slash = norm.lastIndexOf("/");
     const parentDir = slash >= 0 && !isAbsOrHomePath(norm) ? norm.slice(0, slash) : "";
+    if (revealKey) setReveal({ key: revealKey, path: parentDir });
     updateRecord((rec) => ({
       ...rec,
       open: true,
       active: FILES_TAB.key,
-      dirPath: parentDir,
       preferredActive: undefined,
     }));
-  }, [updateRecord, workspace]);
+  }, [updateRecord, workspace, revealKey]);
 
   const openSkill = useCallback((name: string) => {
     updateRecord((rec) => {
@@ -318,10 +325,11 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
 
   return {
     sessionKey,
+    accountId: s.accountId, revision,
     scope: resolvedScope?.scope ?? null, scopeError: resolvedScope !== null && !resolvedScope.scope,
     open, setOpen, width, startResize, resetWidth, fullscreen, setFullscreen,
     tabs: state.tabs, active: state.active, activate, close, closeMany,
-    dirPath, setDirPath,
-    browsePath, revealInFilesTab, openSkill, openReview, selectReviewFile, openGuide, pickFiles, canTerminal, pickTerminal, pickBrowser, updateBrowser, terminalGone,
+    revealDirectory: reveal?.key === revealKey ? reveal : null, projectDir,
+    browsePath, replacePreview, revealInFilesTab, openSkill, openReview, selectReviewFile, openGuide, pickFiles, canTerminal, pickTerminal, pickBrowser, updateBrowser, terminalGone,
   };
 }

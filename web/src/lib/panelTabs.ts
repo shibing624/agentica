@@ -45,6 +45,12 @@ export function initialSessionPanel(): SessionPanelRecord {
   return { tabs: [FILES_TAB], active: FILES_TAB.key, open: false, dirPath: "" };
 }
 
+export function toggleWorkspaceDirectory(expanded: string[], path: string): string[] {
+  return expanded.includes(path)
+    ? expanded.filter((open) => open !== path && !open.startsWith(path + "/"))
+    : [...expanded, path];
+}
+
 export const fileKey = (path: string) => `file:${path}`;
 export const skillKey = (name: string) => `skill:${name}`;
 export const reviewKey = (turn: number) => `review:${turn}`;
@@ -111,7 +117,7 @@ export function upsertTab(state: TabsState, tab: PanelTab): TabsState {
 export function replaceTab(state: TabsState, key: string, tab: PanelTab): TabsState {
   const at = state.tabs.findIndex((t) => t.key === key);
   if (at < 0) return openTab(state, tab);
-  if (state.tabs.some((t) => t.key === tab.key)) {
+  if (key !== tab.key && state.tabs.some((t) => t.key === tab.key)) {
     return { tabs: state.tabs.filter((t) => t.key !== key), active: tab.key };
   }
   const tabs = [...state.tabs];

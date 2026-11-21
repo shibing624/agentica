@@ -1,5 +1,5 @@
 /**
- * Workspace file browser: directory list <-> file preview (penguin's drill-down).
+ * Workspace file browser: scoped directory tree and file previews.
  * Text over 256 KiB is truncated; source highlighting stops at 64 KiB.
  * Markdown has rendered/source views. Source views (and fenced blocks inside
  * rendered Markdown) use CodeFrame.
@@ -13,10 +13,11 @@ import rehypeKatex from "rehype-katex";
 import * as api from "../api";
 import { CodeFrame, MarkdownCode } from "../components/CodeFrame";
 import { useStrings } from "../i18n";
-import { fmtFileSize, formatDateTime } from "../lib/format";
+import { fmtFileSize } from "../lib/format";
 import { languageFromFilename, HIGHLIGHT_LIMIT } from "../lib/highlight";
-import { classifyPreviewTarget, joinWorkspacePath, splitExternalTarget } from "../lib/filePath";
+import { classifyPreviewTarget, joinWorkspacePath, splitExternalTarget, toWorkspaceRelative } from "../lib/filePath";
 import { GFM_PLUGINS, localMarkdownPath, markdownUrlTransform } from "../lib/markdownPlugins";
+import { toggleWorkspaceDirectory } from "../lib/panelTabs";
 import { MarkdownLink } from "../components/ChatMarkdown";
 import { askConfirm, showToast } from "../store";
 import { FileTypeIcon, IconChevronDown, IconCopy, IconFinder, IconFolder, IconRefresh, IconTerminal, IconUpload } from "../icons";
@@ -125,7 +126,8 @@ export function FilePreview({
   // Workbooks fetch their own bytes; a refresh remounts the table to refetch.
   const [refreshKey, setRefreshKey] = useState(0);
   const seq = useRef(0);
-  const { targetRoot, targetRel, absPath: resolvedAbsPath, isExternal } = splitExternalTarget(filePath, root);
+  const relative = scope && toWorkspaceRelative(filePath, scope.root.replaceAll("\\", "/"));
+  const { targetRoot, targetRel, absPath: resolvedAbsPath, isExternal } = splitExternalTarget(relative || filePath, root);
   const target = !isExternal && scope ? scope : targetRoot;
 
   /** `keepMode` is a refresh: same file, same view. */
@@ -243,59 +245,149 @@ export function FilePreview({
   );
 }
 
-/** The panel's fixed first tab: the directory list. A file opens in a tab of its own. */
-export function WorkspaceBrowser({
-  root, scope, active, dirPath, onDirPathChange, onOpenFile,
-}: {
-  root: string;
+type DirectoryProps = {
   scope: api.WorkspaceScope;
-  active?: boolean;
-  dirPath?: string;
-  onDirPathChange?: (dirPath: string) => void;
+  path: string;
+  active: boolean;
+  expanded: string[];
+  selected: string;
+  revision: string;
+  toggle: (path: string) => void;
+  onOpenFile: (path: string) => void;
+};
+
+function DirectoryChildren(props: DirectoryProps) {
+  const { scope, path, active, expanded, selected, revision, toggle, onOpenFile } = props;
+  const S = useStrings();
+  const [entries, setEntries] = useState<Entry[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!active) return;
+    const request = new AbortController();
+    void api.fetchWorkspaceFiles(scope, path, request.signal).then(({ ok, data }) => {
+      if (request.signal.aborted) return;
+      setFailed(!ok);
+      if (ok) setEntries(data.entries);
+    });
+    return () => request.abort();
+  }, [scope, path, active, revision]);
+  if (failed) return <p className="ws-err">{S.files.loadFailed}</p>;
+  if (!entries) return <p className="ws-muted">{S.common.loading}</p>;
+  if (!entries.length) return <p className="ws-muted">{S.files.empty}</p>;
+  return (
+    <ul className="ws-tree-level">
+      {entries.map((entry) => {
+        const child = joinWorkspacePath(path, entry.name);
+        const directory = entry.kind === "dir";
+        const open = directory && expanded.includes(child);
+        return (
+          <li key={child}>
+            <div className="ws-tree-row">
+              <button type="button" className={"ws-row" + (directory && selected === child ? " selected" : "")}
+                      title={child} aria-expanded={directory ? open : undefined}
+                      onClick={() => directory ? toggle(child) : onOpenFile(child)}>
+                {directory && <span className="ws-tree-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>}
+                <span className="ws-row-icon"><FileTypeIcon path={entry.name} kind={directory ? "folder" : undefined} size={16} /></span>
+                <span className="ws-row-name">{entry.name}</span>
+                {!directory && <span className="ws-row-meta">{fmtFileSize(entry.sizeBytes)}</span>}
+              </button>
+              {!directory && <a className="ws-row-dl" href={api.workspaceContentUrl(scope, child, true)} download={entry.name}
+                                title={S.files.download} aria-label={`${S.files.download}: ${entry.name}`}>↓</a>}
+            </div>
+            {open && <DirectoryChildren {...props} path={child} />}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** One tree for a scoped session, shared by the Files page and its previews. */
+export function WorkspaceBrowser({
+  scope, accountId, isAdmin, active, revision, revealDirectory, projectDir, onOpenFile,
+}: {
+  scope: api.WorkspaceScope;
+  accountId: string;
+  isAdmin: boolean;
+  active: boolean;
+  revision: string;
+  revealDirectory: { path: string } | null;
+  projectDir: string;
   onOpenFile: (path: string) => void;
 }) {
   const S = useStrings();
-  const [localPath, setLocalPath] = useState(dirPath ?? "");
-  const path = dirPath !== undefined ? dirPath : localPath;
-  const setPath = useCallback((next: string) => {
-    setLocalPath(next);
-    onDirPathChange?.(next);
-  }, [onDirPathChange]);
-  const [data, setData] = useState<{ base: string; entries: Entry[] } | null>(null);
-  const [error, setError] = useState("");
+  const { root } = scope;
+  const storageKey = "ag_workspace_tree:" + JSON.stringify([accountId, scope.session_id, scope.binding]);
+  const [expanded, setExpanded] = useState<string[]>(() => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) ?? "[]");
+      return Array.isArray(value) ? value.filter((path): path is string => typeof path === "string").slice(0, 128) : [];
+    } catch { return []; }
+  });
+  const [path, setPath] = useState(() => {
+    try { return localStorage.getItem(`${storageKey}:selection`) || ""; } catch { return ""; }
+  });
   const [uploading, setUploading] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
-
-  const [renderedRoot, setRenderedRoot] = useState(root);
-  if (renderedRoot !== root) {
-    setRenderedRoot(root);
-    setPath("");
-    setData(null);
-  }
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<{ paths: string[]; truncated: boolean; failed?: boolean } | null>(null);
+  const scroll = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!root) return;
-    let cancelled = false;
-    setError("");
-    void api.fetchWorkspaceFiles(scope, path).then(({ ok, data: body, status }) => {
-      if (cancelled) return;
-      if (!ok) { setError(S.files.loadFailed + (status ? ` (${status})` : "")); return; }
-      setData({ base: path, entries: body?.entries || [] });
+    try { localStorage.setItem(storageKey, JSON.stringify(expanded)); } catch { /* in-memory tree still works */ }
+  }, [storageKey, expanded]);
+  useEffect(() => {
+    try { localStorage.setItem(`${storageKey}:selection`, path); } catch { /* in-memory selection still works */ }
+  }, [storageKey, path]);
+  useEffect(() => {
+    const list = scroll.current;
+    const tree = content.current;
+    if (!active || !list || !tree || query.trim()) return;
+    let offset = 0;
+    try { offset = Number(localStorage.getItem(`${storageKey}:scroll`)) || 0; } catch { return; }
+    if (!offset) return;
+    const observer = new ResizeObserver(() => {
+      if (list.scrollHeight - list.clientHeight < offset) return;
+      list.scrollTop = offset;
+      observer.disconnect();
     });
-    return () => { cancelled = true; };
-  }, [root, scope, path, reloadTick, S.files.loadFailed]);
-
-  const prevActive = useRef(active);
+    observer.observe(tree);
+    const release = () => observer.disconnect();
+    list.addEventListener("wheel", release, { once: true, passive: true });
+    list.addEventListener("pointerdown", release, { once: true });
+    return () => {
+      release();
+      list.removeEventListener("wheel", release);
+      list.removeEventListener("pointerdown", release);
+    };
+  }, [storageKey, active, query]);
   useEffect(() => {
-    if (active && !prevActive.current) setReloadTick((t) => t + 1);
-    prevActive.current = active;
-  }, [active]);
+    if (!revealDirectory) return;
+    const { path } = revealDirectory;
+    if (path) {
+      const parts = path.split("/");
+      setExpanded((previous) => [...new Set([...parts.map((_, i) => parts.slice(0, i + 1).join("/")), ...previous])].slice(0, 128));
+    }
+    setQuery("");
+    setPath(path);
+  }, [revealDirectory]);
+  useEffect(() => {
+    if (!active || !query.trim()) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void api.searchWorkspaceFiles(scope, query.trim(), controller.signal).then(({ ok, data }) => {
+        if (!controller.signal.aborted) setResults(ok && data ? data : { paths: [], truncated: false, failed: true });
+      });
+    }, 180);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [active, scope, query, revision, reloadTick]);
 
-  const doUpload = (files: File[]) => {
+  const doUpload = (files: File[], destination: string) => {
     setUploading(true);
     void (async () => {
       try {
         for (const file of files) {
-          const up = await api.uploadWorkspaceFile(file, scope, path);
+          const up = await api.uploadWorkspaceFile(file, scope, destination);
           if (!up.ok) showToast(S.chat.uploadFailed(file.name, up.data?.detail), 5000);
         }
         showToast(S.files.uploaded);
@@ -306,38 +398,36 @@ export function WorkspaceBrowser({
     })();
   };
 
-  const onUpload = (e: ChangeEvent<HTMLInputElement>) => {
+  const onUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files ? [...e.target.files] : [];
     e.target.value = "";
     if (!files.length) return;
-    const existing = new Set((data?.entries || []).map((x) => x.name));
+    const target = path;
+    const { ok, data } = await api.fetchWorkspaceFiles(scope, target);
+    if (!ok) { showToast(S.files.loadFailed); return; }
+    const existing = new Set((data.entries as Entry[]).map((x) => x.name));
     const clashes = files.filter((f) => existing.has(f.name)).map((f) => f.name);
     if (clashes.length) {
       askConfirm({
         title: S.files.overwriteTitle,
         msg: S.files.overwriteConfirm(clashes.length) + "\n" + clashes.join("\n"),
         okLabel: S.files.upload,
-        onOk: () => doUpload(files),
+        onOk: () => doUpload(files, target),
       });
-    } else doUpload(files);
+    } else doUpload(files, target);
   };
-
-  const crumbs = path === "" ? [] : path.split("/");
-  const busy = error === "" && data !== null && data.base !== path;
+  const cleanRoot = root.replace(/[\\/]+$/, "");
+  const label = cleanRoot.split(/[\\/]/).at(-1) || root;
+  const parent = cleanRoot.slice(0, -(label.length + 1));
 
   return (
     <div className="ws-browser">
       <div className="ws-toolbar">
-        <button type="button" className="ws-crumb ws-crumb-root" onClick={() => setPath("")}>
+        <button type="button" className="ws-crumb ws-crumb-root ws-scope-title" title={root} onClick={() => setPath("")}>
           <FileTypeIcon kind="folder" size={14} />
-          <span>{S.files.root}</span>
+          <span><strong>{label}{projectDir && projectDir !== root ? ` · ${S.files.boundWorktree}` : ""}</strong>
+            <small>{parent && (parent + (path ? ` · ${path}` : ""))}</small></span>
         </button>
-        {crumbs.map((seg, i) => (
-          <span key={i} className="ws-crumb-wrap">
-            <span className="ws-sep">/</span>
-            <button type="button" className="ws-crumb" onClick={() => setPath(crumbs.slice(0, i + 1).join("/"))}>{seg}</button>
-          </span>
-        ))}
         <span className="ws-toolbar-grow" />
         <button type="button" className="ws-tool" title={S.files.refresh} aria-label={S.files.refresh}
                 onClick={() => setReloadTick((t) => t + 1)}>
@@ -348,35 +438,34 @@ export function WorkspaceBrowser({
           <input type="file" multiple hidden disabled={uploading} onChange={onUpload} />
           <IconUpload />
         </label>
-        <OpenFolderButton dir={path ? root.replace(/\/+$/, "") + "/" + path : root} />
+        {isAdmin && <OpenFolderButton dir={path ? cleanRoot + "/" + path : root} />}
       </div>
-      <div className="ws-list">
-        {error ? <p className="ws-err">{error}</p>
-          : data === null ? <p className="ws-muted">{S.common.loading}</p>
-          : data.entries.length === 0 ? <p className="ws-muted">{S.files.empty}</p>
-          : (
-            <ul className={busy ? "busy" : ""}>
-              {data.entries.map((entry) => {
-                const target = joinWorkspacePath(data.base, entry.name);
-                return (
-                  <li key={entry.name}>
-                    <button type="button" className="ws-row" disabled={busy} title={entry.name}
-                            onClick={() => { if (entry.kind === "dir") setPath(target); else onOpenFile(target); }}>
-                      <span className="ws-row-icon">
-                        {entry.kind === "dir" ? <FileTypeIcon kind="folder" size={16} /> : <FileTypeIcon path={entry.name} size={16} />}
-                      </span>
-                      <span className="ws-row-name">{entry.name}</span>
-                      <span className="ws-row-meta">{entry.kind === "file" ? fmtFileSize(entry.sizeBytes) : ""}</span>
-                      <span className="ws-row-meta">{entry.mtime ? formatDateTime(entry.mtime) : ""}</span>
-                    </button>
-                    {entry.kind === "file" && (
-                      <a className="ws-row-dl" href={api.workspaceContentUrl(scope, target, true)} download={entry.name} title={S.files.download}>↓</a>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+      <input type="search" className="ws-search" placeholder={S.files.searchNames} aria-label={S.files.searchNames}
+             value={query} maxLength={160} onChange={(e) => { setQuery(e.currentTarget.value); setResults(null); }} />
+      <div className="ws-list" ref={scroll} onScroll={(e) => {
+        if (!query.trim()) try { localStorage.setItem(`${storageKey}:scroll`, String(e.currentTarget.scrollTop)); } catch { /* session remains usable */ }
+      }}>
+        <div ref={content} hidden={!!query.trim()}>
+          <DirectoryChildren scope={scope} path="" active={active && !query.trim()} expanded={expanded} selected={path}
+                             revision={`${revision}:${reloadTick}`} onOpenFile={onOpenFile} toggle={(next) => {
+              const opens = !expanded.includes(next);
+              setExpanded((value) => toggleWorkspaceDirectory(value, next).slice(0, 128));
+              setPath(opens ? next : "");
+            }} />
+        </div>
+        {query.trim() && (
+          <div className="ws-search-results">
+            {!results ? <p className="ws-muted">{S.common.loading}</p> : results.failed ? <p className="ws-err">{S.files.loadFailed}</p> : (
+              <>
+                {!results.paths.length && <p className="ws-muted">{S.files.empty}</p>}
+                {results.truncated && <p className="ws-muted">{S.files.searchLimited}</p>}
+                {results.paths.map((match) => <button key={match} className="ws-row" title={match} onClick={() => onOpenFile(match)}>
+                  <FileTypeIcon path={match} size={16} /><span className="ws-row-name">{match}</span>
+                </button>)}
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

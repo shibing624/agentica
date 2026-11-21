@@ -165,6 +165,14 @@ def test_session_file_requests_use_the_binding_not_a_client_root(client):
     assert c.get("/api/workspace/content", params=params).status_code == 409
     fresh = c.get("/api/workspace/scope", params=target).json()
     assert c.get("/api/workspace/content", params={**params, "binding": fresh["binding"]}).json()["content"] == "new"
+    assert c.get("/api/workspace/search", params={**target, "binding": bound["binding"], "q": "same"}).status_code == 409
+    hidden = second / ".git"
+    hidden.mkdir()
+    (hidden / "same.md").write_text("not part of the workspace view")
+    (second / "link.md").symlink_to(first / "same.md")
+    found = c.get("/api/workspace/search", params={**target, "binding": fresh["binding"], "q": ".md"})
+    assert found.status_code == 200
+    assert found.json()["paths"] == ["same.md"]
 
 
 def test_member_cannot_browse_an_admin_root_or_another_accounts_session(tmp_path, monkeypatch):
