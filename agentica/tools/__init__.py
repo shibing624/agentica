@@ -19,6 +19,7 @@ from agentica.tools.builtin import (
     BuiltinExecuteTool,
 )
 from agentica.tools.code_tool import CodeTool
+from agentica.tools.browser_tool import BrowserTool, AgentBrowserDriver
 from agentica.tools.e2b_tool import E2BExecuteTool
 from agentica.tools.lsp_tool import LspTool
 from agentica.tools.cron_tool import CronTool
@@ -58,6 +59,8 @@ __all__ = [
     "BuiltinTaskTool",       # Sub-agent task delegation
     # Extended tools
     "CodeTool",        # Code analysis, formatting, linting
+    "BrowserTool",     # Strong-typed managed browser tools (agent-browser driver)
+    "AgentBrowserDriver",  # Default CLI driver behind BrowserTool
     "E2BExecuteTool",  # Remote sandboxed Python / shell execution (E2B cloud)
     "LspTool",         # LSP-based code navigation
     "CronTool",        # Cron job management

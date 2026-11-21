@@ -14,6 +14,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from agentica import DeepAgent
 from agentica.agent.approvals import SessionGrants
 from agentica.tools.background_processes import BackgroundProcessRegistry
+from agentica.tools.browser_tool import BrowserTool
 from agentica.utils.log import logger
 from agentica.workspace import Workspace
 
@@ -38,7 +39,12 @@ class AgentService(AgentModelMixin, AgentBuilderMixin, AgentExecutionMixin, Agen
         self.extra_tools = extra_tools or []
         self.extra_instructions = extra_instructions or []
 
-        self._cache = LRUAgentCache(max_size=settings.agent_max_sessions)
+        # Browser daemons are owned per session, not per Agent object: a rebuild
+        # reuses the same daemon, and a cache eviction releases it on the main
+        # loop (see AgentBuilderMixin._drain_released_agents).
+        self._browser_tools: Dict[str, BrowserTool] = {}
+        self._released_agent_keys: List[str] = []
+        self._cache = LRUAgentCache(max_size=settings.agent_max_sessions, on_evict=self._released_agent_keys.append)
         self._session_work_dirs: Dict[str, str] = {}
         self._session_log_dirs: Dict[str, str] = {}
         self._session_approval_modes: Dict[str, str] = {}

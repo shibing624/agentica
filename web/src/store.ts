@@ -199,6 +199,8 @@ export type AppState = {
    *  showing the new-chat screen then would flash before it is restored. */
   booting: boolean;
   sessions: Record<string, Session>;
+  /** An agent-proposed URL per chat, awaiting explicit user confirmation. */
+  pendingBrowserUrls: Map<string, string>;
   streams: Record<string, {
     abortCtrl: AbortController;
     aiMsg: ChatMsg;
@@ -388,6 +390,7 @@ const state: AppState = {
   curSess: null,
   booting: true,
   sessions: {},
+  pendingBrowserUrls: new Map(),
   streams: {},
   goalRuns: {},
   commandRuns: {},

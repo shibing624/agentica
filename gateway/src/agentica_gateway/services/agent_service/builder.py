@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -30,6 +31,7 @@ from agentica.run.config import RunConfig
 from agentica.run.context import RunSource
 from agentica.skills import load_system_skills
 from agentica.tools.ask_user_question_tool import AskUserQuestionTimeout
+from agentica.tools.browser_tool import AgentBrowserDriver, BrowserTool
 from agentica.utils.log import logger
 from agentica.workspace import Workspace
 
@@ -45,6 +47,32 @@ class AgentBuilderMixin:
     """Workspace init, DeepAgent construction, session locks, approvals, and ask callback."""
 
     _agent_builds: Dict[str, "asyncio.Future[DeepAgent]"]
+
+    @staticmethod
+    async def _close_browser_tools(tools: List[BrowserTool]) -> None:
+        """End these browser daemons; shutdown must still try the rest on failure."""
+        results = await asyncio.gather(*(tool.close() for tool in tools), return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                logger.warning("Browser daemon cleanup failed: %s", result)
+
+    async def _drain_released_agents(self) -> None:
+        """Close daemons of sessions that left the cache and were not rebuilt."""
+        keys = self._released_agent_keys[:]
+        self._released_agent_keys.clear()
+        orphaned = [
+            self._browser_tools.pop(key)
+            for key in dict.fromkeys(keys)
+            if not self._cache.contains(key) and key in self._browser_tools
+        ]
+        await self._close_browser_tools(orphaned)
+
+    async def close_browser_sessions(self) -> None:
+        """Close all per-session browser daemons before the gateway exits."""
+        await self._drain_released_agents()
+        tools = list(self._browser_tools.values())
+        self._browser_tools.clear()
+        await self._close_browser_tools(tools)
 
     async def _ensure_initialized(self) -> None:
         """Ensure the workspace is initialized (idempotent, Lock-protected)."""
@@ -130,6 +158,13 @@ class AgentBuilderMixin:
             cron_job_runner=_gateway_cron_job_runner,
             extra_tools=list(self.extra_tools),
         )
+        if settings.browser_tool_enabled:
+            # Keep AF_UNIX socket paths short, including the daemon's directory.
+            browser_session = sha256(self._sk(session_id, owner).encode()).hexdigest()[:24]
+            driver = AgentBrowserDriver(session=f"ag-gw-{browser_session}", restore=False, isolated=True)
+            browser_tool = BrowserTool(driver=driver)
+            self._browser_tools[self._sk(session_id, owner)] = browser_tool
+            extra.append(browser_tool)
 
         # Same identity and instructions as the CLI (agentica.tools.product):
         # a session that moves between terminal, web and IM keeps its prefix.
@@ -267,6 +302,7 @@ class AgentBuilderMixin:
 
         agent.set_permission_mode(self.get_session_approval_mode(session_id, owner))
         self._cache.put(key, agent)
+        await self._drain_released_agents()
         logger.info(f"Agent created for session: {session_id} (cache size: {len(self._cache)})")
         return agent
 

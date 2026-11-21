@@ -27,6 +27,13 @@ TOKEN = "test-token-not-a-real-secret"
 ADMIN_ID = "default"
 
 
+def _agent_service_stub():
+    """The lifespan shuts browser daemons down through this async hook."""
+    svc = MagicMock()
+    svc.close_browser_sessions = AsyncMock()
+    return svc
+
+
 @pytest.fixture(autouse=True)
 def _cheap_password_hash(monkeypatch):
     """scrypt cost is a production defence; tests do not need to pay it.
@@ -62,7 +69,7 @@ def client(monkeypatch, tmp_path):
         lambda uid: (tmp_path / "ws" / "users" / uid).mkdir(parents=True, exist_ok=True),
     )
 
-    svc = MagicMock()
+    svc = _agent_service_stub()
     svc._ensure_initialized = AsyncMock()
     svc.session_catalog = MagicMock(return_value=Catalog(rows=[]))
     with TestClient(app, raise_server_exceptions=False) as c:
@@ -306,7 +313,7 @@ class TestPasswordLogin:
         monkeypatch.delenv("AGENTICA_GATEWAY_TOKEN", raising=False)
         auth.reset_token_for_tests()
         monkeypatch.setattr(runtime, "RUNTIME_FILE", tmp_path / "restarted.json")
-        svc = MagicMock()
+        svc = _agent_service_stub()
         svc._ensure_initialized = AsyncMock()
         svc.session_catalog = MagicMock(return_value=Catalog(rows=[]))
         with TestClient(app, raise_server_exceptions=False) as fresh:
@@ -945,7 +952,7 @@ class TestGateOff:
 
         monkeypatch.setenv("GATEWAY_AUTH", "false")
         monkeypatch.setattr(runtime, "RUNTIME_FILE", tmp_path / "runtime.json")
-        svc = MagicMock()
+        svc = _agent_service_stub()
         svc._ensure_initialized = AsyncMock()
         svc.session_catalog = MagicMock(return_value=Catalog(rows=[]))
         with TestClient(app, raise_server_exceptions=False) as c:
@@ -962,7 +969,7 @@ class TestGateOff:
         monkeypatch.setenv("GATEWAY_AUTH", "false")
         path = tmp_path / "runtime.json"
         monkeypatch.setattr(runtime, "RUNTIME_FILE", path)
-        svc = MagicMock()
+        svc = _agent_service_stub()
         svc._ensure_initialized = AsyncMock()
         with TestClient(app, raise_server_exceptions=False):
             deps.agent_service = svc
@@ -1092,7 +1099,7 @@ class TestPortReporting:
         monkeypatch.setattr(runtime, "RUNTIME_FILE", path)
         monkeypatch.setattr(settings, "port", 45678)
 
-        svc = MagicMock()
+        svc = _agent_service_stub()
         svc._ensure_initialized = AsyncMock()
         with TestClient(app, raise_server_exceptions=False):
             deps.agent_service = svc

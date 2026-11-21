@@ -2335,6 +2335,10 @@ html[data-desktop="mac"] .auto-detail-bar{-webkit-app-region:drag}
 .bv-url:focus{border-color:var(--accent)}
 .bv-url.bad{border-color:#dc2626}
 .bv-note{padding:6px 12px;font-size:12px;color:var(--fg3);border-bottom:var(--hair) solid var(--border)}
+.bv-pending{display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:var(--hair) solid var(--border);background:var(--bg2);font-size:12px}
+.bv-pending-label{color:var(--fg3);white-space:nowrap}
+.bv-pending-url{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg);font-family:monospace}
+.bv-pending-open{flex:none;padding:3px 10px;border:var(--hair) solid var(--accent);border-radius:var(--radius-sm);background:var(--accent);color:#fff;font-size:12px;cursor:pointer}
 .bv-page{position:relative;flex:1;min-height:0;display:flex}
 .bv-guest{flex:1;width:100%;border:0;background:#fff}
 .bv-empty{margin:auto;color:var(--fg3);font-size:13px}

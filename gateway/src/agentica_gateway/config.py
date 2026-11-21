@@ -32,6 +32,7 @@ class Settings:
     host: str = "127.0.0.1"
     port: int = 8881
     debug: bool = False
+    browser_tool_enabled: bool = False
 
     # When set, the gateway exits once this pid is gone — the desktop shell
     # passes its own so killing the shell cannot orphan the server.
@@ -174,6 +175,7 @@ class Settings:
             host=os.getenv("HOST", "127.0.0.1"),
             port=int(os.getenv("PORT", "8881")),
             debug=os.getenv("DEBUG", "").lower() in ("1", "true"),
+            browser_tool_enabled=os.getenv("GATEWAY_BROWSER_TOOL", "").lower() in ("1", "true"),
             parent_pid=int(os.getenv("AGENTICA_GATEWAY_PARENT_PID", "0") or 0),
 
             # Default user

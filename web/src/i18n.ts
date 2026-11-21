@@ -1029,6 +1029,10 @@ const en = {
     openExternal: "Open in your browser",
     embedNote: "Many sites refuse to be shown inside another page. If this one stays blank, open it in your browser.",
     empty: "Enter a web address above",
+    agentWantsToOpen: "Agent wants to open",
+    openHere: "Open here",
+    dismiss: "Dismiss",
+    loadFailed: "Could not open that page",
   },
 
   terminal: {
@@ -2071,6 +2075,10 @@ const zh: Strings = {
     openExternal: "在浏览器中打开",
     embedNote: "很多网站不允许被嵌在其他页面里。如果这里一直空白，请在浏览器中打开。",
     empty: "在上方输入网址",
+    agentWantsToOpen: "Agent 想打开",
+    openHere: "在此打开",
+    dismiss: "忽略",
+    loadFailed: "无法打开该页面",
   },
 
   terminal: {

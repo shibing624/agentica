@@ -230,9 +230,14 @@ class ChatResult:
 class LRUAgentCache:
     """Thread-unsafe but asyncio-safe LRU cache for DeepAgent instances."""
 
-    def __init__(self, max_size: int = 50):
+    def __init__(self, max_size: int = 50, on_evict: Optional[Callable[[str], None]] = None):
         self._cache: OrderedDict[str, DeepAgent] = OrderedDict()
         self.max_size = max_size
+        self.on_evict = on_evict
+
+    def _release(self, key: str) -> None:
+        if self.on_evict is not None:
+            self.on_evict(key)
 
     def get(self, session_id: str) -> Optional[DeepAgent]:
         if session_id not in self._cache:
@@ -242,6 +247,8 @@ class LRUAgentCache:
 
     def put(self, session_id: str, agent: DeepAgent) -> None:
         if session_id in self._cache:
+            # A rebuild reuses the same daemon session name, so its browser
+            # tool must stay registered instead of being closed here.
             self._cache.move_to_end(session_id)
             self._cache[session_id] = agent
             return
@@ -251,7 +258,8 @@ class LRUAgentCache:
             for key in list(self._cache.keys()):
                 if _cache_key_is_pinned(key):
                     continue
-                del self._cache[key]
+                self._cache.pop(key)
+                self._release(key)
                 logger.debug(f"LRU evicted agent for session: {key}")
                 evicted = True
                 break
@@ -259,13 +267,16 @@ class LRUAgentCache:
                 break
 
     def delete(self, session_id: str) -> bool:
-        if session_id in self._cache:
-            del self._cache[session_id]
-            return True
-        return False
+        if self._cache.pop(session_id, None) is None:
+            return False
+        self._release(session_id)
+        return True
 
     def clear(self) -> None:
+        keys = list(self._cache.keys())
         self._cache.clear()
+        for key in keys:
+            self._release(key)
 
     def contains(self, session_id: str) -> bool:
         """Membership without the LRU touch ``get`` performs.

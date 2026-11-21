@@ -257,8 +257,10 @@ export function FilesPanel({
                 )}
                 {tab.kind === "skill" && <SkillPane name={tab.name} />}
                 {tab.kind === "browser" && (
-                  <BrowserView url={tab.url} visible={shown && active}
-                               onChange={(patch) => panel.updateBrowser(tab.key, patch)} />
+                  <BrowserView url={tab.url} pendingUrl={tab.pendingUrl || ""} visible={shown && active}
+                               onChange={(patch) => panel.updateBrowser(tab.key, patch)}
+                               onOpen={() => panel.confirmBrowser(tab.key)}
+                               onDismiss={() => panel.dismissBrowser(tab.key)} />
                 )}
                 {tab.kind === "terminal" && (
                   <Suspense fallback={<p className="ws-muted">{S.common.loading}</p>}>
