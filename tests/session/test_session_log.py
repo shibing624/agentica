@@ -1197,6 +1197,18 @@ class TestSessionLastRead:
         assert sessions[0]["last_read_at"] == "2026-01-01T00:00:00.000Z"
         assert sessions[0]["last_timestamp"] == "2026-01-01T00:01:00.000Z"
 
+    def test_long_final_answer_keeps_its_timestamp_for_the_unread_dot(self, tmp_path):
+        from agentica.session.log import is_session_unread
+
+        log = SessionLog("s-long", base_dir=str(tmp_path))
+        log.append("user", "hello", timestamp="2026-01-01T00:00:00.000Z")
+        log.set_last_read_at("2026-01-01T00:01:00.000Z")
+        stamp = "2026-01-01T00:03:00.000Z"
+        log.append("assistant", "结果\n" * 4000, timestamp=stamp)
+        row, = SessionLog.list_sessions(base_dir=str(tmp_path))
+        assert row["last_timestamp"] == stamp
+        assert is_session_unread(row["last_timestamp"], row["last_read_at"])
+
     def test_mark_session_read_classmethod(self, tmp_path):
         ts = SessionLog.mark_session_read("s-mark", base_dir=str(tmp_path), when="2026-04-01T12:00:00.000Z")
         assert ts == "2026-04-01T12:00:00.000Z"

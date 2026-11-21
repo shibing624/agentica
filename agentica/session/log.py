@@ -1727,11 +1727,20 @@ class SessionLog:
                 head = fh.readline().decode("utf-8", errors="replace")
                 if head.strip():
                     first_timestamp = json.loads(head).get("timestamp")
-                fh.seek(max(0, stat.st_size - 4096))
-                tail = fh.read().decode("utf-8", errors="replace")
-                lines = tail.strip().splitlines()
-                if lines:
-                    last_timestamp = json.loads(lines[-1]).get("timestamp")
+                for tail_bytes in (4096, 128 * 1024):
+                    offset = max(0, stat.st_size - tail_bytes)
+                    fh.seek(offset)
+                    tail = fh.read(stat.st_size - offset).rstrip(b"\r\n")
+                    if not tail:
+                        break
+                    before, separator, last_line = tail.rpartition(b"\n")
+                    if separator or not offset:
+                        last_timestamp = json.loads(last_line).get("timestamp")
+                        break
+                else:
+                    # One exceptionally large row: retain activity without
+                    # reading the whole tool output into every catalog refresh.
+                    last_timestamp = iso_timestamp(stat.st_mtime)
         except Exception:
             pass
 
