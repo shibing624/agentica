@@ -10,9 +10,8 @@ import {
   nextTerminalOrdinal, openTab, readSessionPanel, replaceTab, skillKey, tabsToClose, terminalKey, upsertTab, writeSessionPanel,
   type PanelTab, type SessionPanelRecord, type TabsState,
 } from "../lib/panelTabs";
-import { isAbsOrHomePath, toWorkspaceRelative } from "../lib/filePath";
 import type { FileEdits } from "../lib/fileDiff";
-import { clampWidth, PANEL_MAX_RATIO, PANEL_MIN, preferredWidth, resolvedWidth } from "./panelWidth";
+import { clampWidth, PANEL_MAX_RATIO, PANEL_MIN, preferredWidth, resolvePanelLayout, TREE_DEFAULT_WIDTH } from "./panelWidth";
 
 export type FilesPanelState = {
   sessionKey: string;
@@ -23,6 +22,9 @@ export type FilesPanelState = {
   open: boolean;
   setOpen: (open: boolean) => void;
   width: number;
+  treeWidth: number;
+  setTreeWidth: (width?: number) => void;
+  floating: boolean;
   startResize: (e: React.MouseEvent) => void;
   /** Double-click on the handle: back to the first-open default. */
   resetWidth: () => void;
@@ -35,14 +37,10 @@ export type FilesPanelState = {
   close: (key: string) => void;
   /** Close every other tab / every tab to the right of `key` (never the file browser). */
   closeMany: (key: string, scope: "others" | "right") => void;
-  /** Current directory path in the `files` tab for this session. */
-  revealDirectory: { path: string } | null;
   projectDir: string;
   /** Open a workspace file in its own tab (or focus the tab it already has). */
   browsePath: (path: string) => void;
   replacePreview: (path: string) => void;
-  /** Reveal `path`'s parent directory in the `files` tab. */
-  revealInFilesTab: (path: string) => void;
   /** Open an installed skill's SKILL.md in a tab. */
   openSkill: (name: string) => void;
   /** Review round `turn`'s edits with `path` on screen (one tab per round). */
@@ -94,7 +92,7 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
   const sidebar = s.sidebarCollapsed ? 0 : s.sidebarWidth;
   const [fullscreen, setFullscreen] = useState(false);
   const [saved, setSaved] = useState(readSaved);
-  const width = resolvedWidth(preferredWidth(saved, viewport), viewport, sidebar);
+  const { width, floating } = resolvePanelLayout(preferredWidth(saved, viewport), viewport, sidebar);
   const canTerminal = s.accountRole === "admin";
 
   // Panel state (open + opened file history tabs + active tab + directory path)
@@ -183,9 +181,10 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
   const setOpen = useCallback((nextOpen: boolean) => {
     updateRecord((rec) => ({ ...rec, open: nextOpen }));
   }, [updateRecord]);
+  const setTreeWidth = useCallback((treeWidth?: number) => {
+    updateRecord((rec) => ({ ...rec, treeWidth }));
+  }, [updateRecord]);
 
-  const [reveal, setReveal] = useState<{ key: string; path: string } | null>(null);
-  const revealKey = resolvedScope?.scope ? JSON.stringify([s.accountId, sessionKey, resolvedScope.scope.binding]) : null;
   const projectDir = sessionId ? s.sessions[sessionId]?.projectDir || "" : "";
 
   // After a reload the tab list is gone but the shells are not.
@@ -255,20 +254,6 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
   const replacePreview = useCallback((path: string) => {
     update((record) => replaceTab(record, record.active, { key: fileKey(path), kind: "file", path }));
   }, [update]);
-
-  const revealInFilesTab = useCallback((path: string) => {
-    const rel = isAbsOrHomePath(path) ? (toWorkspaceRelative(path, workspace) || "") : path;
-    const norm = rel.replace(/\/+$/, "");
-    const slash = norm.lastIndexOf("/");
-    const parentDir = slash >= 0 && !isAbsOrHomePath(norm) ? norm.slice(0, slash) : "";
-    if (revealKey) setReveal({ key: revealKey, path: parentDir });
-    updateRecord((rec) => ({
-      ...rec,
-      open: true,
-      active: FILES_TAB.key,
-      preferredActive: undefined,
-    }));
-  }, [updateRecord, workspace, revealKey]);
 
   const openSkill = useCallback((name: string) => {
     updateRecord((rec) => {
@@ -360,10 +345,11 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
     sessionKey,
     accountId: s.accountId, revision,
     scope: resolvedScope?.scope ?? null, scopeError: resolvedScope !== null && !resolvedScope.scope,
-    open, setOpen, width, startResize, resetWidth, fullscreen, setFullscreen,
+    open, setOpen, width, floating, startResize, resetWidth, fullscreen, setFullscreen,
+    treeWidth: state.treeWidth ?? TREE_DEFAULT_WIDTH, setTreeWidth,
     tabs: state.tabs, active: state.active, activate, close, closeMany,
-    revealDirectory: reveal?.key === revealKey ? reveal : null, projectDir,
-    browsePath, replacePreview, revealInFilesTab, openSkill, openReview, selectReviewFile,
+    projectDir,
+    browsePath, replacePreview, openSkill, openReview, selectReviewFile,
     openGuide, pickFiles, canTerminal, pickTerminal, pickBrowser,
     updateBrowser, confirmBrowser, dismissBrowser, terminalGone,
   };

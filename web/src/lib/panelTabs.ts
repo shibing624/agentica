@@ -27,6 +27,7 @@ export type SessionPanelRecord = {
   active: string;
   open: boolean;
   dirPath: string;
+  treeWidth?: number;
   /** When a reloaded session's active tab was a terminal (`term:...`), remember
    *  it so `adoptTerminals` restores focus once the live shell list arrives. */
   preferredActive?: string;
@@ -50,6 +51,13 @@ export function toggleWorkspaceDirectory(expanded: string[], path: string): stri
   return expanded.includes(path)
     ? expanded.filter((open) => open !== path && !open.startsWith(path + "/"))
     : [...expanded, path];
+}
+
+export function expandWorkspaceAncestors(expanded: string[], file: string): string[] {
+  const parts = file.split("/").slice(0, -1);
+  const ancestors = parts.map((_, index) => parts.slice(0, index + 1).join("/"));
+  if (ancestors.every((path) => expanded.includes(path))) return expanded;
+  return [...new Set([...ancestors, ...expanded])].slice(0, Math.max(128, ancestors.length));
 }
 
 export const fileKey = (path: string) => `file:${path}`;
@@ -200,6 +208,7 @@ export function serializeSessionPanel(record: SessionPanelRecord): string {
   const active = record.active === GUIDE_TAB.key ? FILES_TAB.key : record.active;
   return JSON.stringify({
     open: Boolean(record.open),
+    treeWidth: record.treeWidth,
     active,
     dirPath: record.dirPath || "",
     tabs: tabs.length ? tabs : [FILES_TAB],
@@ -258,6 +267,7 @@ export function restoreSessionPanel(raw: string | null | undefined): SessionPane
     const preferredActive = !hasActive && rawActive.startsWith("term:") ? rawActive : undefined;
     return {
       tabs,
+      ...(Number.isFinite(parsed.treeWidth) && parsed.treeWidth > 0 ? { treeWidth: parsed.treeWidth } : {}),
       active: hasActive ? rawActive : FILES_TAB.key,
       open: Boolean(parsed.open),
       dirPath: typeof parsed.dirPath === "string" ? parsed.dirPath : "",

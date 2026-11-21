@@ -18,6 +18,17 @@ test("collapsing one directory also removes its expanded descendants, not siblin
   assert.deepEqual(T.toggleWorkspaceDirectory([], "docs"), ["docs"]);
 });
 
+test("revealing a file opens each of its ancestors without closing another branch", () => {
+  const open = ["notes", "src"];
+  assert.deepEqual(T.expandWorkspaceAncestors(open, "src/nested/report.md"), ["src", "src/nested", "notes"]);
+  assert.equal(T.expandWorkspaceAncestors(open, "README.md"), open);
+  assert.equal(T.expandWorkspaceAncestors(open, "src/index.ts"), open);
+  const filled = Array.from({ length: 128 }, (_, i) => `dir-${i}`);
+  const revealed = T.expandWorkspaceAncestors(filled, "src/nested/report.md");
+  assert.equal(revealed.length, 128);
+  assert.deepEqual(revealed.slice(0, 2), ["src", "src/nested"]);
+});
+
 const file = (path) => ({ key: T.fileKey(path), kind: "file", path });
 const term = (id, ordinal) => ({ key: T.terminalKey(id), kind: "terminal", id, ordinal });
 const keys = (st) => st.tabs.map((t) => t.key);
@@ -25,6 +36,12 @@ const keys = (st) => st.tabs.map((t) => t.key);
 test("selecting the previewed file again from the tree keeps its tab open", () => {
   const state = T.openTab(T.initialTabs(), file("README.md"));
   assert.deepEqual(T.replaceTab(state, state.active, file("README.md")), state);
+});
+
+test("the tree width preference survives a reload and is separate from the right panel width", () => {
+  const record = { ...T.initialSessionPanel(), treeWidth: 350 };
+  assert.deepEqual(T.restoreSessionPanel(T.serializeSessionPanel(record)), record);
+  assert.equal(T.restoreSessionPanel('{"treeWidth":-5}').treeWidth, undefined);
 });
 
 test("opening a file twice focuses the tab it already has", () => {

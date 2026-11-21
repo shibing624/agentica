@@ -1,15 +1,16 @@
 import * as ContextMenu from "@radix-ui/react-context-menu";
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import {
-  FileTypeIcon, IconClose, IconCompass, IconDiff, IconExitFullscreen, IconFullscreen, IconGlobe, IconPlus, IconSidebarRight, IconTerminal,
+  FileTypeIcon, IconClose, IconCompass, IconDiff, IconExitFullscreen, IconFileTree, IconFullscreen, IconGlobe, IconPlus, IconSidebarRight, IconTerminal,
 } from "../icons";
 import { useStrings } from "../i18n";
-import { isAbsOrHomePath } from "../lib/filePath";
+import { isAbsOrHomePath, toWorkspaceRelative } from "../lib/filePath";
 import { browserTabLabel } from "../lib/browserUrl";
 import { baseName, closeTabShortcut, isCloseTabKey, tabsToClose, type PanelTab } from "../lib/panelTabs";
 import { BrowserView } from "./BrowserView";
 import { DiffView } from "./DiffView";
 import { SkillPane } from "./SkillPane";
+import { clampWidth, resolveTreeLayout } from "./panelWidth";
 import type { FilesPanelState } from "./useFilesPanel";
 
 // xterm.js is ~300 kB; nobody who never opens a terminal downloads it.
@@ -122,22 +123,40 @@ export function FilesPanel({
   panel: FilesPanelState;
 }) {
   const S = useStrings();
-  // Width 0 = the window is too narrow to keep the chat at its minimum; the
-  // panel can still be opened fullscreen there.
-  const shown = panel.open && (panel.width > 0 || panel.fullscreen);
+  const shown = panel.open;
   const strip = useTabStrip(panel.active, panel.tabs);
+  const treeId = useId();
+  const treeToggle = useRef<HTMLButtonElement>(null);
+  const content = useRef<HTMLDivElement>(null);
+  const [contentWidth, setContentWidth] = useState(0);
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+  const drag = useRef<{ x: number; width: number; final: number } | null>(null);
   const [showTree, setShowTree] = useState(false);
-  const onPreview = panel.tabs.some((tab) => tab.key === panel.active && tab.kind === "file");
+  const activeTab = panel.tabs.find((tab) => tab.key === panel.active);
+  const onPreview = activeTab?.kind === "file";
   const onFiles = panel.active === "files";
   const sideTree = onPreview && showTree;
+  useLayoutEffect(() => {
+    const el = content.current;
+    if (!shown || !sideTree || !el) return;
+    const measure = () => setContentWidth(el.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [shown, sideTree]);
+  const treeLayout = resolveTreeLayout(contentWidth, dragWidth ?? panel.treeWidth);
+  const currentFile = activeTab?.kind === "file" && panel.scope
+    ? toWorkspaceRelative(activeTab.path, panel.scope.root.replaceAll("\\", "/")) : null;
+  const treeLabel = showTree ? S.files.hideTree : S.files.showTree;
   return (
     <>
-      {shown && !panel.fullscreen && (
+      {shown && !panel.fullscreen && !panel.floating && (
         <div className="files-resize" onMouseDown={panel.startResize} onDoubleClick={panel.resetWidth}
              title={S.files.resizeHandle} />
       )}
       <aside
-        className={"files-panel" + (shown ? " open" : "") + (panel.fullscreen ? " fullscreen" : "")}
+        className={"files-panel" + (shown ? " open" : "") + (panel.fullscreen ? " fullscreen" : panel.floating ? " floating" : "")}
         style={{ width: panel.fullscreen ? undefined : shown ? panel.width : 0 }}
         inert={!shown}
         onKeyDownCapture={(e) => {
@@ -147,7 +166,7 @@ export function FilesPanel({
           panel.close(panel.active);
         }}
       >
-        <div className="files-panel-inner" style={{ width: panel.fullscreen ? "100%" : panel.width }}>
+        <div className="files-panel-inner">
           <div className="files-panel-head">
             <div className="pt-strip" role="tablist" ref={strip}>
               {panel.tabs.map((tab, i) => {
@@ -196,44 +215,34 @@ export function FilesPanel({
                 );
               })}
             </div>
-            {/* One start page per panel: the control hides while it is open. */}
-            {!panel.tabs.some((t) => t.kind === "guide") && (
-              <button type="button" className="ib pt-add" onClick={panel.openGuide}
-                      title={S.files.newTab} aria-label={S.files.newTab}>
-                <IconPlus />
+            <div className="pt-actions">
+              {/* One start page per panel: the control hides while it is open. */}
+              {!panel.tabs.some((t) => t.kind === "guide") && (
+                <button type="button" className="ib" onClick={panel.openGuide}
+                        title={S.files.newTab} aria-label={S.files.newTab}>
+                  <IconPlus />
+                </button>
+              )}
+              {onPreview && panel.scope && (
+                <button type="button" className="ib" ref={treeToggle} title={treeLabel} aria-label={treeLabel}
+                        aria-controls={treeId} aria-expanded={sideTree} onClick={() => setShowTree(!showTree)}>
+                  <IconFileTree />
+                </button>
+              )}
+              <button type="button" className="ib" onClick={() => panel.setFullscreen(!panel.fullscreen)}
+                      title={panel.fullscreen ? S.files.exitFullscreen : S.files.fullscreen}
+                      aria-label={panel.fullscreen ? S.files.exitFullscreen : S.files.fullscreen}>
+                {panel.fullscreen ? <IconExitFullscreen /> : <IconFullscreen />}
               </button>
-            )}
-            <span className="pt-fill" />
-            {onPreview && panel.scope && (
-              <button type="button" className="ib" title={S.files.title} aria-label={S.files.title}
-                      aria-pressed={showTree} onClick={() => setShowTree(!showTree)}>
-                <FileTypeIcon kind="folder" size={16} />
+              <button type="button" className="ib" title={S.files.collapse} aria-label={S.files.collapse}
+                      onClick={() => panel.setOpen(false)}>
+                <IconSidebarRight />
               </button>
-            )}
-            <button type="button" className="ib" onClick={() => panel.setFullscreen(!panel.fullscreen)}
-                    title={panel.fullscreen ? S.files.exitFullscreen : S.files.fullscreen}
-                    aria-label={panel.fullscreen ? S.files.exitFullscreen : S.files.fullscreen}>
-              {panel.fullscreen ? <IconExitFullscreen /> : <IconFullscreen />}
-            </button>
-            <button type="button" className="ib" title={S.files.collapse} aria-label={S.files.collapse}
-                    onClick={() => panel.setOpen(false)}>
-              <IconSidebarRight />
-            </button>
+            </div>
           </div>
           {/* Every tab stays mounted while it is open, so switching does not
               refetch a file or drop a terminal's screen. */}
-          <div className="ws-panel-content">
-          <div hidden={!onFiles && !sideTree} className={sideTree ? "ws-tree-column side" : "ws-tree-column"}>
-            {panel.scope ? (
-              <Suspense fallback={<p className="ws-muted">{S.common.loading}</p>}>
-                <WorkspaceBrowser key={`${panel.accountId}:${panel.sessionKey}:${panel.scope.binding}`} scope={panel.scope}
-                                  accountId={panel.accountId} isAdmin={panel.canTerminal} revision={panel.revision}
-                                  active={shown && (onFiles || sideTree)} revealDirectory={panel.revealDirectory}
-                                  projectDir={panel.projectDir}
-                                  onOpenFile={sideTree ? panel.replacePreview : panel.browsePath} />
-              </Suspense>
-            ) : <p className="ws-muted">{panel.scopeError ? S.files.loadFailed : panel.sessionKey && root ? S.common.loading : S.files.noRoot}</p>}
-          </div>
+          <div className="ws-panel-content" ref={content}>
           {panel.tabs.filter((tab) => tab.kind !== "files").map((tab) => {
             const active = tab.key === panel.active;
             const scopedKey = `${panel.sessionKey}:${tab.key}`;
@@ -247,7 +256,6 @@ export function FilesPanel({
                       scope={panel.scope ?? undefined}
                       path={tab.path}
                       onOpenFile={panel.browsePath}
-                      onRevealInTree={panel.revealInFilesTab}
                     />
                   </Suspense>
                 )}
@@ -271,6 +279,56 @@ export function FilesPanel({
               </div>
             );
           })}
+          <div id={treeId} hidden={!onFiles && !sideTree}
+               className={sideTree ? `ws-tree-column side ${treeLayout.mode}` : "ws-tree-column"}
+               style={sideTree && treeLayout.mode !== "fill" ? { width: treeLayout.width } : undefined}
+               onKeyDown={(event) => {
+                 if (event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing || !sideTree) return;
+                 event.stopPropagation();
+                 setShowTree(false);
+                 treeToggle.current?.focus();
+               }}>
+            {sideTree && treeLayout.mode !== "fill" && (
+              <div className={"ws-tree-resize" + (dragWidth !== null ? " dragging" : "")} role="separator"
+                   aria-orientation="vertical" aria-label={S.files.resizeTree} aria-valuemin={treeLayout.min}
+                   aria-valuemax={treeLayout.max} aria-valuenow={treeLayout.width} title={S.files.resizeHandle} tabIndex={0}
+                   onDoubleClick={() => panel.setTreeWidth()}
+                   onKeyDown={(event) => {
+                     const next = event.key === "ArrowLeft" ? treeLayout.width + 16
+                       : event.key === "ArrowRight" ? treeLayout.width - 16
+                       : event.key === "Home" ? treeLayout.min : event.key === "End" ? treeLayout.max : null;
+                     if (next === null) return;
+                     event.preventDefault();
+                     panel.setTreeWidth(clampWidth(next, treeLayout.min, treeLayout.max));
+                   }}
+                   onPointerDown={(event) => {
+                     if (!event.isPrimary || event.button !== 0) return;
+                     event.preventDefault();
+                     event.currentTarget.setPointerCapture(event.pointerId);
+                     drag.current = { x: event.clientX, width: treeLayout.width, final: treeLayout.width };
+                     setDragWidth(treeLayout.width);
+                   }}
+                   onPointerMove={(event) => {
+                     const start = drag.current;
+                     if (!event.isPrimary || !start) return;
+                     start.final = clampWidth(start.width + start.x - event.clientX, treeLayout.min, treeLayout.max);
+                     setDragWidth(start.final);
+                   }}
+                   onLostPointerCapture={() => {
+                     if (drag.current && drag.current.final !== drag.current.width) panel.setTreeWidth(drag.current.final);
+                     drag.current = null;
+                     setDragWidth(null);
+                   }} />
+            )}
+            {panel.scope ? (
+              <Suspense fallback={<p className="ws-muted">{S.common.loading}</p>}>
+                <WorkspaceBrowser key={`${panel.accountId}:${panel.sessionKey}:${panel.scope.binding}`} scope={panel.scope}
+                                  accountId={panel.accountId} isAdmin={panel.canTerminal} revision={panel.revision}
+                                  active={shown && (onFiles || sideTree)} currentFile={currentFile}
+                                  projectDir={panel.projectDir} onOpenFile={sideTree ? panel.replacePreview : panel.browsePath} />
+              </Suspense>
+            ) : <p className="ws-muted">{panel.scopeError ? S.files.loadFailed : panel.sessionKey && root ? S.common.loading : S.files.noRoot}</p>}
+          </div>
           </div>
         </div>
       </aside>

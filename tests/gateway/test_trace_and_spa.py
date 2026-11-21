@@ -141,6 +141,24 @@ def test_events_route_passes_include_turn_through(tmp_path):
             deps.agent_service = original
 
 
+def test_chat_projection_sends_tool_output_once_and_preserves_the_full_trace(client_and_svc, tmp_path):
+    client, _ = client_and_svc
+    log = SessionLog(session_id="projected", base_dir=str(tmp_path))
+    log.append("user", "question")
+    log.append("tool", "large output\n" * 18000, tool_call_id="tool-1", tool_name="read_file")
+    log.append("assistant", "final answer")
+    plain = client.get("/api/sessions/projected/trace/events", params={"turns": 1})
+    projected = client.get("/api/sessions/projected/trace/events", params={"turns": 1, "projected": "true"})
+    assert projected.status_code == plain.status_code == 200
+    full = plain.json()
+    light = projected.json()
+    for event in full["events"]:
+        if "row" in event:
+            event.pop("content")
+    assert light == full
+    assert len(projected.content) < len(plain.content) * 0.51
+
+
 def test_session_search_can_be_scoped_to_one_session_with_a_higher_cap(tmp_path):
     from agentica_gateway.main import app
     from agentica_gateway import deps

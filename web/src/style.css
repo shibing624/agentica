@@ -1439,14 +1439,13 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .ws-panel-content{--ws-preview-bar-height:38px;position:relative;isolation:isolate;display:flex;flex:1;min-height:0;min-width:0;container-type:inline-size}
 .ws-tree-column{display:flex;flex:1;min-width:0;min-height:0}
 .ws-tree-column[hidden]{display:none}
-.ws-tree-column.side{flex:0 0 248px;margin:8px;background:var(--bg2);border:var(--hair) solid var(--border);border-radius:var(--radius-md);box-shadow:var(--elev-pop);z-index:2}
-@container (width < 560px){
-  .ws-tree-column.side{position:absolute;inset:var(--ws-preview-bar-height) 0 0 auto;width:248px}
-}
-@container (width < 400px){
-  .ws-tree-column.side{left:0;width:auto;margin:0;border:0;border-radius:0;background:var(--bg);box-shadow:none}
-  .ws-panel-content:has(> .ws-tree-column.side) > .files-panel-body .ws-preview-body{visibility:hidden}
-}
+.ws-tree-column.side{position:relative;flex:none;margin:8px;background:var(--bg2);border:var(--hair) solid var(--border);border-radius:var(--radius-md);box-shadow:var(--elev-pop);z-index:2}
+.ws-tree-column.side.overlay,.ws-tree-column.side.fill{position:absolute;inset:var(--ws-preview-bar-height) 0 0 auto}
+.ws-tree-column.side.fill{left:0;margin:0;border:0;border-radius:0;background:var(--bg);box-shadow:none}
+.ws-panel-content:has(> .ws-tree-column.side.fill) > .files-panel-body .ws-preview-body{visibility:hidden}
+.ws-tree-resize{position:absolute;inset:0 auto 0 -5px;width:9px;cursor:col-resize;touch-action:none;z-index:1}
+.ws-tree-resize:is(:hover,:focus-visible,.dragging){background:var(--accent-soft);border-radius:5px}
+.ws-panel-content:has(.ws-tree-resize.dragging){user-select:none}
 .files-panel-head{display:flex;align-items:center;gap:4px;height:38px;padding:10px 8px 0 10px;flex-shrink:0;min-width:0;box-sizing:border-box}
 /* ===== PANEL TABS (dsh's dockkit strip, one pane) =====
    28px chips; the active one is filled, the rest are bare text with a hairline

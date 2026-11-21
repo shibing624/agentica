@@ -4,7 +4,7 @@ import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from agentica.session.trace import chat_turn_page, with_row_views
 
@@ -23,6 +23,7 @@ async def trace_events(
     turns: Optional[int] = Query(None, ge=1, le=200),
     before: Optional[int] = Query(None, ge=0),
     include_turn: Optional[int] = Query(None, ge=1),
+    projected: bool = Query(False),
     svc: AgentService = Depends(deps.get_agent_service),
 ):
     """``include_turn``: with ``turns``, reach back far enough that this turn is in the page."""
@@ -30,10 +31,11 @@ async def trace_events(
     if not log.path.exists():
         raise HTTPException(status_code=404, detail="Session not found")
     if turns is not None:
-        page = await asyncio.to_thread(
-            chat_turn_page, log.iter_raw_entries(), turns, before, include_turn,
-        )
-        return {"session_id": session_id, **page}
+        def page_response():
+            page = chat_turn_page(log.iter_raw_entries(), turns, before, include_turn, projected=projected)
+            return JSONResponse({"session_id": session_id, **page})
+
+        return await asyncio.to_thread(page_response)
     entries = list(log.iter_raw_entries())
     window = entries[offset:offset + limit]
     return {

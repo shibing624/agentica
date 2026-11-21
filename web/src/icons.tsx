@@ -47,6 +47,13 @@ export const IconEditorApp = () => (
 export const IconSearch = () => (
   <S strokeWidth="1.4"><circle cx="7" cy="7" r="4.25" /><path d="M10.2 10.2l3.05 3.05" strokeLinecap="round" /></S>
 );
+export const IconFileTree = () => (
+  <S strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2.5 2.5v9A1.5 1.5 0 0 0 4 13h3M2.5 6h4.5" />
+    <rect x="7" y="3.5" width="6.5" height="5" rx="1" />
+    <rect x="7" y="10.5" width="6.5" height="4" rx="1" />
+  </S>
+);
 export const IconClose = () => (
   <S strokeWidth="1.5" strokeLinecap="round"><path d="M4 4l8 8M12 4l-8 8" /></S>
 );

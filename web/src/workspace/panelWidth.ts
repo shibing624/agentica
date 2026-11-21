@@ -2,7 +2,7 @@
  * Right files panel geometry, the same contract as deepseek-harness's right
  * column (ui-layout/columns.ts): first open takes 45% of the window, a drag
  * clamps to [300px, 70% of the window], and the chat column keeps at least
- * 400px — the panel gives way first, then closes its track entirely.
+ * 400px when docked. Below that, float the panel rather than hiding an open one.
  */
 export const PANEL_MIN = 300;
 export const PANEL_MAX_RATIO = 0.7;
@@ -19,9 +19,18 @@ export function preferredWidth(saved: number | null, viewport: number): number {
   return clampWidth(want, PANEL_MIN, Math.max(PANEL_MIN, viewport * PANEL_MAX_RATIO));
 }
 
-/** Width actually drawn this frame; 0 when the chat would drop below CENTER_MIN. */
-export function resolvedWidth(preferred: number, viewport: number, sidebar: number): number {
+export function resolvePanelLayout(preferred: number, viewport: number, sidebar: number) {
   const available = viewport - sidebar - CENTER_MIN;
-  if (available < PANEL_MIN) return 0;
-  return Math.min(available, preferred);
+  if (available < PANEL_MIN) return { width: Math.min(viewport, preferred), floating: true };
+  return { width: Math.min(available, preferred), floating: false };
+}
+
+export const TREE_DEFAULT_WIDTH = 248;
+
+export function resolveTreeLayout(available: number, preferred: number) {
+  if (available < 400) return { mode: "fill", width: available, min: available, max: available } as const;
+  const mode = available >= 560 ? "beside" : "overlay";
+  const min = 180;
+  const max = available - (mode === "beside" ? 336 : 136);
+  return { mode, width: clampWidth(preferred, min, max), min, max };
 }

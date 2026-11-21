@@ -151,6 +151,14 @@ export function switchTo(id: string) {
   st.curSess = id;
   const sess = st.sessions[id];
   if (sess) {
+    for (const msg of sess.msgs) {
+      const cached = verifiedMentions.get(msg);
+      if (cached?.workspace === sess.dir && cached.account === st.accountId) {
+        msg.mentionedFiles = cached.paths;
+      } else if (cached) {
+        msg.mentionedFiles = [];
+      }
+    }
     sess.unread = false;
     if (sess.sizeBytes || sess.msgs.length || sess.running) markSessionRead(id);
   }
@@ -322,25 +330,42 @@ function countUserTurns(msgs: Session["msgs"]): number {
   return n;
 }
 
-const FILE_CARD_PREFETCH_MS = 600;
+const verifiedMentions = new WeakMap<ChatMsg, { account: string; workspace: string; paths: string[] }>();
 
-async function prepareFileMentions(msgs: Session["msgs"], workspace: string, sessionId: string) {
-  const candidates = msgs.map((m) => workspace ? mentionedFileCandidates({
-    ...m, content: m.role === "assistant" ? finalAnswerOf(m) : m.content,
-  }, workspace) : []);
-  const paths = [...new Set(candidates.flat())];
-  const found = new Set(paths.length ? await Promise.race([
-    api.fetchWorkspaceScope(sessionId).then(({ ok, data }) => {
-      const scope = ok && data ? data : undefined;
-      const cached = cachedExisting(scope ?? workspace, paths);
-      const refresh = statWorkspaceFilesBatched(workspace, paths, scope);
-      return cached ?? refresh;
-    }),
-    new Promise<string[]>((resolve) => window.setTimeout(() => resolve([]), FILE_CARD_PREFETCH_MS)),
-  ]) : []);
-  // Freeze optional mentions for this paint, even on timeout. A later stat
-  // can warm the cache for the next hydration, but must not insert a card here.
-  msgs.forEach((m, index) => { m.mentionedFiles = candidates[index].filter((path) => found.has(path)); });
+function prepareFileMentions(msgs: ChatMsg[], sess: Session, sessionId: string) {
+  const { accountId: account } = getState();
+  const workspace = sess.dir;
+  const settled = msgs.filter((msg) => !msg.inFlight);
+  const previous = new Map(sess.msgs.filter((msg) => msg.uuid).map((msg) => [msg.uuid, msg]));
+  for (const msg of settled) {
+    const oldMsg = previous.get(msg.uuid);
+    const cached = oldMsg && verifiedMentions.get(oldMsg);
+    if (oldMsg && cached?.workspace === workspace && cached.account === account) {
+      verifiedMentions.set(msg, cached);
+      msg.mentionedFiles = oldMsg.mentionedFiles ?? [];
+    } else msg.mentionedFiles = [];
+  }
+  if (!workspace || !settled.length) return;
+  const current = () => getState().accountId === account && getState().sessions[sessionId] === sess && sess.dir === workspace;
+  const warm = async () => {
+    if (!current()) return;
+    const candidates = settled.map((m) => mentionedFileCandidates({
+      ...m, content: m.role === "assistant" ? finalAnswerOf(m) : m.content,
+    }, workspace));
+    const paths = [...new Set(candidates.flat())];
+    if (!paths.length) return;
+    const { ok, data } = await api.fetchWorkspaceScope(sessionId);
+    if (!current()) return;
+    const scope = ok && data ? data : undefined;
+    const found = new Set(cachedExisting(scope ?? workspace, paths) ?? await statWorkspaceFilesBatched(workspace, paths, scope));
+    if (!current()) return;
+    settled.forEach((msg, i) => {
+      verifiedMentions.set(msg, { account, workspace, paths: candidates[i].filter((path) => found.has(path)) });
+    });
+  };
+  // Keep the current transcript's height stable. Optional file mentions are
+  // ready for a later visit, never awaited or appended to the current paint.
+  window.setTimeout(() => { void warm(); }, 0);
 }
 
 /** Replay a session's transcript from the server log so a reload (or another
@@ -367,9 +392,7 @@ export async function hydrateSession(id: string, force = false, allowResuming = 
   }
   const olderTurns = data.older_turns ?? 0;
   const msgs = mergeClientSteers(id, eventsToChatMsgs(data.events), olderTurns);
-  // Recorded changes are already in the transcript; only optional mentions need stat.
-  await prepareFileMentions(msgs.filter((m) => !m.inFlight), sess.dir, id);
-  if (hydrateGenerations[id] !== generation || sessionIsLive(id, allowResuming) || getState().sessions[id] !== sess) return;
+  prepareFileMentions(msgs, sess, id);
   sess.msgs = msgs;
   sess.hasOlder = !!data.has_more;
   sess.olderCursor = data.next_before ?? 0;
@@ -415,11 +438,7 @@ export async function loadOlderMessages(id: string, includeTurn?: number): Promi
     return false;
   }
   const older = eventsToChatMsgs(data.events);
-  await prepareFileMentions(older, cur.dir, id);
-  if ((hydrateGenerations[id] || 0) !== generation || getState().sessions[id] !== cur) {
-    bump();
-    return false;
-  }
+  prepareFileMentions(older, cur, id);
   const olderTurns = data.older_turns ?? 0;
   cur.msgs = mergeClientSteers(id, [...older, ...cur.msgs], olderTurns);
   cur.hasOlder = !!data.has_more;

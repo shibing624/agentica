@@ -628,7 +628,9 @@ def _include_shadowed_question(entries: List[Dict[str, Any]], start: int) -> int
     return start - 1
 
 
-def with_row_views(entries: Iterable[Dict[str, Any]], turns_before: int = 0) -> List[Dict[str, Any]]:
+def with_row_views(
+    entries: Iterable[Dict[str, Any]], turns_before: int = 0, *, projected: bool = False,
+) -> List[Dict[str, Any]]:
     """Copies of ``entries`` whose user and tool rows carry ``row`` (``rows.row_payload``).
 
     A user row a person's turn starts at also gets ``row["turn"]``: its 1-based
@@ -647,7 +649,10 @@ def with_row_views(entries: Iterable[Dict[str, Any]], turns_before: int = 0) -> 
         if e.get("type") == "user" and classify_user(e).starts_turn:
             turn += 1
             payload["turn"] = turn
-        out.append({**e, "row": payload})
+        row = {**e, "row": payload}
+        if projected:
+            row.pop("content", None)  # Chat already consumes row.text, images and steers.
+        out.append(row)
     return out
 
 
@@ -656,6 +661,8 @@ def chat_turn_page(
     turns: int,
     before: Optional[int] = None,
     include_turn: Optional[int] = None,
+    *,
+    projected: bool = False,
 ) -> Dict[str, Any]:
     """One turn-aligned backwards page of conversation rows for the chat view.
 
@@ -715,7 +722,7 @@ def chat_turn_page(
         "offset": start,
         "limit": end - start,
         "total": total,
-        "events": with_row_views(chat_entries[start:end], older_turns),
+        "events": with_row_views(chat_entries[start:end], older_turns, projected=projected),
         "has_more": start > 0,
         "next_before": start,
         "older_turns": older_turns,

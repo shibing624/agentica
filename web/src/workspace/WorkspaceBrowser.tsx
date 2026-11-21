@@ -4,7 +4,7 @@
  * Markdown has rendered/source views. Source views (and fenced blocks inside
  * rendered Markdown) use CodeFrame.
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import Markdown, { type ExtraProps } from "react-markdown";
 import remarkMath from "remark-math";
@@ -17,10 +17,10 @@ import { fmtFileSize } from "../lib/format";
 import { languageFromFilename, HIGHLIGHT_LIMIT } from "../lib/highlight";
 import { classifyPreviewTarget, joinWorkspacePath, splitExternalTarget, toWorkspaceRelative } from "../lib/filePath";
 import { GFM_PLUGINS, localMarkdownPath, markdownUrlTransform } from "../lib/markdownPlugins";
-import { toggleWorkspaceDirectory } from "../lib/panelTabs";
+import { expandWorkspaceAncestors, toggleWorkspaceDirectory } from "../lib/panelTabs";
 import { MarkdownLink } from "../components/ChatMarkdown";
 import { askConfirm, showToast } from "../store";
-import { FileTypeIcon, IconChevronDown, IconCopy, IconFinder, IconFolder, IconRefresh, IconTerminal, IconUpload } from "../icons";
+import { FileTypeIcon, IconChevronDown, IconChevronRight, IconClose, IconCopy, IconFinder, IconFolder, IconRefresh, IconSearch, IconTerminal, IconUpload } from "../icons";
 import { PlainText, PreviewActions, type ViewMode } from "./PreviewActions";
 import { SheetView } from "./SheetView";
 import { PreviewableImage } from "../components/ImageLightbox";
@@ -109,13 +109,12 @@ const MD_REMARK = [...GFM_PLUGINS, remarkMath];
 const MD_REHYPE = [rehypeRaw, rehypeKatex];
 
 export function FilePreview({
-  root, scope, path: filePath, onOpenFile, onRevealInTree,
+  root, scope, path: filePath, onOpenFile,
 }: {
   root: string;
   scope?: api.WorkspaceScope;
   path: string;
   onOpenFile: (path: string) => void;
-  onRevealInTree?: (path: string) => void;
 }) {
   const S = useStrings();
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -209,7 +208,6 @@ export function FilePreview({
           absPath={absPath}
           downloadHref={dl}
           downloadName={preview.name}
-          onBackToTree={onRevealInTree ? () => onRevealInTree(filePath) : undefined}
         />
       </div>
       <div className={"ws-preview-body" + (view === "code" || view === "text" ? " source" : "")
@@ -251,13 +249,15 @@ type DirectoryProps = {
   active: boolean;
   expanded: string[];
   selected: string;
+  currentFile: string | null;
+  onCurrentRow: (row: HTMLButtonElement | null) => void;
   revision: string;
   toggle: (path: string) => void;
   onOpenFile: (path: string) => void;
 };
 
 function DirectoryChildren(props: DirectoryProps) {
-  const { scope, path, active, expanded, selected, revision, toggle, onOpenFile } = props;
+  const { scope, path, active, expanded, selected, currentFile, onCurrentRow, revision, toggle, onOpenFile } = props;
   const S = useStrings();
   const [entries, setEntries] = useState<Entry[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -280,13 +280,16 @@ function DirectoryChildren(props: DirectoryProps) {
         const child = joinWorkspacePath(path, entry.name);
         const directory = entry.kind === "dir";
         const open = directory && expanded.includes(child);
+        const current = !directory && child === currentFile;
         return (
           <li key={child}>
-            <div className="ws-tree-row">
-              <button type="button" className={"ws-row" + (directory && selected === child ? " selected" : "")}
-                      title={child} aria-expanded={directory ? open : undefined}
+            <div className={"ws-tree-row" + (current || directory && selected === child ? " selected" : "")}>
+              <button type="button" className="ws-row" ref={active && current ? onCurrentRow : undefined}
+                      title={child} aria-expanded={directory ? open : undefined} aria-current={current ? true : undefined}
                       onClick={() => directory ? toggle(child) : onOpenFile(child)}>
-                {directory && <span className="ws-tree-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>}
+                <span className="ws-tree-caret" aria-hidden="true">
+                  {directory && (open ? <IconChevronDown /> : <IconChevronRight />)}
+                </span>
                 <span className="ws-row-icon"><FileTypeIcon path={entry.name} kind={directory ? "folder" : undefined} size={16} /></span>
                 <span className="ws-row-name">{entry.name}</span>
                 {!directory && <span className="ws-row-meta">{fmtFileSize(entry.sizeBytes)}</span>}
@@ -304,14 +307,14 @@ function DirectoryChildren(props: DirectoryProps) {
 
 /** One tree for a scoped session, shared by the Files page and its previews. */
 export function WorkspaceBrowser({
-  scope, accountId, isAdmin, active, revision, revealDirectory, projectDir, onOpenFile,
+  scope, accountId, isAdmin, active, revision, currentFile, projectDir, onOpenFile,
 }: {
   scope: api.WorkspaceScope;
   accountId: string;
   isAdmin: boolean;
   active: boolean;
   revision: string;
-  revealDirectory: { path: string } | null;
+  currentFile: string | null;
   projectDir: string;
   onOpenFile: (path: string) => void;
 }) {
@@ -331,6 +334,9 @@ export function WorkspaceBrowser({
   const [reloadTick, setReloadTick] = useState(0);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<{ paths: string[]; truncated: boolean; failed?: boolean } | null>(null);
+  const [reveal, setReveal] = useState<string | null>(null);
+  const currentRow = useRef<HTMLButtonElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -342,7 +348,7 @@ export function WorkspaceBrowser({
   useEffect(() => {
     const list = scroll.current;
     const tree = content.current;
-    if (!active || !list || !tree || query.trim()) return;
+    if (!active || !list || !tree || query.trim() || currentFile) return;
     let offset = 0;
     try { offset = Number(localStorage.getItem(`${storageKey}:scroll`)) || 0; } catch { return; }
     if (!offset) return;
@@ -360,17 +366,46 @@ export function WorkspaceBrowser({
       list.removeEventListener("wheel", release);
       list.removeEventListener("pointerdown", release);
     };
-  }, [storageKey, active, query]);
-  useEffect(() => {
-    if (!revealDirectory) return;
-    const { path } = revealDirectory;
-    if (path) {
-      const parts = path.split("/");
-      setExpanded((previous) => [...new Set([...parts.map((_, i) => parts.slice(0, i + 1).join("/")), ...previous])].slice(0, 128));
-    }
+  }, [storageKey, active, query, currentFile]);
+  const locateFile = useCallback((file: string) => {
+    setExpanded((previous) => expandWorkspaceAncestors(previous, file));
+    setReveal(file);
+  }, []);
+  useLayoutEffect(() => {
+    if (!active || !currentFile) return;
     setQuery("");
-    setPath(path);
-  }, [revealDirectory]);
+    setResults(null);
+    locateFile(currentFile);
+  }, [active, currentFile, locateFile]);
+  // Lazy ancestor requests may finish after the tab change. Scroll only when
+  // the selected row actually mounts, and only once for this reveal.
+  const onCurrentRow = useCallback((row: HTMLButtonElement | null) => {
+    currentRow.current = row;
+    if (!row || reveal !== currentFile || !reveal) return;
+    row.scrollIntoView({ block: "nearest", inline: "nearest" });
+    setReveal(null);
+  }, [reveal, currentFile]);
+  useEffect(() => {
+    const list = scroll.current;
+    if (!list || !active || !currentFile || query.trim()) return;
+    let width = list.clientWidth;
+    let height = list.clientHeight;
+    const observer = new ResizeObserver(() => {
+      const nextWidth = list.clientWidth;
+      const nextHeight = list.clientHeight;
+      if (nextWidth === width && nextHeight === height) return;
+      width = nextWidth;
+      height = nextHeight;
+      currentRow.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [active, currentFile, query]);
+  const clearSearch = () => {
+    setQuery("");
+    setResults(null);
+    if (currentFile) locateFile(currentFile);
+  };
   useEffect(() => {
     if (!active || !query.trim()) return;
     const controller = new AbortController();
@@ -440,13 +475,26 @@ export function WorkspaceBrowser({
         </label>
         {isAdmin && <OpenFolderButton dir={path ? cleanRoot + "/" + path : root} />}
       </div>
-      <input type="search" className="ws-search" placeholder={S.files.searchNames} aria-label={S.files.searchNames}
-             value={query} maxLength={160} onChange={(e) => { setQuery(e.currentTarget.value); setResults(null); }} />
+      <div className="ws-search-field">
+        <span className="ws-search-icon" aria-hidden="true"><IconSearch /></span>
+        <input ref={searchInput} type="search" className="ws-search" placeholder={S.files.searchNames} aria-label={S.files.searchNames}
+               value={query} maxLength={160} autoComplete="off" spellCheck={false}
+               onChange={(event) => { setQuery(event.currentTarget.value); setResults(null); }}
+               onKeyDown={(event) => {
+                 if (event.key !== "Escape" || !query || event.nativeEvent.isComposing) return;
+                 event.preventDefault();
+                 event.stopPropagation();
+                 clearSearch();
+               }} />
+        {query && <button type="button" className="ws-tool ws-search-clear" aria-label={S.files.clearSearch} title={S.files.clearSearch}
+                          onClick={() => { clearSearch(); searchInput.current?.focus(); }}><IconClose /></button>}
+      </div>
       <div className="ws-list" ref={scroll} onScroll={(e) => {
         if (!query.trim()) try { localStorage.setItem(`${storageKey}:scroll`, String(e.currentTarget.scrollTop)); } catch { /* session remains usable */ }
       }}>
         <div ref={content} hidden={!!query.trim()}>
           <DirectoryChildren scope={scope} path="" active={active && !query.trim()} expanded={expanded} selected={path}
+                             currentFile={currentFile} onCurrentRow={onCurrentRow}
                              revision={`${revision}:${reloadTick}`} onOpenFile={onOpenFile} toggle={(next) => {
               const opens = !expanded.includes(next);
               setExpanded((value) => toggleWorkspaceDirectory(value, next).slice(0, 128));
@@ -459,8 +507,10 @@ export function WorkspaceBrowser({
               <>
                 {!results.paths.length && <p className="ws-muted">{S.files.empty}</p>}
                 {results.truncated && <p className="ws-muted">{S.files.searchLimited}</p>}
-                {results.paths.map((match) => <button key={match} className="ws-row" title={match} onClick={() => onOpenFile(match)}>
-                  <FileTypeIcon path={match} size={16} /><span className="ws-row-name">{match}</span>
+                {results.paths.map((match) => <button key={match} type="button" className="ws-row" title={match}
+                  onClick={() => { clearSearch(); onOpenFile(match); }}>
+                  <span className="ws-tree-caret" aria-hidden="true" /><FileTypeIcon path={match} size={16} />
+                  <span className="ws-row-name">{match}</span>
                 </button>)}
               </>
             )}
