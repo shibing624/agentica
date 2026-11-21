@@ -410,6 +410,13 @@ class PromptsMixin:
         can_pin = self._can_pin_system_prompt()
         has_active_history = bool(self.working_memory.runs)
 
+        # Every reader goes through the logged prompt first, not only the
+        # runner: a gateway rebuild hydrates history and the page's usage poll
+        # asks for the system message before the next turn. Rendering fresh
+        # there pinned a prompt the provider never cached, and the resumed
+        # turn paid the whole window uncached.
+        if can_pin and has_active_history:
+            self._restore_prelude_from_session_log()
         if can_pin and has_active_history and self._pinned_system_prompt is not None:
             return Message(role=pc.system_message_role, content=self._pinned_system_prompt)
 

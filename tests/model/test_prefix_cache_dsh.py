@@ -983,3 +983,33 @@ def test_token_usage_says_whether_the_request_kept_the_previous_prefix(tmp_path,
     rows = _usage_rows(agent._session_log)
     assert rows[2]["prefix_intact"] is False
     assert rows[2]["prefix_diverged_at"] == 1
+
+
+def test_a_usage_read_before_the_first_resumed_turn_keeps_the_logged_prompt(tmp_path, monkeypatch):
+    """Gateway rebuild: history is hydrated, then the page's usage poll measures
+    the context before anyone sends a turn. That read must not pin a fresh
+    render of ``messages[0]``: what goes into it drifts between processes (the
+    skills catalogue order did, in one session), and the resumed turn then
+    re-paid 143K uncached instead of reading the logged prompt's cache."""
+    from agentica.compression.context_usage import measure_context
+
+    monkeypatch.setenv("AGENTICA_HOME", str(tmp_path))
+    sess_dir = tmp_path / "sessions"
+
+    def build(spy, rules):
+        return Agent(
+            model=spy, instructions=rules, add_history_to_context=True,
+            tool_config=ToolConfig(auto_load_mcp=False),
+            session_id="sess-usage-before-turn", session_base_dir=str(sess_dir),
+        )
+
+    spy1 = _SpyOpenAIChat(id="DeepSeek-V4.1-Flash")
+    asyncio.run(build(spy1, ["rule order A", "rule order B"]).run("initial task"))
+
+    spy2 = _SpyOpenAIChat(id="DeepSeek-V4.1-Flash")
+    a2 = build(spy2, ["rule order B", "rule order A"])
+    a2.working_memory.hydrate_runs_from_history(a2._session_log.load(model=spy2.id))
+    asyncio.run(measure_context(a2))
+    asyncio.run(a2.run("resumed turn"))
+
+    assert spy2.captured[0][0][0] == spy1.captured[0][0][0]
