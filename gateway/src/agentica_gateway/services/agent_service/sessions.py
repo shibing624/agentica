@@ -605,6 +605,11 @@ class AgentSessionsMixin:
             key, str(settings.base_dir),
         )
 
+    def session_workspace_dir(self, session_id: str, owner: str) -> Optional[str]:
+        """Read an existing binding without treating the global default as one."""
+        self._locate_session(session_id, owner)
+        return self._session_work_dirs.get(self._sk(session_id, owner))
+
     def _session_base_dir(self, work_dir: str, owner: Optional[str] = None) -> str:
         """Resolve the SessionLog storage dir for a given project work_dir."""
         from agentica.config.project import project_base_dir

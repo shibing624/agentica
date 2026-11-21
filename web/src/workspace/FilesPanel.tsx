@@ -217,11 +217,12 @@ export function FilesPanel({
             const scopedKey = `${panel.sessionKey}:${tab.key}`;
             return (
               <div key={scopedKey} className="files-panel-body" hidden={!active} role="tabpanel">
-                {tab.kind === "files" && (root
+                {tab.kind === "files" && (panel.scope
                   ? (
                     <Suspense fallback={<p className="ws-muted">{S.common.loading}</p>}>
                       <WorkspaceBrowser
-                        root={root}
+                        root={panel.scope.root}
+                        scope={panel.scope}
                         active={panel.open && active}
                         dirPath={panel.dirPath}
                         onDirPathChange={panel.setDirPath}
@@ -229,12 +230,13 @@ export function FilesPanel({
                       />
                     </Suspense>
                   )
-                  : <p className="ws-muted">{S.files.noRoot}</p>)}
+                  : <p className="ws-muted">{panel.scopeError ? S.files.loadFailed : panel.sessionKey && root ? S.common.loading : S.files.noRoot}</p>)}
                 {tab.kind === "guide" && <GuidePage panel={panel} />}
-                {tab.kind === "file" && (root || isAbsOrHomePath(tab.path)) && (
+                {tab.kind === "file" && (panel.scope || isAbsOrHomePath(tab.path)) && (
                   <Suspense fallback={<p className="ws-muted">{S.common.loading}</p>}>
                     <FilePreview
-                      root={root}
+                      root={panel.scope?.root ?? root}
+                      scope={panel.scope ?? undefined}
                       path={tab.path}
                       onOpenFile={panel.browsePath}
                       onRevealInTree={panel.revealInFilesTab}

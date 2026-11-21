@@ -29,7 +29,8 @@ from ..models import (
 from ..services.agent_service import AgentService
 from ..services import chat_images, live_turn
 from ..services.uploads import save_upload
-from .settings import show_cli_sessions_pref
+from ..workspace_files import WorkspacePathError, authorized_workspace_root
+from .settings import _files_base, show_cli_sessions_pref
 
 try:
     from agentica.run.response import AgentCancelledError
@@ -238,8 +239,8 @@ async def chat(
 ):
     """Send a message to the agent (non-streaming)."""
     account = _account(request)
-    if body.work_dir:
-        await _apply_session_work_dir(svc, body.session_id, body.work_dir, account)
+    if body.work_dir or not request.state.principal.is_admin:
+        await _apply_session_work_dir(svc, body.session_id, body.work_dir, request)
     if body.approval_mode is not None:
         svc.set_session_approval_mode(body.session_id, body.approval_mode, owner=account)
 
@@ -353,8 +354,8 @@ async def run_goal(
 async def _start_chat_run(body: ChatRequest, request: Request, svc: AgentService) -> live_turn.LiveTurn:
     account = _account(request)
     session_id = body.session_id
-    if body.work_dir:
-        await _apply_session_work_dir(svc, session_id, body.work_dir, account)
+    if body.work_dir or not request.state.principal.is_admin:
+        await _apply_session_work_dir(svc, session_id, body.work_dir, request)
     if body.approval_mode is not None:
         svc.set_session_approval_mode(session_id, body.approval_mode, owner=account)
     _touch_session_log(svc, session_id, account)
@@ -845,7 +846,7 @@ async def get_session_model(
     """The model this chat runs on: its own pick, else its project's default."""
     account = _account(request)
     if work_dir:
-        await _apply_session_work_dir(svc, session_id, work_dir, account)
+        await _apply_session_work_dir(svc, session_id, work_dir, request)
     return _session_model_payload(svc, session_id, account)
 
 
@@ -863,7 +864,7 @@ async def set_session_model(
         raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
     account = _account(request)
     if work_dir:
-        await _apply_session_work_dir(svc, session_id, work_dir, account)
+        await _apply_session_work_dir(svc, session_id, work_dir, request)
     await svc.set_session_profile(session_id, name, owner=account)
     return _session_model_payload(svc, session_id, account)
 
@@ -1091,17 +1092,24 @@ _work_dir_lock = asyncio.Lock()
 
 
 async def _apply_session_work_dir(
-    svc: AgentService, session_id: str, work_dir: str, owner: str,
+    svc: AgentService, session_id: str, work_dir: Optional[str], request: Request,
 ) -> None:
     """Set per-session work_dir.  Acquires lock to avoid concurrent races."""
-    p = Path(work_dir).expanduser()
-    if not p.is_dir():
-        return
+    principal = request.state.principal
+    owner = principal.user_id
     async with _work_dir_lock:
-        current = svc.get_session_work_dir(session_id, owner)
-        if str(p) == current:
+        # work_dir is a legacy creation hint, not a rebind command. In
+        # particular a stale browser tab must not undo an explicit worktree bind.
+        current = svc.session_workspace_dir(session_id, owner)
+        if current is not None and principal.is_admin:
             return
-        svc.set_session_work_dir(session_id, str(p), owner)
+        selected = current or work_dir or str(_files_base(request))
+        try:
+            path = authorized_workspace_root(selected, settings.workspace_path, owner, principal.is_admin)
+        except WorkspacePathError as err:
+            raise HTTPException(status_code=err.status, detail=err.detail) from err
+        if current is None:
+            svc.set_session_work_dir(session_id, str(path), owner)
 
 
 def _touch_session_log(svc: AgentService, session_id: str, owner: str) -> None:

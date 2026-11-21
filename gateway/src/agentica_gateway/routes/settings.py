@@ -174,8 +174,22 @@ async def apply_update(request: Request):
         }
 
 
+def _files_base(request: Request) -> Path:
+    from ..workspace_files import WorkspacePathError, account_files_root
+
+    principal = request.state.principal
+    if principal.is_admin:
+        return settings.base_dir
+    try:
+        root = account_files_root(settings.workspace_path, principal.user_id)
+    except WorkspacePathError as err:
+        raise HTTPException(status_code=err.status, detail=err.detail) from err
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 @router.get("/api/status")
-async def status():
+async def status(request: Request):
     from agentica.cron.jobs import list_jobs
     active_jobs = len(list_jobs(include_disabled=False))
     scheduler_status = {"active_jobs": active_jobs}
@@ -192,7 +206,7 @@ async def status():
         compact_token_limit = parse_compact_token_limit(get_setting("compact_token_limit", None))
     return {
         "workspace": str(settings.workspace_path),
-        "base_dir": str(settings.base_dir),
+        "base_dir": str(_files_base(request)),
         "platform": sys.platform,
         "model": f"{svc.model_provider}/{svc.model_name}" if svc else f"{settings.model_provider}/{settings.model_name}",
         "model_provider": svc.model_provider if svc else settings.model_provider,
@@ -746,10 +760,14 @@ async def _add_dir_history(path: str) -> None:
 # ============== Filesystem browsing (folder picker) ==============
 
 @router.get("/api/fs/browse")
-async def browse_fs(path: Optional[str] = None):
+async def browse_fs(request: Request, path: Optional[str] = None):
     """List subdirectories of a path for the web UI's folder picker
     (read-only). Falls back to settings.base_dir when path is omitted."""
-    base = Path(path).expanduser().resolve() if path else settings.base_dir
+    allowed = _files_base(request)
+    base = Path(path).expanduser().resolve() if path else allowed
+    restricted = not request.state.principal.is_admin
+    if restricted and not base.is_relative_to(allowed):
+        raise HTTPException(status_code=403, detail="Directory is not allowed for this account")
     if not base.exists() or not base.is_dir():
         raise HTTPException(status_code=400, detail=f"Not a directory: {base}")
     try:
@@ -759,9 +777,9 @@ async def browse_fs(path: Optional[str] = None):
     dirs = [
         {"name": entry.name, "path": str(entry)}
         for entry in entries
-        if entry.is_dir() and not entry.name.startswith(".")
+        if entry.is_dir() and not entry.name.startswith(".") and (not restricted or entry.resolve().is_relative_to(allowed))
     ]
-    parent = str(base.parent) if base.parent != base else None
+    parent = str(base.parent) if base.parent != base and (not restricted or base != allowed) else None
     return {"path": str(base), "parent": parent, "dirs": dirs}
 
 
@@ -817,6 +835,8 @@ async def pick_fs_directory(request: Request):
     to the HTTP folder walk of ``/api/fs/browse``, which works from anywhere.
     """
     forwarded = "x-forwarded-for" in request.headers or "forwarded" in request.headers
+    if not request.state.principal.is_admin:
+        raise HTTPException(status_code=403, detail="Native folder selection requires administrator access")
     if request.client is None or request.client.host not in _LOCAL_HOSTS or forwarded:
         raise HTTPException(status_code=409, detail="The folder dialog only opens for a client on the gateway's own machine")
     cmd = _pick_command()
@@ -831,13 +851,14 @@ async def pick_fs_directory(request: Request):
 
 
 @router.post("/api/fs/temp")
-async def make_temp_workspace():
+async def make_temp_workspace(request: Request):
     """Create a throwaway working directory for a new web chat.
 
     Same idea as leaving the CLI cwd blank: the directory must exist, so the
     server makes one under ``$AGENTICA_HOME/tmp/web-chats``.
     """
-    root = Path(AGENTICA_HOME) / "tmp" / "web-chats"
+    root = (Path(AGENTICA_HOME) / "tmp" / "web-chats" if request.state.principal.is_admin
+            else _files_base(request) / "web-chats")
     root.mkdir(parents=True, exist_ok=True)
     path = Path(tempfile.mkdtemp(prefix="chat-", dir=str(root)))
     return {"path": str(path)}
@@ -951,9 +972,11 @@ async def open_app_icon(app_id: str):
     return FileResponse(out, media_type="image/png", headers={"Cache-Control": "max-age=86400"})
 
 @router.post("/api/open")
-async def open_path(request: OpenRequest):
+async def open_path(request: OpenRequest, http_request: Request):
     """Open a local path or an http(s) URL with the OS default handler, or a
     folder in one of the apps ``/api/open/apps`` lists."""
+    if not http_request.state.principal.is_admin:
+        raise HTTPException(status_code=403, detail="Opening an application on the gateway requires administrator access")
     # Reject unknown values instead of silently opening with the wrong handler.
     if request.app not in ("finder", "editor", "reveal", "terminal") and request.app not in _APP_NAMES:
         raise HTTPException(status_code=422, detail=f"Unknown app: {request.app}")

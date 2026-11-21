@@ -37,12 +37,13 @@ function absPath(workspace: string, rel: string) {
  * file with the OS default app or show it in its folder.
  */
 export function MessageFilesCard({
-  text, steps, uploaded, workspace, onOpenFile, onOpenDiff, live, role,
+  text, steps, uploaded, workspace, sessionId, onOpenFile, onOpenDiff, live, role,
 }: {
   text: string;
   steps?: Array<Record<string, any>>;
   uploaded?: string[];
   workspace: string | null;
+  sessionId: string | null;
   onOpenFile: (path: string) => void;
   /** Open this round's review tab on `path`; `files` is every file the round changed. */
   onOpenDiff: (files: FileEdits[], path: string) => void;
@@ -74,11 +75,14 @@ export function MessageFilesCard({
       return;
     }
     let cancelled = false;
-    void statWorkspaceFilesBatched(workspace, candidates).then((found) => {
+    void (sessionId ? api.fetchWorkspaceScope(sessionId) : Promise.resolve(null)).then((scope) => {
+      if (cancelled) return [];
+      return statWorkspaceFilesBatched(workspace, candidates, scope?.ok && scope.data ? scope.data : undefined);
+    }).then((found) => {
       if (!cancelled) setExisting(found);
     });
     return () => { cancelled = true; };
-  }, [live, workspace, sig]);
+  }, [live, workspace, sessionId, sig]);
 
   const [expanded, setExpanded] = useState(false);
   if (live || !workspace || existing.length === 0) return null;

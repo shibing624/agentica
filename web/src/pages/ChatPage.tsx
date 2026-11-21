@@ -516,7 +516,10 @@ export function ChatPage() {
               {/* dsh: the way in only shows while the panel is closed; the open
                   panel carries its own collapse button in its head. */}
               {!files.open && (
-                <button type="button" className="ib" onClick={() => files.setOpen(true)}
+                <button type="button" className="ib" onClick={() => {
+                  if (!s.curSess && workspace) createSession(workspace);
+                  files.setOpen(true);
+                }}
                         title={S.chat.openWorkspace} aria-label={S.chat.openWorkspace}>
                   <IconSidebarRight />
                 </button>
@@ -1318,6 +1321,7 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
           steps={m.steps}
           uploaded={m.files}
           workspace={workspace || null}
+          sessionId={sessionId}
           onOpenFile={onOpenFile}
           onOpenDiff={(files, path) => onOpenReview(turn, files, path)}
           live={!!live}

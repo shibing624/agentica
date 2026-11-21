@@ -8,7 +8,9 @@ symlink escapes are both refused.
 from __future__ import annotations
 
 import codecs
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+
+from agentica.workspace import Workspace
 # 256 KiB preview cap; 50 MiB hard ceiling for a full inline read.
 TEXT_PREVIEW_BYTES = 256 * 1024
 # Raw bytes are streamed from disk (and the browser asks for ranges), so this is
@@ -73,6 +75,30 @@ class WorkspacePathError(Exception):
         super().__init__(detail)
         self.status = status
         self.detail = detail
+
+
+def account_files_root(workspace: Path, owner: str) -> Path:
+    """Regular accounts get a files area, not access to the gateway user's home."""
+    base = workspace.resolve()
+    expected = base / "users" / Workspace.sanitize_user_id(owner) / "files"
+    if expected.resolve() != expected:
+        raise WorkspacePathError(403, "Account filesystem root must not be redirected")
+    return expected
+
+
+def authorized_workspace_root(root: str, workspace: Path, owner: str, is_admin: bool) -> Path:
+    if not root or "\0" in root:
+        raise WorkspacePathError(400, "root is required")
+    target = Path(root).expanduser().resolve()
+    if not is_admin and not _is_inside(target, account_files_root(workspace, owner)):
+        raise WorkspacePathError(403, "Workspace is not allowed for this account")
+    return resolve_root(str(target))
+
+
+def require_relative_path(path: str) -> None:
+    for parsed in (Path(path), PureWindowsPath(path)):
+        if parsed.anchor or ".." in parsed.parts:
+            raise WorkspacePathError(400, "Workspace operations require a relative path inside the session root")
 
 
 def _is_inside(target: Path, base: Path) -> bool:

@@ -59,9 +59,10 @@ function resolveRelative(baseDir: string, ref: string): string {
  *  types, and fresh ones on every app-state tick (each keystroke in the
  *  composer) remounted every image and link, which reloaded and jumped. */
 const MarkdownDoc = memo(function MarkdownDoc({
-  root, path: docPath, content, isExternal, onOpenFile,
+  root, scope, path: docPath, content, isExternal, onOpenFile,
 }: {
   root: string;
+  scope?: api.WorkspaceScope;
   path: string;
   content: string;
   isExternal: boolean;
@@ -74,7 +75,7 @@ const MarkdownDoc = memo(function MarkdownDoc({
         <img
           src={EXTERNAL_REF_RE.test(src)
             ? src
-            : api.workspaceContentUrl(root, resolveRelative(dirOf(docPath), src))}
+            : api.workspaceContentUrl(scope ?? root, resolveRelative(dirOf(docPath), src))}
           alt={alt || ""}
         />
       );
@@ -90,12 +91,12 @@ const MarkdownDoc = memo(function MarkdownDoc({
       }
       const target = resolveRelative(dirOf(docPath), href);
       const openPath = isExternal ? splitExternalTarget(target, root).absPath : target;
-      return <a href={api.workspaceContentUrl(root, target)} title={title} onClick={(e) => { e.preventDefault(); onOpenFile(openPath); }}>{children}</a>;
+      return <a href={api.workspaceContentUrl(scope ?? root, target)} title={title} onClick={(e) => { e.preventDefault(); onOpenFile(openPath); }}>{children}</a>;
     },
     table: ({ children }: { children?: React.ReactNode }) => <div className="md-table"><table>{children}</table></div>,
     pre: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
     code: MarkdownCode,
-  }), [root, docPath, isExternal, onOpenFile]);
+  }), [root, scope, docPath, isExternal, onOpenFile]);
   return (
     <div className="md-doc">
       <Markdown remarkPlugins={MD_REMARK} rehypePlugins={MD_REHYPE} components={components} urlTransform={markdownUrlTransform}>{content}</Markdown>
@@ -107,9 +108,10 @@ const MD_REMARK = [...GFM_PLUGINS, remarkMath];
 const MD_REHYPE = [rehypeRaw, rehypeKatex];
 
 export function FilePreview({
-  root, path: filePath, onOpenFile, onRevealInTree,
+  root, scope, path: filePath, onOpenFile, onRevealInTree,
 }: {
   root: string;
+  scope?: api.WorkspaceScope;
   path: string;
   onOpenFile: (path: string) => void;
   onRevealInTree?: (path: string) => void;
@@ -124,6 +126,7 @@ export function FilePreview({
   const [refreshKey, setRefreshKey] = useState(0);
   const seq = useRef(0);
   const { targetRoot, targetRel, absPath: resolvedAbsPath, isExternal } = splitExternalTarget(filePath, root);
+  const target = !isExternal && scope ? scope : targetRoot;
 
   /** `keepMode` is a refresh: same file, same view. */
   const load = useCallback(async (keepMode: boolean) => {
@@ -135,7 +138,7 @@ export function FilePreview({
     if (targetKind === "pdf") { present({ path: filePath, name, kind: "pdf" }); return; }
     if (targetKind === "workbook") { present({ path: filePath, name, kind: "workbook" }); return; }
     if (targetKind === "unsupported") { present({ path: filePath, name, kind: "unsupported" }); return; }
-    const { ok, data } = await api.fetchWorkspacePreview(targetRoot, targetRel);
+    const { ok, data } = await api.fetchWorkspacePreview(target, targetRel);
     if (nonce !== seq.current) return;
     if (!ok || !data) { present({ path: filePath, name, kind: "unsupported" }); return; }
     const content = data.content || "";
@@ -159,14 +162,14 @@ export function FilePreview({
       content,
       truncated: !!data.truncated,
     });
-  }, [filePath, targetRoot, targetRel]);
+  }, [filePath, target, targetRel]);
 
   useEffect(() => { void load(false); }, [load]);
 
   if (!preview) return <div className="ws-browser"><p className="ws-muted">{S.common.loading}</p></div>;
 
-  const src = api.workspaceContentUrl(targetRoot, targetRel);
-  const dl = api.workspaceContentUrl(targetRoot, targetRel, true);
+  const src = api.workspaceContentUrl(target, targetRel);
+  const dl = api.workspaceContentUrl(target, targetRel, true);
   const absPath = isExternal ? preview.path : resolvedAbsPath;
   const hasText = preview.content !== undefined;
   const modes: ViewMode[] = preview.kind === "md" ? ["markdown", "code", "text"]
@@ -220,7 +223,7 @@ export function FilePreview({
           <iframe srcDoc={preview.content} title={preview.name} sandbox="allow-scripts" />
         )}
         {view === "markdown" && (
-          <MarkdownDoc root={targetRoot} path={targetRel} content={preview.content || ""} isExternal={isExternal} onOpenFile={onOpenFile} />
+          <MarkdownDoc root={targetRoot} scope={!isExternal ? scope : undefined} path={targetRel} content={preview.content || ""} isExternal={isExternal} onOpenFile={onOpenFile} />
         )}
         {view === "code" && (
           <CodeFrame
@@ -242,9 +245,10 @@ export function FilePreview({
 
 /** The panel's fixed first tab: the directory list. A file opens in a tab of its own. */
 export function WorkspaceBrowser({
-  root, active, dirPath, onDirPathChange, onOpenFile,
+  root, scope, active, dirPath, onDirPathChange, onOpenFile,
 }: {
   root: string;
+  scope: api.WorkspaceScope;
   active?: boolean;
   dirPath?: string;
   onDirPathChange?: (dirPath: string) => void;
@@ -272,13 +276,13 @@ export function WorkspaceBrowser({
     if (!root) return;
     let cancelled = false;
     setError("");
-    void api.fetchWorkspaceFiles(root, path).then(({ ok, data: body, status }) => {
+    void api.fetchWorkspaceFiles(scope, path).then(({ ok, data: body, status }) => {
       if (cancelled) return;
       if (!ok) { setError(S.files.loadFailed + (status ? ` (${status})` : "")); return; }
       setData({ base: path, entries: body?.entries || [] });
     });
     return () => { cancelled = true; };
-  }, [root, path, reloadTick, S.files.loadFailed]);
+  }, [root, scope, path, reloadTick, S.files.loadFailed]);
 
   const prevActive = useRef(active);
   useEffect(() => {
@@ -291,7 +295,7 @@ export function WorkspaceBrowser({
     void (async () => {
       try {
         for (const file of files) {
-          const up = await api.uploadWorkspaceFile(file, root, path);
+          const up = await api.uploadWorkspaceFile(file, scope, path);
           if (!up.ok) showToast(S.chat.uploadFailed(file.name, up.data?.detail), 5000);
         }
         showToast(S.files.uploaded);
@@ -366,7 +370,7 @@ export function WorkspaceBrowser({
                       <span className="ws-row-meta">{entry.mtime ? formatDateTime(entry.mtime) : ""}</span>
                     </button>
                     {entry.kind === "file" && (
-                      <a className="ws-row-dl" href={api.workspaceContentUrl(root, target, true)} download={entry.name} title={S.files.download}>↓</a>
+                      <a className="ws-row-dl" href={api.workspaceContentUrl(scope, target, true)} download={entry.name} title={S.files.download}>↓</a>
                     )}
                   </li>
                 );

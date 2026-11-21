@@ -23,6 +23,11 @@ async function action(kind: "new" | "bind" | "merge" | "remove", name: string) {
   try {
     const res = await api.postWorktree(sessionId, kind, name, panel.base);
     if (!res.ok || !res.data) throw new Error(res.error ? String(res.error) : `HTTP ${res.status}`);
+    const session = getState().sessions[sessionId];
+    if (kind === "bind" && session && res.data.work_dir) {
+      session.projectDir ||= session.dir;
+      session.dir = res.data.work_dir;
+    }
     const refreshed = await api.getWorktrees(sessionId);
     if (!refreshed.ok || !refreshed.data) throw new Error(refreshed.error ? String(refreshed.error) : `HTTP ${refreshed.status}`);
     setState({

@@ -59,7 +59,7 @@ def gateway_repo(tmp_path: Path):
 
     @app.middleware("http")
     async def principal(request, call_next):
-        request.state.principal = SimpleNamespace(user_id="alice")
+        request.state.principal = SimpleNamespace(user_id="alice", is_admin=True)
         return await call_next(request)
 
     with TestClient(app) as client:

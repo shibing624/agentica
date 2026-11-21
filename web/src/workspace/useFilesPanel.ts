@@ -14,6 +14,8 @@ import { clampWidth, PANEL_MAX_RATIO, PANEL_MIN, preferredWidth, resolvedWidth }
 
 export type FilesPanelState = {
   sessionKey: string;
+  scope: api.WorkspaceScope | null;
+  scopeError: boolean;
   open: boolean;
   setOpen: (open: boolean) => void;
   width: number;
@@ -144,6 +146,20 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
   }, [updateRecord]);
 
   const open = state.open;
+  const scopeKey = JSON.stringify([s.accountId, sessionKey, workspace]);
+  const [scoped, setScoped] = useState<{ key: string; scope: api.WorkspaceScope | null } | null>(null);
+  useEffect(() => {
+    if (!open || !sessionKey || !workspace) return;
+    let cancelled = false;
+    void (async () => {
+      const current = await api.fetchWorkspaceScope(sessionKey);
+      if (cancelled) return;
+      const result = current.status === 404 ? await api.bindWorkspaceDraft(sessionKey, workspace) : current;
+      if (!cancelled) setScoped({ key: scopeKey, scope: result.ok ? result.data : null });
+    })();
+    return () => { cancelled = true; };
+  }, [open, sessionKey, workspace, scopeKey]);
+  const resolvedScope = scoped?.key === scopeKey ? scoped : null;
   const setOpen = useCallback((nextOpen: boolean) => {
     updateRecord((rec) => ({ ...rec, open: nextOpen }));
   }, [updateRecord]);
@@ -302,6 +318,7 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
 
   return {
     sessionKey,
+    scope: resolvedScope?.scope ?? null, scopeError: resolvedScope !== null && !resolvedScope.scope,
     open, setOpen, width, startResize, resetWidth, fullscreen, setFullscreen,
     tabs: state.tabs, active: state.active, activate, close, closeMany,
     dirPath, setDirPath,

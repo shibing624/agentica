@@ -151,7 +151,7 @@ export function switchTo(id: string) {
   const sess = st.sessions[id];
   if (sess) {
     sess.unread = false;
-    markSessionRead(id);
+    if (sess.sizeBytes || sess.msgs.length || sess.running) markSessionRead(id);
   }
   writeLastSessionId(id);
   bump();
@@ -323,12 +323,15 @@ function countUserTurns(msgs: Session["msgs"]): number {
 
 const FILE_CARD_PREFETCH_MS = 600;
 
-async function prefetchFileCards(msgs: Session["msgs"], workspace: string) {
+async function prefetchFileCards(msgs: Session["msgs"], workspace: string, sessionId: string) {
   if (!workspace) return;
   const paths = [...new Set(msgs.flatMap((m) => messageFileCandidates(m, workspace)))];
-  if (!paths.length || cachedExisting(workspace, paths)) return;
+  if (!paths.length) return;
   await Promise.race([
-    statWorkspaceFilesBatched(workspace, paths),
+    api.fetchWorkspaceScope(sessionId).then(({ ok, data }) => {
+      const scope = ok && data ? data : undefined;
+      if (!cachedExisting(scope ?? workspace, paths)) return statWorkspaceFilesBatched(workspace, paths, scope);
+    }),
     new Promise((resolve) => window.setTimeout(resolve, FILE_CARD_PREFETCH_MS)),
   ]);
 }
@@ -360,7 +363,7 @@ export async function hydrateSession(id: string, force = false, allowResuming = 
   // Look up the files cards' paths before the transcript is shown, so each
   // reply and its card land in one paint. Bounded: a slow stat only brings
   // back the late card, never a blank chat.
-  await prefetchFileCards(sess.running ? msgs.filter((m) => !m.inFlight) : msgs, sess.dir);
+  await prefetchFileCards(sess.running ? msgs.filter((m) => !m.inFlight) : msgs, sess.dir, id);
   if (hydrateGenerations[id] !== generation || sessionIsLive(id, allowResuming) || getState().sessions[id] !== sess) return;
   sess.msgs = msgs;
   sess.hasOlder = !!data.has_more;
@@ -407,7 +410,7 @@ export async function loadOlderMessages(id: string, includeTurn?: number): Promi
     return false;
   }
   const older = eventsToChatMsgs(data.events);
-  await prefetchFileCards(older, cur.dir);
+  await prefetchFileCards(older, cur.dir, id);
   if ((hydrateGenerations[id] || 0) !== generation || getState().sessions[id] !== cur) {
     bump();
     return false;

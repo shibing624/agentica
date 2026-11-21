@@ -139,6 +139,67 @@ def test_download_preserves_the_unicode_attachment_name(client):
     assert response.headers["content-disposition"] == f"attachment; filename*=utf-8''{quote(name)}"
 
 
+def test_session_file_requests_use_the_binding_not_a_client_root(client):
+    c, root = client
+    from agentica_gateway import deps
+
+    first, second = root / "first", root / "second"
+    first.mkdir()
+    second.mkdir()
+    (first / "same.md").write_text("old")
+    (second / "same.md").write_text("new")
+    sid = "workspace-test-session"
+    target = {"session_id": sid}
+    assert c.get("/api/workspace/scope", params=target).status_code == 404
+    bound = c.post("/api/workspace/scope", json={**target, "root": str(first)}).json()
+    assert bound["root"] == str(first)
+    svc = deps.get_agent_service()
+    assert not svc.session_log_for(sid).path.exists()
+    params = {**target, "binding": bound["binding"], "path": "same.md", "preview": 1}
+    assert c.get("/api/workspace/content", params=params).json()["content"] == "old"
+    assert c.get("/api/workspace/content", params={**params, "root": str(second)}).status_code == 400
+    assert c.get("/api/workspace/content", params={**params, "path": str(first / "same.md")}).status_code == 400
+    (first / "outside.md").symlink_to(second / "same.md")
+    assert c.get("/api/workspace/content", params={**params, "path": "outside.md"}).status_code == 400
+    svc.set_session_work_dir(sid, str(second))
+    assert c.get("/api/workspace/content", params=params).status_code == 409
+    fresh = c.get("/api/workspace/scope", params=target).json()
+    assert c.get("/api/workspace/content", params={**params, "binding": fresh["binding"]}).json()["content"] == "new"
+
+
+def test_member_cannot_browse_an_admin_root_or_another_accounts_session(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+
+    from agentica_gateway import deps
+    from agentica_gateway.auth import Principal
+    from agentica_gateway.config import Settings
+    from agentica_gateway.routes import workspace
+    from agentica_gateway.services.agent_service import AgentService
+
+    monkeypatch.setattr(Settings, "workspace_path", property(lambda self: tmp_path))
+    service = AgentService(workspace_path=str(tmp_path))
+    monkeypatch.setattr(deps, "agent_service", service)
+    private = tmp_path / "users" / "alice" / "files"
+    private.mkdir(parents=True)
+    service.set_session_work_dir("admin-session", str(tmp_path), "admin")
+    app = FastAPI()
+    app.include_router(workspace.router)
+
+    @app.middleware("http")
+    async def member(request, call_next):
+        request.state.principal = Principal("alice", "session", "user")
+        return await call_next(request)
+
+    c = TestClient(app)
+    assert c.get("/api/workspace/scope", params={"session_id": "admin-session"}).status_code == 404
+    assert c.get("/api/workspace/files", params={"root": str(tmp_path)}).status_code == 403
+    target = {"session_id": "new-session"}
+    assert c.post("/api/workspace/scope", json={**target, "root": str(tmp_path)}).status_code == 403
+    bound = c.post("/api/workspace/scope", json={**target, "root": str(private)})
+    assert bound.status_code == 200
+    assert c.get("/api/workspace/files", params={**target, "binding": bound.json()["binding"]}).json()["entries"] == []
+
+
 def test_any_file_type_uploads_unchanged(client):
     """The panel is the user's own directory: no extension is refused, bytes land untouched."""
     c, tmp_path = client

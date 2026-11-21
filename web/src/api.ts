@@ -279,17 +279,36 @@ export const fetchTraceTurnPage = (sessionId: string, turns: number, before?: nu
       + (includeTurn != null ? `&include_turn=${includeTurn}` : ""),
   );
 
-export function workspaceContentUrl(root: string, path: string, download = false) {
-  const q = new URLSearchParams({ root, path });
+export type WorkspaceScope = { root: string; session_id: string; binding: string };
+export type WorkspaceTarget = string | WorkspaceScope;
+
+function workspaceParams(target: WorkspaceTarget): Record<string, string> {
+  return typeof target === "string" ? { root: target } : { session_id: target.session_id, binding: target.binding };
+}
+
+const workspaceScopeFlights = new Map<string, Promise<ApiResult<WorkspaceScope>>>();
+export function fetchWorkspaceScope(session_id: string) {
+  const existing = workspaceScopeFlights.get(session_id);
+  if (existing) return existing;
+  const flight = request<WorkspaceScope>(`/api/workspace/scope?${new URLSearchParams({ session_id })}`)
+    .finally(() => { workspaceScopeFlights.delete(session_id); });
+  workspaceScopeFlights.set(session_id, flight);
+  return flight;
+}
+export const bindWorkspaceDraft = (session_id: string, root: string) =>
+  postJson<WorkspaceScope>("/api/workspace/scope", { session_id, root });
+
+export function workspaceContentUrl(target: WorkspaceTarget, path: string, download = false) {
+  const q = new URLSearchParams({ ...workspaceParams(target), path });
   if (download) q.set("download", "1");
   return `/api/workspace/content?${q.toString()}`;
 }
 
-export const fetchWorkspaceFiles = (root: string, path: string) =>
-  request(`/api/workspace/files?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`);
+export const fetchWorkspaceFiles = (target: WorkspaceTarget, path: string, signal?: AbortSignal) =>
+  request(`/api/workspace/files?${new URLSearchParams({ ...workspaceParams(target), path })}`, { signal });
 
-export const fetchWorkspacePreview = (root: string, path: string) =>
-  request(`/api/workspace/content?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}&preview=1`);
+export const fetchWorkspacePreview = (target: WorkspaceTarget, path: string) =>
+  request(`${workspaceContentUrl(target, path)}&preview=1`);
 
 export type TerminalInfo = {
   id: string; session_id: string; cwd: string; shell: string;
@@ -301,13 +320,15 @@ export const createTerminal = (body: { cwd: string; session_id: string; cols?: n
 export const closeTerminal = (id: string) =>
   request(`/api/terminals/${encodeURIComponent(id)}`, { method: "DELETE" });
 
-export const statWorkspaceFiles = (root: string, paths: string[]) =>
-  postJson<{ existing: string[] }>("/api/workspace/stat", { root, paths });
+export const statWorkspaceFiles = (target: WorkspaceTarget, paths: string[]) =>
+  postJson<{ existing: string[] }>("/api/workspace/stat", { ...workspaceParams(target), paths });
 
-export async function uploadWorkspaceFile(file: File, root: string, dir: string) {
+export async function uploadWorkspaceFile(file: File, target: WorkspaceTarget, dir: string) {
   const fd = new FormData();
   fd.append("file", file);
-  fd.append("root", root);
+  for (const [key, value] of Object.entries(workspaceParams(target))) {
+    if (value !== undefined) fd.append(key, value);
+  }
   fd.append("path", dir);
   return request("/api/workspace/upload", {
     method: "POST",

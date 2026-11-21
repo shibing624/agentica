@@ -20,6 +20,7 @@ from agentica.git.worktree import WorktreeError
 
 from .. import deps
 from ..services import live_turn
+from ..workspace_files import WorkspacePathError, authorized_workspace_root
 
 router = APIRouter(prefix="/api/worktrees")
 
@@ -32,6 +33,13 @@ def _binder(request: Request, session_id: str) -> tuple[WorktreeBinder, object, 
     service = deps.get_agent_service()
     owner = _account(request)
     work_dir = service.get_session_work_dir(session_id, owner)
+    if not request.state.principal.is_admin:
+        try:
+            from ..config import settings
+
+            authorized_workspace_root(work_dir, settings.workspace_path, owner, False)
+        except WorkspacePathError as err:
+            raise HTTPException(status_code=err.status, detail=err.detail) from err
     binder = WorktreeBinder(agent_config={"work_dir": work_dir})
     return binder, service, owner
 
