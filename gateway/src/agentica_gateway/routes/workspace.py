@@ -17,7 +17,6 @@ from pydantic import BaseModel, Field
 from ..config import settings
 from ..services.uploads import save_upload
 from ..workspace_files import (
-    CONTENT_TYPES,
     MAX_READ_BYTES,
     TEXT_PREVIEW_BYTES,
     WorkspacePathError,
@@ -82,12 +81,11 @@ async def workspace_content(
     size = target.stat().st_size
     if size > MAX_READ_BYTES and not download:
         raise HTTPException(status_code=413, detail="file too large to preview")
-    media = content_type_for(name, inline=not download)
-    headers = {}
-    if download:
-        headers["Content-Disposition"] = f'attachment; filename="{name}"'
-        media = CONTENT_TYPES.get(Path(name).suffix.lower(), "application/octet-stream")
-    return FileResponse(target, media_type=media, headers=headers, filename=name if download else None)
+    return FileResponse(
+        target,
+        media_type=content_type_for(name, inline=not download),
+        filename=name if download else None,
+    )
 
 
 @router.post("/api/workspace/stat")

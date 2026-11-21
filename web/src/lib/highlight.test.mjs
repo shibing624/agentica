@@ -78,6 +78,23 @@ test("bare absolute paths are extracted regardless of their top-level directory"
   assert.deepEqual(FP.extractFilePaths("ratio 1/2 and a/b"), []);
 });
 
+test("file previews keep Windows drive roots and exact filenames", () => {
+  assert.deepEqual(FP.splitExternalTarget("C:/report.pdf", "/tmp/workspace"), {
+    targetRoot: "C:/", targetRel: "report.pdf", absPath: "C:/report.pdf", isExternal: true,
+  });
+  assert.deepEqual(FP.splitExternalTarget("/tmp/ report.md ", "/tmp/workspace"), {
+    targetRoot: "/tmp", targetRel: " report.md ", absPath: "/tmp/ report.md ", isExternal: true,
+  });
+  assert.equal(FP.isAbsOrHomePath("C:/docs/report.md"), true);
+  assert.equal(FP.isAbsOrHomePath("C:report.md"), false);
+  assert.equal(FP.normalizeMentionedPath("C:/docs/report.md", "C:/work"), "C:/docs/report.md");
+  assert.equal(FP.normalizeMentionedPath("C:/work/report.md", "C:/work"), "report.md");
+});
+
+test("a relative file in a document at the gateway filesystem root stays rooted", () => {
+  assert.equal(FP.splitExternalTarget("sibling.md", "/").absPath, "/sibling.md");
+});
+
 test("splitHighlightedHtmlLines wraps each line and balances multiline hljs spans across lines", () => {
   const py = 'def demo():\n    """multi-line\n    docstring"""\n    return {"a": 1}';
   const rawHtml = H.highlightToHtml(py, "python", true);

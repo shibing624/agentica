@@ -1,10 +1,12 @@
-import { memo, useMemo, type ReactNode } from "react";
-import Markdown from "react-markdown";
+import { memo, useMemo, type ComponentProps, type MouseEvent, type ReactNode } from "react";
+import Markdown, { type ExtraProps } from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { MarkdownCode } from "./CodeFrame";
 import { PreviewableImage } from "./ImageLightbox";
-import { GFM_PLUGINS, markdownUrlTransform, localFileLinkTarget, openLocalFile } from "../lib/markdownPlugins";
+import { workspaceContentUrl } from "../api";
+import { classifyPreviewTarget, splitExternalTarget } from "../lib/filePath";
+import { GFM_PLUGINS, localMarkdownPath, markdownUrlTransform } from "../lib/markdownPlugins";
 
 /**
  * Frozen plugin / component maps so a per-frame stream bump does not remount
@@ -31,22 +33,25 @@ const STREAMING_COMPONENTS = {
   table: MdTable,
 };
 
-type MarkdownLinkProps = {
-  href?: string;
-  children?: ReactNode;
+type MarkdownAnchorProps = Pick<ComponentProps<"a">, "href" | "title" | "children">;
+
+type MarkdownLinkProps = MarkdownAnchorProps & {
+  localPath?: string;
   onOpenFile?: (path: string) => void;
 };
 
-export function MarkdownLink({ href, children, onOpenFile }: MarkdownLinkProps) {
-  if (typeof href !== "string" || href === "") return <a aria-disabled="true">{children}</a>;
-  const target = localFileLinkTarget(href);
-  if (!target) return <a href={href}>{children}</a>;
+export function MarkdownLink({ href, title, children, localPath, onOpenFile }: MarkdownLinkProps) {
+  if (localPath === undefined) return href ? <a href={href} title={title}>{children}</a> : <>{children}</>;
+  const { targetRoot, targetRel } = splitExternalTarget(localPath, "");
+  const preview = onOpenFile && classifyPreviewTarget(localPath) !== "unsupported"
+    ? (e: MouseEvent<HTMLAnchorElement>) => {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      onOpenFile(localPath);
+    }
+    : undefined;
   return (
-    <a
-      href={href}
-      data-open-file={target.path}
-      onClick={(e) => { e.preventDefault(); openLocalFile(target, onOpenFile); }}
-    >
+    <a href={workspaceContentUrl(targetRoot, targetRel, true)} title={title} download onClick={preview}>
       {children}
     </a>
   );
@@ -69,8 +74,8 @@ export const ChatMarkdown = memo(function ChatMarkdown({
   onOpenFile?: (path: string) => void;
 }) {
   const components = useMemo(() => {
-    const a = ({ href, children }: { href?: string; children?: ReactNode }) => (
-      <MarkdownLink href={href} onOpenFile={onOpenFile}>{children}</MarkdownLink>
+    const a = ({ node, ...props }: MarkdownAnchorProps & ExtraProps) => (
+      <MarkdownLink {...props} localPath={localMarkdownPath(node)} onOpenFile={onOpenFile} />
     );
     return streaming
       ? { ...STREAMING_COMPONENTS, a }

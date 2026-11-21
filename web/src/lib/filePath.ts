@@ -91,6 +91,7 @@ export function classifyPreviewTarget(name: string): PreviewTargetKind {
 }
 
 const URL_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
+const WINDOWS_DRIVE_ROOT = /^[A-Za-z]:\//;
 const MAX_PATH_LEN = 512;
 const FILE_ARG_KEYS = ["file_path", "path", "target_file", "file"];
 
@@ -103,19 +104,17 @@ export function parseLocalFileUrl(href: string): string | null {
   let url: URL;
   try { url = new URL(href); } catch { return null; }
   if (url.protocol !== "file:" && url.protocol !== "computer:") return null;
+  if (url.hostname && url.hostname !== "localhost") return null;
   let decoded: string;
   try { decoded = decodeURIComponent(url.pathname); } catch { return null; }
-  const drive = /^\/[A-Za-z]:/.test(decoded) ? decoded.slice(1) : decoded;
-  const host = url.hostname && url.hostname !== "localhost" ? url.hostname : "";
-  if (host) return `//${host}${drive}`;
-  if (drive.startsWith("/~/")) return `~${drive.slice(2)}`;
-  return drive;
+  if (!decoded.startsWith("/") || decoded.startsWith("//") || decoded.endsWith("/") || decoded.includes("\0")) return null;
+  const withoutSlash = decoded.slice(1);
+  return WINDOWS_DRIVE_ROOT.test(withoutSlash) || withoutSlash.startsWith("~/") ? withoutSlash : decoded;
 }
 
-/** True when `path` is an absolute path (`/a/b`) or a home-relative path (`~` / `~/a/b`). */
+/** Recognize absolute paths on the gateway, regardless of the browser's OS. */
 export function isAbsOrHomePath(path: string): boolean {
-  const s = path.trim();
-  return s.startsWith("/") || s === "~" || s.startsWith("~/");
+  return path.startsWith("/") || path === "~" || path.startsWith("~/") || WINDOWS_DRIVE_ROOT.test(path);
 }
 
 /**
@@ -129,24 +128,21 @@ export function splitExternalTarget(filePath: string, workspaceRoot: string): {
   absPath: string;
   isExternal: boolean;
 } {
-  const trimmed = filePath.trim();
-  const isExternal = isAbsOrHomePath(trimmed);
-  if (isExternal) {
-    const slash = trimmed.lastIndexOf("/");
-    const parent = slash > 0 ? trimmed.slice(0, slash) : (trimmed.startsWith("/") ? "/" : "~");
-    const name = slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
+  if (isAbsOrHomePath(filePath)) {
+    const slash = filePath.lastIndexOf("/");
+    const rootLength = WINDOWS_DRIVE_ROOT.test(filePath) ? 3 : 1;
     return {
-      targetRoot: parent,
-      targetRel: name,
-      absPath: trimmed,
+      targetRoot: filePath.slice(0, Math.max(slash, rootLength)),
+      targetRel: filePath.slice(slash + 1),
+      absPath: filePath,
       isExternal: true,
     };
   }
   const rootClean = workspaceRoot.replace(/\/+$/, "");
   return {
     targetRoot: workspaceRoot,
-    targetRel: trimmed,
-    absPath: rootClean ? `${rootClean}/${trimmed}` : trimmed,
+    targetRel: filePath,
+    absPath: workspaceRoot ? `${rootClean}/${filePath}` : filePath,
     isExternal: false,
   };
 }
@@ -210,7 +206,7 @@ export function toWorkspaceRelative(path: string, workspace: string | null): str
   if (s.length === 0 || s.length > MAX_PATH_LEN) return null;
   if (s.startsWith("~")) return null;
   const ws = workspace && workspace.length > 0 ? workspace.replace(/\/+$/, "") : null;
-  const absolute = s.startsWith("/");
+  const absolute = s.startsWith("/") || WINDOWS_DRIVE_ROOT.test(s);
   let rel = s;
   if (absolute) {
     if (ws === null || !s.startsWith(ws + "/")) return null;
@@ -240,8 +236,8 @@ export function normalizeMentionedPath(path: string, workspace: string | null): 
   if (rel !== null) return rel;
   const s = path.trim();
   if (s.length === 0 || s.length > MAX_PATH_LEN || !isAbsOrHomePath(s)) return null;
-  const isHome = s === "~" || s.startsWith("~/");
-  const body = isHome ? s.slice(1) : s;
+  const prefix = s.startsWith("~") ? "~/" : WINDOWS_DRIVE_ROOT.test(s) ? s.slice(0, 3) : "/";
+  const body = s.slice(prefix.length);
   const stack: string[] = [];
   for (const seg of body.split("/")) {
     if (seg === "" || seg === ".") continue;
@@ -249,5 +245,5 @@ export function normalizeMentionedPath(path: string, workspace: string | null): 
     stack.push(seg);
   }
   if (stack.length === 0) return null;
-  return isHome ? `~/${stack.join("/")}` : `/${stack.join("/")}`;
+  return prefix + stack.join("/");
 }

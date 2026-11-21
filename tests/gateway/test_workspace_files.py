@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 """Workspace file browser: containment, list, preview cap, upload."""
+from urllib.parse import quote
+
 import pytest
 
 pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
@@ -122,6 +124,19 @@ def test_http_list_preview_upload_and_escape(client):
     st = c.post("/api/workspace/stat", json={"root": str(root), "paths": ["note.md", "new.py", "nope"]})
     assert st.status_code == 200
     assert set(st.json()["existing"]) == {"note.md", "new.py"}
+
+
+def test_download_preserves_the_unicode_attachment_name(client):
+    c, root = client
+    name = "源包 初稿.tar.gz"
+    payload = b"archive bytes"
+    (root / name).write_bytes(payload)
+
+    response = c.get("/api/workspace/content", params={"root": str(root), "path": name, "download": 1})
+
+    assert response.status_code == 200
+    assert response.content == payload
+    assert response.headers["content-disposition"] == f"attachment; filename*=utf-8''{quote(name)}"
 
 
 def test_any_file_type_uploads_unchanged(client):

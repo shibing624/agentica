@@ -40,16 +40,6 @@ function isAppUrl(url, origin) {
   }
 }
 
-/**
- * An empty href resolves to the document's own URL. That is a click on a dead
- * link, not a route change: letting it through would reload the whole SPA.
- */
-function shouldAllowAppNavigation(url, origin, currentUrl) {
-  if (!isAppUrl(url, origin)) return false;
-  if (!currentUrl) return true;
-  return new URL(url).href !== new URL(currentUrl).href;
-}
-
 /** Reads a port out of the shell's own memory file; null when absent/invalid. */
 function parsePort(content) {
   const m = /^(\d{1,5})\s*$/.exec(String(content).trim());
@@ -123,7 +113,6 @@ module.exports = {
   HEALTHY_AFTER_MS,
   restartDelayMs,
   isAppUrl,
-  shouldAllowAppNavigation,
   parsePort,
   iconPath,
 };

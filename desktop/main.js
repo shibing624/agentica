@@ -36,7 +36,7 @@ const { buildDockMenuTemplate } = require("./dock-menu");
 const { startUpdates } = require("./updater");
 const { keepVisiblePosition, readWindowState, writeWindowState } = require("./window-state");
 const {
-  BROWSER_PARTITION, HEALTHY_AFTER_MS, MAX_GATEWAY_RESTARTS, hardenWebview, iconPath, isAppUrl, isBrowsableUrl, restartDelayMs, shouldAllowAppNavigation,
+  BROWSER_PARTITION, HEALTHY_AFTER_MS, MAX_GATEWAY_RESTARTS, hardenWebview, iconPath, isAppUrl, isBrowsableUrl, restartDelayMs,
 } = require("./util");
 
 const log = (msg) => console.log(`[desktop] ${msg}`);
@@ -159,9 +159,10 @@ function createWindow() {
     return { action: "deny" };
   });
   win.webContents.on("will-navigate", (event, url) => {
-    if (shouldAllowAppNavigation(url, origin, win.webContents.getURL())) return;
-    event.preventDefault();
-    if (!isAppUrl(url, origin)) void shell.openExternal(url);
+    if (!isAppUrl(url, origin)) {
+      event.preventDefault();
+      void shell.openExternal(url);
+    }
   });
 
   // A renderer crash leaves a white rectangle with no way back: there is no

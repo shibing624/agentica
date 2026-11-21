@@ -311,15 +311,3 @@ test("a browser-tab webview is stripped to a plain sandboxed web page, and only 
   }
   assert.equal(isBrowsableUrl("http://localhost:3000/a?b=1"), true);
 });
-
-test("the main window refuses a full navigation back to its own current URL", () => {
-  const { shouldAllowAppNavigation } = require("./util");
-  const origin = "http://127.0.0.1:8765";
-  const current = `${origin}/chat`;
-  assert.equal(shouldAllowAppNavigation(current, origin, current), false);
-  assert.equal(shouldAllowAppNavigation(`${origin}/chat?x=1`, origin, current), true);
-  assert.equal(shouldAllowAppNavigation(`${origin}/settings`, origin, current), true);
-  assert.equal(shouldAllowAppNavigation("file:///Users/xuming/a.pdf", origin, current), false);
-  assert.equal(shouldAllowAppNavigation("https://example.com", origin, current), false);
-  assert.equal(shouldAllowAppNavigation("http://127.0.0.1:9999/chat", origin, current), false);
-});

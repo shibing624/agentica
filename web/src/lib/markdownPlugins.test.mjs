@@ -19,7 +19,6 @@ const vite = await createServer({
   server: { middlewareMode: true },
 });
 const { ChatMarkdown, MarkdownLink } = await vite.ssrLoadModule("/src/components/ChatMarkdown.tsx");
-const M = await vite.ssrLoadModule("/src/lib/markdownPlugins.ts");
 after(() => vite.close());
 
 function render(text, streaming) {
@@ -36,103 +35,59 @@ test("numeric ranges do not turn into strikethrough in chat markdown", () => {
   }
 });
 
-const PDF_URL = "file:///Users/xuming/Documents/Codes/memhub/exp/memhub_exp/paper/acl_industry/arxiv_final.pdf";
-const PDF_PATH = "/Users/xuming/Documents/Codes/memhub/exp/memhub_exp/paper/acl_industry/arxiv_final.pdf";
-const TGZ_URL = "file:///Users/xuming/Documents/Codes/memhub/tmp/arxiv_memory_preprint_source.tar.gz";
-const TGZ_PATH = "/Users/xuming/Documents/Codes/memhub/tmp/arxiv_memory_preprint_source.tar.gz";
-
-test("local file URLs become gateway content URLs with a local_file marker", () => {
-  const href = M.markdownUrlTransform(PDF_URL);
-  const url = new URL(href, "http://app.local");
-  assert.equal(url.pathname, "/api/workspace/content");
-  assert.equal(url.searchParams.get("local_file"), "1");
-  assert.equal(url.searchParams.get("root"), "/Users/xuming/Documents/Codes/memhub/exp/memhub_exp/paper/acl_industry");
-  assert.equal(url.searchParams.get("path"), "arxiv_final.pdf");
-  assert.equal(url.searchParams.get("download"), null);
-
-  const encoded = M.markdownUrlTransform("computer:///Users/xuming/tmp/a%20b.md");
-  const encodedUrl = new URL(encoded, "http://app.local");
-  assert.equal(encodedUrl.searchParams.get("root"), "/Users/xuming/tmp");
-  assert.equal(encodedUrl.searchParams.get("path"), "a b.md");
-  assert.equal(encodedUrl.searchParams.get("download"), null);
-
-  const windows = M.markdownUrlTransform("file:///C:/Users/xuming/a.pdf");
-  const windowsUrl = new URL(windows, "http://app.local");
-  assert.equal(windowsUrl.searchParams.get("root"), "C:/Users/xuming");
-  assert.equal(windowsUrl.searchParams.get("path"), "a.pdf");
-
-  const archive = new URL(M.markdownUrlTransform(TGZ_URL), "http://app.local");
-  assert.equal(archive.searchParams.get("download"), "1");
-  assert.equal(M.markdownUrlTransform("https://example.com/a?b=1"), "https://example.com/a?b=1");
-  assert.equal(M.markdownUrlTransform("javascript:alert(1)"), "");
-});
-
-test("a generated local-file href resolves back to its absolute path and previewability", () => {
-  assert.deepEqual(M.localFileLinkTarget(M.markdownUrlTransform(PDF_URL)), { path: PDF_PATH, previewable: true });
-  assert.deepEqual(M.localFileLinkTarget(M.markdownUrlTransform(TGZ_URL)), { path: TGZ_PATH, previewable: false });
-  assert.deepEqual(
-    M.localFileLinkTarget(M.markdownUrlTransform("computer:///Users/xuming/tmp/a%20b.md")),
-    { path: "/Users/xuming/tmp/a b.md", previewable: true },
-  );
-  assert.deepEqual(
-    M.localFileLinkTarget(M.markdownUrlTransform("file:///C:/Users/xuming/a.pdf")),
-    { path: "C:/Users/xuming/a.pdf", previewable: true },
-  );
-  assert.equal(M.localFileLinkTarget("/api/workspace/content?root=/tmp&path=a.pdf"), null);
-  assert.equal(M.localFileLinkTarget("https://example.com"), null);
-  assert.equal(M.localFileLinkTarget(""), null);
-});
-
-test("local file links open by path; unsupported files use the OS default app", () => {
-  const previewed = [];
-  const opened = [];
-  const external = (path, app) => { opened.push([path, app]); return Promise.resolve({ ok: true }); };
-  M.openLocalFile({ path: PDF_PATH, previewable: true }, (p) => previewed.push(p), external);
-  assert.deepEqual(previewed, [PDF_PATH]);
-  assert.deepEqual(opened, []);
-
-  M.openLocalFile({ path: TGZ_PATH, previewable: false }, (p) => previewed.push(p), external);
-  assert.deepEqual(previewed, [PDF_PATH]);
-  assert.deepEqual(opened, [[TGZ_PATH, "finder"]]);
-
-  M.openLocalFile({ path: PDF_PATH, previewable: true }, undefined, external);
-  assert.deepEqual(opened, [[TGZ_PATH, "finder"], [PDF_PATH, "finder"]]);
-});
-
-test("chat markdown never keeps an empty or file-scheme href for local files", () => {
+test("local chat links emit an exact workspace download URL in both rendering modes", () => {
+  const cases = [
+    ["file:///tmp/paper.pdf", "/tmp", "paper.pdf"],
+    ["computer:///tmp/a%20b.md", "/tmp", "a b.md"],
+    ["file:///C:/report.pdf", "C:/", "report.pdf"],
+    ["file://localhost/tmp/source.tar.gz", "/tmp", "source.tar.gz"],
+  ];
   for (const streaming of [true, false]) {
-    const html = render(`[新版 arxiv_final.pdf](${PDF_URL})`, streaming);
-    assert.equal(html.includes('href=""'), false, `streaming=${streaming} must not render href=""`);
-    assert.equal(html.includes('href="file:'), false, `streaming=${streaming} must not render a raw file URL`);
-    assert.match(html, /<a [^>]*href="\/api\/workspace\/content\?[^"]*local_file=1"/);
-    assert.ok(html.includes(`data-open-file="${PDF_PATH}"`), html);
+    for (const [fileUrl, root, path] of cases) {
+      const html = render(`[local](${fileUrl} "Artifact")`, streaming);
+      const href = html.match(/<a [^>]*href="([^"]+)"/)?.[1]?.replaceAll("&amp;", "&");
+      assert.equal(href, `/api/workspace/content?${new URLSearchParams({ root, path, download: "1" })}`, html);
+      assert.match(html, /\bdownload=""/);
+      assert.match(html, /\btitle="Artifact"/);
+    }
   }
 });
 
-test("a markdown link click calls the preview callback with the decoded path and prevents navigation", () => {
+test("only a plain click on a previewable file is intercepted", () => {
   const opened = [];
-  const href = M.markdownUrlTransform(PDF_URL);
-  const el = MarkdownLink({ href, children: "pdf", onOpenFile: (p) => opened.push(p) });
-  assert.equal(el.type, "a");
-  assert.equal(el.props.href, href);
-  assert.equal(el.props["data-open-file"], PDF_PATH);
+  const onOpenFile = (path) => opened.push(path);
+  const el = MarkdownLink({ localPath: "/tmp/a b.md", children: "notes", onOpenFile });
+  assert.equal(typeof el.props.onClick, "function");
   let prevented = false;
-  el.props.onClick({ preventDefault() { prevented = true; } });
+  const click = { button: 0, preventDefault() { prevented = true; } };
+  el.props.onClick({ ...click, metaKey: true });
+  assert.equal(prevented, false);
+  assert.deepEqual(opened, []);
+  el.props.onClick(click);
   assert.equal(prevented, true);
-  assert.deepEqual(opened, [PDF_PATH]);
+  assert.deepEqual(opened, ["/tmp/a b.md"]);
+
+  const archive = MarkdownLink({ localPath: "/tmp/source.tar.gz", children: "archive", onOpenFile });
+  assert.equal(archive.props.download, true);
+  assert.equal(archive.props.onClick, undefined);
+  const noPanel = MarkdownLink({ localPath: "/tmp/paper.pdf", children: "paper" });
+  assert.equal(noPanel.props.download, true);
+  assert.equal(noPanel.props.onClick, undefined);
 });
 
-test("sanitized empty hrefs and ordinary web links do not navigate the whole page", () => {
-  const empty = MarkdownLink({ href: "", children: "unsafe" });
-  assert.equal(empty.type, "a");
-  assert.equal(empty.props.href, undefined);
-  assert.ok(empty.props["aria-disabled"]);
-  assert.equal(empty.props.onClick, undefined);
+test("ordinary web links never become local actions based on their query string", () => {
+  const href = "https://example.com/api/workspace/content?root=/tmp&path=source.tar.gz&local_file=1";
+  const link = MarkdownLink({ href, children: "web" });
+  assert.equal(link.props.href, href);
+  assert.equal(link.props.onClick, undefined);
+  assert.equal(link.props.download, undefined);
+});
 
-  const web = MarkdownLink({ href: "https://example.com/a", children: "web" });
-  assert.equal(web.type, "a");
-  assert.equal(web.props.href, "https://example.com/a");
-  assert.equal(web.props.onClick, undefined);
+test("local image URLs and nonlocal file hosts do not generate workspace requests", () => {
+  for (const streaming of [true, false]) {
+    const html = render("![image](file:///tmp/figure.png) [network](file://remote.example/notes.md)", streaming);
+    assert.doesNotMatch(html, /(?:href|src)="(?:file:|\/api\/workspace\/content|")/);
+  }
 });
 
 test("double tildes still render strikethrough in chat markdown", () => {

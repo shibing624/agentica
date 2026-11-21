@@ -6,7 +6,7 @@
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import Markdown from "react-markdown";
+import Markdown, { type ExtraProps } from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
 import rehypeKatex from "rehype-katex";
@@ -16,7 +16,7 @@ import { useStrings } from "../i18n";
 import { fmtFileSize, formatDateTime } from "../lib/format";
 import { languageFromFilename, HIGHLIGHT_LIMIT } from "../lib/highlight";
 import { classifyPreviewTarget, joinWorkspacePath, splitExternalTarget } from "../lib/filePath";
-import { GFM_PLUGINS, markdownUrlTransform, localFileLinkTarget } from "../lib/markdownPlugins";
+import { GFM_PLUGINS, localMarkdownPath, markdownUrlTransform } from "../lib/markdownPlugins";
 import { MarkdownLink } from "../components/ChatMarkdown";
 import { askConfirm, showToast } from "../store";
 import { FileTypeIcon, IconChevronDown, IconCopy, IconFinder, IconFolder, IconRefresh, IconTerminal, IconUpload } from "../icons";
@@ -59,43 +59,43 @@ function resolveRelative(baseDir: string, ref: string): string {
  *  types, and fresh ones on every app-state tick (each keystroke in the
  *  composer) remounted every image and link, which reloaded and jumped. */
 const MarkdownDoc = memo(function MarkdownDoc({
-  root, path: docPath, content, onOpenFile,
+  root, path: docPath, content, isExternal, onOpenFile,
 }: {
   root: string;
   path: string;
   content: string;
+  isExternal: boolean;
   onOpenFile: (path: string) => void;
 }) {
   const components = useMemo(() => ({
-    img: ({ src: href, alt }: { src?: unknown; alt?: string }) => {
-      if (typeof href !== "string" || href === "") return <img alt={alt || ""} />;
-      if (localFileLinkTarget(href)) return <img src={href} alt={alt || ""} />;
+    img: ({ src, alt }: { src?: string; alt?: string }) => {
+      if (!src) return <img alt={alt || ""} />;
       return (
         <img
-          src={EXTERNAL_REF_RE.test(href)
-            ? href
-            : api.workspaceContentUrl(root, resolveRelative(dirOf(docPath), href))}
+          src={EXTERNAL_REF_RE.test(src)
+            ? src
+            : api.workspaceContentUrl(root, resolveRelative(dirOf(docPath), src))}
           alt={alt || ""}
         />
       );
     },
-    a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
-      if (typeof href !== "string" || href === "") {
-        return <MarkdownLink href={href}>{children}</MarkdownLink>;
+    a: ({ href, title, children, node }: { href?: string; title?: string; children?: React.ReactNode } & ExtraProps) => {
+      const localPath = localMarkdownPath(node);
+      if (localPath !== undefined) {
+        return <MarkdownLink localPath={localPath} title={title} onOpenFile={onOpenFile}>{children}</MarkdownLink>;
       }
-      if (localFileLinkTarget(href)) {
-        return <MarkdownLink href={href} onOpenFile={onOpenFile}>{children}</MarkdownLink>;
-      }
+      if (!href) return <>{children}</>;
       if (href.startsWith("#") || EXTERNAL_REF_RE.test(href)) {
-        return <a href={href} target={EXTERNAL_REF_RE.test(href) ? "_blank" : undefined} rel="noreferrer">{children}</a>;
+        return <a href={href} title={title} target={EXTERNAL_REF_RE.test(href) ? "_blank" : undefined} rel="noreferrer">{children}</a>;
       }
       const target = resolveRelative(dirOf(docPath), href);
-      return <a href={api.workspaceContentUrl(root, target)} onClick={(e) => { e.preventDefault(); onOpenFile(target); }}>{children}</a>;
+      const openPath = isExternal ? splitExternalTarget(target, root).absPath : target;
+      return <a href={api.workspaceContentUrl(root, target)} title={title} onClick={(e) => { e.preventDefault(); onOpenFile(openPath); }}>{children}</a>;
     },
     table: ({ children }: { children?: React.ReactNode }) => <div className="md-table"><table>{children}</table></div>,
     pre: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
     code: MarkdownCode,
-  }), [root, docPath, onOpenFile]);
+  }), [root, docPath, isExternal, onOpenFile]);
   return (
     <div className="md-doc">
       <Markdown remarkPlugins={MD_REMARK} rehypePlugins={MD_REHYPE} components={components} urlTransform={markdownUrlTransform}>{content}</Markdown>
@@ -220,7 +220,7 @@ export function FilePreview({
           <iframe srcDoc={preview.content} title={preview.name} sandbox="allow-scripts" />
         )}
         {view === "markdown" && (
-          <MarkdownDoc root={targetRoot} path={targetRel} content={preview.content || ""} onOpenFile={onOpenFile} />
+          <MarkdownDoc root={targetRoot} path={targetRel} content={preview.content || ""} isExternal={isExternal} onOpenFile={onOpenFile} />
         )}
         {view === "code" && (
           <CodeFrame
