@@ -19,7 +19,7 @@ def git_repo_template(tmp_path_factory):
     _git(root, "config", "user.name", "T")
     (root / "a.py").write_text("print(1)\n")
     _git(root, "add", "a.py")
-    _git(root, "commit", "-q", "-m", "first")
+    _git(root, "-c", "maintenance.auto=false", "commit", "-q", "-m", "first")
     return root
 
 
