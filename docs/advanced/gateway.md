@@ -93,7 +93,7 @@ agentica-gateway --port 8890         # 指定监听端口
 镜像内已编译好 Web UI，运行时不需要 Node。数据保存在 named volume，当前目录挂载到容器 `/workspace`：
 
 ```bash
-cp .env.docker.example .env   # 填入 OPENAI_API_KEY 等模型密钥
+cp .env.example .env   # 填入 OPENAI_API_KEY 等模型密钥
 docker compose up -d --build
 ```
 

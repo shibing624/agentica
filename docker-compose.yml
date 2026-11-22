@@ -1,7 +1,7 @@
 # Agentica Gateway (self-hosted)
 #
 # Usage:
-#   cp .env.docker.example .env   # fill OPENAI_API_KEY
+#   cp .env.example .env   # fill OPENAI_API_KEY
 #   docker compose up -d --build
 #
 # The Web UI is built in the image (Node stage) and served by agentica-gateway.
