@@ -83,6 +83,20 @@ test("ordinary web links never become local actions based on their query string"
   assert.equal(link.props.download, undefined);
 });
 
+test("chat file menu is exposed only for structured local links and respects host access", () => {
+  const text = "[report](file:///repo/report.pdf) [private](file:///elsewhere/readme.md) [website](https://example.com/report.pdf)";
+  const markup = (canOpenHost) => renderToStaticMarkup(React.createElement(ChatMarkdown, {
+    text, onOpenFile() {}, fileContext: { sessionId: "test", workspace: "/repo", canOpenHost, platform: "darwin" },
+  }));
+  const admin = markup(true);
+  assert.equal((admin.match(/aria-haspopup="menu"/g) || []).length, 2);
+  assert.match(admin, /<a [^>]*href="https:\/\/example\.com\/report\.pdf">website<\/a>/);
+  const member = markup(false);
+  assert.equal((member.match(/aria-haspopup="menu"/g) || []).length, 1);
+  assert.match(member, /<button [^>]*aria-haspopup="menu"[^>]*>.*<\/svg>report<\/button> private /);
+  assert.doesNotMatch(member, /root=|%2Felsewhere/);
+});
+
 test("local image URLs and nonlocal file hosts do not generate workspace requests", () => {
   for (const streaming of [true, false]) {
     const html = render("![image](file:///tmp/figure.png) [network](file://remote.example/notes.md)", streaming);

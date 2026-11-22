@@ -4,6 +4,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { MarkdownCode } from "./CodeFrame";
 import { PreviewableImage } from "./ImageLightbox";
+import { ChatFileLink, type ChatFileContext } from "./ChatFileLink";
 import { workspaceContentUrl } from "../api";
 import { classifyPreviewTarget, splitExternalTarget } from "../lib/filePath";
 import { GFM_PLUGINS, localMarkdownPath, markdownUrlTransform } from "../lib/markdownPlugins";
@@ -38,10 +39,12 @@ type MarkdownAnchorProps = Pick<ComponentProps<"a">, "href" | "title" | "childre
 type MarkdownLinkProps = MarkdownAnchorProps & {
   localPath?: string;
   onOpenFile?: (path: string) => void;
+  fileContext?: ChatFileContext;
 };
 
-export function MarkdownLink({ href, title, children, localPath, onOpenFile }: MarkdownLinkProps) {
+export function MarkdownLink({ href, title, children, localPath, onOpenFile, fileContext }: MarkdownLinkProps) {
   if (localPath === undefined) return href ? <a href={href} title={title}>{children}</a> : <>{children}</>;
+  if (fileContext) return <ChatFileLink path={localPath} context={fileContext} title={title} onOpenFile={onOpenFile}>{children}</ChatFileLink>;
   const { targetRoot, targetRel } = splitExternalTarget(localPath, "");
   const preview = onOpenFile && classifyPreviewTarget(localPath) !== "unsupported"
     ? (e: MouseEvent<HTMLAnchorElement>) => {
@@ -68,19 +71,21 @@ export const ChatMarkdown = memo(function ChatMarkdown({
   text,
   streaming = false,
   onOpenFile,
+  fileContext,
 }: {
   text: string;
   streaming?: boolean;
   onOpenFile?: (path: string) => void;
+  fileContext?: ChatFileContext;
 }) {
   const components = useMemo(() => {
     const a = ({ node, ...props }: MarkdownAnchorProps & ExtraProps) => (
-      <MarkdownLink {...props} localPath={localMarkdownPath(node)} onOpenFile={onOpenFile} />
+      <MarkdownLink {...props} localPath={localMarkdownPath(node)} onOpenFile={onOpenFile} fileContext={fileContext} />
     );
     return streaming
       ? { ...STREAMING_COMPONENTS, a }
       : { ...SETTLED_COMPONENTS, a };
-  }, [streaming, onOpenFile]);
+  }, [streaming, onOpenFile, fileContext]);
   return (
     <Markdown
       remarkPlugins={streaming ? STREAM_REMARK : SETTLED_REMARK}

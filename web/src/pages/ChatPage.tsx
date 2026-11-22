@@ -10,6 +10,7 @@ import { CommandMenu, ComposerPicker, invocableSkills, slashQuery, type PickerGr
 import { flatItems, plusMenuGroups, slashMenuGroups, type MenuItem } from "../lib/composerCommands";
 import { CollapsibleUserText, FeedbackDialog, SkillTurn } from "../components/MessageExtras";
 import { TurnUsagePanel } from "../components/TurnUsagePanel";
+import type { ChatFileContext } from "../components/ChatFileLink";
 import { TodoDock } from "../components/TaskCard";
 import { AutomatedNotice, ScheduledRunCard } from "../components/AutomatedNotice";
 import { dockTodos } from "../lib/workActivity";
@@ -451,6 +452,9 @@ export function ChatPage() {
   const ctxPct = sessionRingPercent(s.curSess, cur);
   const workspace = cur?.dir || s.pendingNewChatDir || s.serverDir || "";
   const files = useFilesPanel(s.curSess, workspace);
+  const fileContext = useMemo<ChatFileContext | undefined>(() => s.curSess ? {
+    sessionId: s.curSess, workspace, canOpenHost: s.accountRole === "admin", platform: s.serverPlatform,
+  } : undefined, [s.curSess, workspace, s.accountRole, s.serverPlatform]);
   useEffect(() => { setCtxOpen(false); setTitleEditing(false); }, [s.curSess]);
   // This page is where the session was left; reopening it comes back here.
   useEffect(() => {
@@ -587,6 +591,7 @@ export function ChatPage() {
                       <MessageView key={keyOfMsg(m)} idx={i} m={m} sessionId={s.curSess} workspace={workspace}
                         turn={(cur.olderTurns || 0) + turnOf(cur.msgs, i)}
                         onOpenFile={files.browsePath} onOpenReview={files.openReview} onOpenSkill={files.openSkill}
+                        fileContext={fileContext}
                         live={isLiveMsg}
                         pendingToolCallId={pendingToolCallId} />
                     );
@@ -1087,7 +1092,7 @@ function SearchJump({ sessionId, msgCount, areaRef, onLeaveFollow }: {
 }
 
 /** `compact · compacted N -> M messages`; opens to the rendered notes. */
-function CompactCard({ c, onOpenFile }: { c: NonNullable<ChatMsg["compact"]>; onOpenFile?: (path: string) => void }) {
+function CompactCard({ c, onOpenFile, fileContext }: { c: NonNullable<ChatMsg["compact"]>; onOpenFile?: (path: string) => void; fileContext?: ChatFileContext }) {
   const S = useStrings();
   const [open, setOpen] = useState(false);
   if (c.pending) {
@@ -1145,7 +1150,7 @@ function CompactCard({ c, onOpenFile }: { c: NonNullable<ChatMsg["compact"]>; on
         ? (
           <div className="compact-body">
             <Suspense fallback={<pre className="markdown-fallback">{c.notes}</pre>}>
-              <ChatMarkdown text={c.notes} streaming={false} onOpenFile={onOpenFile} />
+              <ChatMarkdown text={c.notes} streaming={false} onOpenFile={onOpenFile} fileContext={fileContext} />
             </Suspense>
           </div>
         )
@@ -1165,10 +1170,11 @@ function turnOf(msgs: ChatMsg[], idx: number): number {
   return Math.max(1, n);
 }
 
-function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenReview, onOpenSkill, live, pendingToolCallId }: {
+function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenReview, onOpenSkill, live, pendingToolCallId, fileContext }: {
   idx: number; m: ChatMsg; sessionId: string | null; workspace: string; turn: number; onOpenFile: (path: string) => void;
   onOpenReview: (turn: number, files: FileEdits[], path: string) => void;
   onOpenSkill: (name: string) => void; live?: boolean; pendingToolCallId?: string;
+  fileContext?: ChatFileContext;
 }) {
   const S = useStrings();
   const skill = m.role === "user"
@@ -1193,7 +1199,7 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
   if (m.role === "assistant" && m.compact) {
     return (
       <div id={"msg-" + idx} className="m m-a">
-        <div className="msg-stack"><CompactCard c={m.compact} onOpenFile={onOpenFile} /></div>
+        <div className="msg-stack"><CompactCard c={m.compact} onOpenFile={onOpenFile} fileContext={fileContext} /></div>
       </div>
     );
   }
@@ -1297,7 +1303,7 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
           return (
             <div className={"bub" + (live && isLast ? " streaming-bub" : "")} key={i}>
               <Suspense fallback={<span className="markdown-fallback">{text}</span>}>
-                <ChatMarkdown text={text} streaming={!!live && isLast} onOpenFile={onOpenFile} />
+                <ChatMarkdown text={text} streaming={!!live && isLast} onOpenFile={onOpenFile} fileContext={fileContext} />
               </Suspense>
             </div>
           );

@@ -210,6 +210,13 @@ class TestPasswordLogin:
         assert body["default_account_id"] == ADMIN_ID
         assert body["min_password_length"] == 6
 
+    def test_open_mode_status_reports_the_effective_host_role(self, client, monkeypatch):
+        monkeypatch.setenv("GATEWAY_AUTH", "false")
+        body = client.get("/api/auth/status").json()
+        assert body["authenticated"] is True
+        assert body["user_id"] == body["default_account_id"]
+        assert (body["role"], body["is_admin"]) == ("admin", True)
+
     def test_the_seeded_password_is_the_way_in(self, client):
         """What a user does on a fresh install: read the password out of the
         startup banner and type it."""

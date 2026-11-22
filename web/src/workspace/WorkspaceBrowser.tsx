@@ -109,12 +109,13 @@ const MD_REMARK = [...GFM_PLUGINS, remarkMath];
 const MD_REHYPE = [rehypeRaw, rehypeKatex];
 
 export function FilePreview({
-  root, scope, path: filePath, onOpenFile,
+  root, scope, path: filePath, onOpenFile, allowNativeOpen = true,
 }: {
   root: string;
   scope?: api.WorkspaceScope;
   path: string;
   onOpenFile: (path: string) => void;
+  allowNativeOpen?: boolean;
 }) {
   const S = useStrings();
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -205,7 +206,7 @@ export function FilePreview({
           onToggleWrap={supportsWrap ? () => setWrap((v) => !v) : undefined}
           onRefresh={refresh}
           refreshing={refreshing}
-          absPath={absPath}
+          absPath={allowNativeOpen ? absPath : undefined}
           downloadHref={dl}
           downloadName={preview.name}
         />

@@ -38,19 +38,23 @@ def _require_admin(request: Request) -> auth.Principal:
 
 @router.get("/status")
 async def auth_status(request: Request):
-    session = accounts.store().read_session(request.cookies.get(auth.SESSION_COOKIE))
+    enabled = auth.auth_enabled()
+    session = accounts.store().read_session(request.cookies.get(auth.SESSION_COOKIE)) if enabled else None
+    # Open mode's identity is assigned by the middleware, not a browser cookie.
+    principal = None if enabled else request.state.principal
     # Signed out, the page still needs to know whether a password exists at
     # all; signed in, everything else is about *this* account.
-    user_id = session.user_id if session else None
+    user_id = principal.user_id if principal else session.user_id if session else None
     account = accounts.store().get_account(user_id) if user_id else None
+    role = principal.role if principal else account.role if account else None
     return {
-        "auth_enabled": auth.auth_enabled(),
+        "auth_enabled": enabled,
         "password_set": accounts.store().has_password(),
-        "authenticated": (not auth.auth_enabled()) or session is not None,
+        "authenticated": not enabled or session is not None,
         "user_id": user_id,
         "via": session.via if session else None,
-        "role": account.role if account else None,
-        "is_admin": bool(account and account.is_admin),
+        "role": role,
+        "is_admin": role == accounts.ROLE_ADMIN,
         "default_account_id": accounts.default_account_id(),
         # The login page says so, and the settings block nags. Not a secret: a
         # gateway that still has its generated password says as much to anybody
