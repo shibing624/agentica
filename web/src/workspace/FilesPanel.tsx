@@ -5,6 +5,7 @@ import {
 } from "../icons";
 import { useStrings } from "../i18n";
 import { isAbsOrHomePath, toWorkspaceRelative } from "../lib/filePath";
+import { FileContextMenu, panelFileResource } from "../components/FileContextMenu";
 import { browserTabLabel } from "../lib/browserUrl";
 import { baseName, closeTabShortcut, isCloseTabKey, tabsToClose, type PanelTab } from "../lib/panelTabs";
 import { BrowserView } from "./BrowserView";
@@ -172,45 +173,49 @@ export function FilesPanel({
               {panel.tabs.map((tab, i) => {
                 const active = tab.key === panel.active;
                 const prevActive = i > 0 && panel.tabs[i - 1].key === panel.active;
+                const file = tab.kind === "file" && panelFileResource(tab.path, panel.scope, panel.canTerminal);
+                const chip = (
+                  <div className={"pt-tab" + (active ? " active" : "") + (tab.kind === "files" ? " fixed" : "")}
+                       role="tab" aria-selected={active} title={tabTitle(tab)} tabIndex={file ? 0 : undefined}
+                       onMouseDown={(e) => { if (e.button === 1 && tab.kind !== "files") { e.preventDefault(); panel.close(tab.key); } }}
+                       onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); panel.activate(tab.key); } }}
+                       onClick={() => panel.activate(tab.key)}>
+                    <span className="pt-title"><TabLabel tab={tab} /></span>
+                    {tab.kind !== "files" && (
+                      <button type="button" className="pt-close" aria-label={S.files.closeTab}
+                              title={S.files.closeTab}
+                              onClick={(e) => { e.stopPropagation(); panel.close(tab.key); }}>
+                        <IconClose />
+                      </button>
+                    )}
+                  </div>
+                );
+                const tabActions = <>
+                  <ContextMenu.Item className="pt-menu-item" disabled={tab.kind === "files"} onSelect={() => panel.close(tab.key)}>
+                    <span>{S.files.closeTab}</span><kbd>{closeTabShortcut()}</kbd>
+                  </ContextMenu.Item>
+                  <ContextMenu.Item className="pt-menu-item" disabled={tabsToClose(panel, tab.key, "others").length === 0}
+                                    onSelect={() => panel.closeMany(tab.key, "others")}>
+                    <span>{S.files.closeOthers}</span>
+                  </ContextMenu.Item>
+                  {tabsToClose(panel, tab.key, "right").length > 0 && (
+                    <ContextMenu.Item className="pt-menu-item" onSelect={() => panel.closeMany(tab.key, "right")}>
+                      <span>{S.files.closeRight}</span>
+                    </ContextMenu.Item>
+                  )}
+                </>;
                 return (
-                  <div key={tab.key} className="pt-cell">
+                  <div key={`${panel.sessionKey}:${tab.key}`} className="pt-cell">
                     {i > 0 && <span className={"pt-slot" + (active || prevActive ? " blank" : "")} />}
-                    <ContextMenu.Root>
-                      <ContextMenu.Trigger asChild>
-                        <div className={"pt-tab" + (active ? " active" : "") + (tab.kind === "files" ? " fixed" : "")}
-                             role="tab" aria-selected={active} title={tabTitle(tab)}
-                             onMouseDown={(e) => { if (e.button === 1 && tab.kind !== "files") { e.preventDefault(); panel.close(tab.key); } }}
-                             onClick={() => panel.activate(tab.key)}>
-                          <span className="pt-title"><TabLabel tab={tab} /></span>
-                          {tab.kind !== "files" && (
-                            <button type="button" className="pt-close" aria-label={S.files.closeTab}
-                                    title={S.files.closeTab}
-                                    onClick={(e) => { e.stopPropagation(); panel.close(tab.key); }}>
-                              <IconClose />
-                            </button>
-                          )}
-                        </div>
-                      </ContextMenu.Trigger>
-                      <ContextMenu.Portal>
-                        <ContextMenu.Content className="pt-menu">
-                          <ContextMenu.Item className="pt-menu-item" disabled={tab.kind === "files"}
-                                            onSelect={() => panel.close(tab.key)}>
-                            <span>{S.files.closeTab}</span>
-                            <kbd>{closeTabShortcut()}</kbd>
-                          </ContextMenu.Item>
-                          <ContextMenu.Item className="pt-menu-item"
-                                            disabled={tabsToClose(panel, tab.key, "others").length === 0}
-                                            onSelect={() => panel.closeMany(tab.key, "others")}>
-                            <span>{S.files.closeOthers}</span>
-                          </ContextMenu.Item>
-                          {tabsToClose(panel, tab.key, "right").length > 0 && (
-                            <ContextMenu.Item className="pt-menu-item" onSelect={() => panel.closeMany(tab.key, "right")}>
-                              <span>{S.files.closeRight}</span>
-                            </ContextMenu.Item>
-                          )}
-                        </ContextMenu.Content>
-                      </ContextMenu.Portal>
-                    </ContextMenu.Root>
+                    {tab.kind === "file" && file ? (
+                      <FileContextMenu key={panel.scope?.binding} path={tab.path} source={file} canOpenHost={panel.canTerminal}
+                                       onOpenSidebar={() => panel.activate(tab.key)} extraItems={tabActions}>{chip}</FileContextMenu>
+                    ) : (
+                      <ContextMenu.Root>
+                        <ContextMenu.Trigger asChild>{chip}</ContextMenu.Trigger>
+                        <ContextMenu.Portal><ContextMenu.Content className="pt-menu">{tabActions}</ContextMenu.Content></ContextMenu.Portal>
+                      </ContextMenu.Root>
+                    )}
                   </div>
                 );
               })}
@@ -256,6 +261,8 @@ export function FilesPanel({
                       scope={panel.scope ?? undefined}
                       path={tab.path}
                       onOpenFile={panel.browsePath}
+                      allowNativeOpen={panel.canTerminal}
+                      showFileMenu
                     />
                   </Suspense>
                 )}

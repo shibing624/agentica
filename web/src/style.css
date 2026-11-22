@@ -1498,6 +1498,9 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .chat-file-menu{min-width:192px;padding:4px;border-radius:var(--radius-md);background:var(--bg2);max-height:var(--radix-context-menu-content-available-height);overflow:auto}
 .chat-file-menu .pt-menu-item{justify-content:flex-start;gap:9px;padding:8px 10px;white-space:nowrap}
 .chat-file-menu .pt-menu-item svg{width:15px;height:15px;flex:none;color:var(--fg2)}
+.chat-file-menu .pt-menu-item kbd{margin-inline-start:auto}
+.file-menu-separator{height:var(--hair);background:var(--border);margin:4px}
+.ws-tree-row:has(.ws-row[data-state="open"]),.ws-search-results .ws-row[data-state="open"]{background:var(--selected)}
 .chat-file-float{position:fixed;inset:0;margin:auto;width:min(960px,calc(100vw - 32px));max-width:none;height:min(720px,calc(100dvh - 32px));max-height:none;min-width:0;overflow:hidden;border:var(--hair) solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--fg);box-shadow:var(--elev-pop)}
 .chat-file-float[open]{display:flex;flex-direction:column}
 .chat-file-float::backdrop{background:#0005}

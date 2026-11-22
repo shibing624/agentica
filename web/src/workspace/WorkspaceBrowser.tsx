@@ -19,6 +19,7 @@ import { classifyPreviewTarget, joinWorkspacePath, splitExternalTarget, toWorksp
 import { GFM_PLUGINS, localMarkdownPath, markdownUrlTransform } from "../lib/markdownPlugins";
 import { expandWorkspaceAncestors, toggleWorkspaceDirectory } from "../lib/panelTabs";
 import { MarkdownLink } from "../components/ChatMarkdown";
+import { FileContextMenu } from "../components/FileContextMenu";
 import { askConfirm, showToast } from "../store";
 import { FileTypeIcon, IconChevronDown, IconChevronRight, IconClose, IconCopy, IconFinder, IconFolder, IconRefresh, IconSearch, IconTerminal, IconUpload } from "../icons";
 import { PlainText, PreviewActions, type ViewMode } from "./PreviewActions";
@@ -109,13 +110,14 @@ const MD_REMARK = [...GFM_PLUGINS, remarkMath];
 const MD_REHYPE = [rehypeRaw, rehypeKatex];
 
 export function FilePreview({
-  root, scope, path: filePath, onOpenFile, allowNativeOpen = true,
+  root, scope, path: filePath, onOpenFile, allowNativeOpen = true, showFileMenu = false,
 }: {
   root: string;
   scope?: api.WorkspaceScope;
   path: string;
   onOpenFile: (path: string) => void;
   allowNativeOpen?: boolean;
+  showFileMenu?: boolean;
 }) {
   const S = useStrings();
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -190,14 +192,18 @@ export function FilePreview({
   const slashIdx = preview.path.lastIndexOf("/");
   const pathDir = slashIdx >= 0 ? preview.path.slice(0, slashIdx + 1) : "";
   const pathFile = slashIdx >= 0 ? preview.path.slice(slashIdx + 1) : preview.path;
+  const fileLabel = <span className="ws-preview-name" title={preview.path} tabIndex={showFileMenu ? 0 : undefined}>
+    {pathDir && <span className="ws-preview-dir">{pathDir}</span>}
+    <span className="ws-preview-base">{pathFile}</span>
+  </span>;
   return (
     <div className="ws-browser">
       <div className="ws-preview-bar">
         <FileTypeIcon path={preview.name} size={15} className="ws-preview-type-icon" />
-        <span className="ws-preview-name" title={preview.path}>
-          {pathDir && <span className="ws-preview-dir">{pathDir}</span>}
-          <span className="ws-preview-base">{pathFile}</span>
-        </span>
+        {showFileMenu && (typeof target !== "string" || allowNativeOpen) ? (
+          <FileContextMenu path={filePath} source={{ target, path: targetRel }} canOpenHost={allowNativeOpen}
+                           onOpenSidebar={() => onOpenFile(filePath)}>{fileLabel}</FileContextMenu>
+        ) : fileLabel}
         <PreviewActions
           modes={modes}
           mode={view ?? "code"}
@@ -246,6 +252,7 @@ export function FilePreview({
 
 type DirectoryProps = {
   scope: api.WorkspaceScope;
+  isAdmin: boolean;
   path: string;
   active: boolean;
   expanded: string[];
@@ -258,7 +265,7 @@ type DirectoryProps = {
 };
 
 function DirectoryChildren(props: DirectoryProps) {
-  const { scope, path, active, expanded, selected, currentFile, onCurrentRow, revision, toggle, onOpenFile } = props;
+  const { scope, isAdmin, path, active, expanded, selected, currentFile, onCurrentRow, revision, toggle, onOpenFile } = props;
   const S = useStrings();
   const [entries, setEntries] = useState<Entry[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -285,16 +292,19 @@ function DirectoryChildren(props: DirectoryProps) {
         return (
           <li key={child}>
             <div className={"ws-tree-row" + (current || directory && selected === child ? " selected" : "")}>
-              <button type="button" className="ws-row" ref={active && current ? onCurrentRow : undefined}
-                      title={child} aria-expanded={directory ? open : undefined} aria-current={current ? true : undefined}
-                      onClick={() => directory ? toggle(child) : onOpenFile(child)}>
-                <span className="ws-tree-caret" aria-hidden="true">
-                  {directory && (open ? <IconChevronDown /> : <IconChevronRight />)}
-                </span>
-                <span className="ws-row-icon"><FileTypeIcon path={entry.name} kind={directory ? "folder" : undefined} size={16} /></span>
-                <span className="ws-row-name">{entry.name}</span>
-                {!directory && <span className="ws-row-meta">{fmtFileSize(entry.sizeBytes)}</span>}
-              </button>
+              <FileContextMenu path={child} source={{ target: scope, path: child }} canOpenHost={isAdmin}
+                               directory={directory} onOpenSidebar={() => onOpenFile(child)}>
+                <button type="button" className="ws-row" ref={active && current ? onCurrentRow : undefined}
+                        title={child} aria-expanded={directory ? open : undefined} aria-current={current ? true : undefined}
+                        onClick={() => directory ? toggle(child) : onOpenFile(child)}>
+                  <span className="ws-tree-caret" aria-hidden="true">
+                    {directory && (open ? <IconChevronDown /> : <IconChevronRight />)}
+                  </span>
+                  <span className="ws-row-icon"><FileTypeIcon path={entry.name} kind={directory ? "folder" : undefined} size={16} /></span>
+                  <span className="ws-row-name">{entry.name}</span>
+                  {!directory && <span className="ws-row-meta">{fmtFileSize(entry.sizeBytes)}</span>}
+                </button>
+              </FileContextMenu>
               {!directory && <a className="ws-row-dl" href={api.workspaceContentUrl(scope, child, true)} download={entry.name}
                                 title={S.files.download} aria-label={`${S.files.download}: ${entry.name}`}>↓</a>}
             </div>
@@ -494,7 +504,7 @@ export function WorkspaceBrowser({
         if (!query.trim()) try { localStorage.setItem(`${storageKey}:scroll`, String(e.currentTarget.scrollTop)); } catch { /* session remains usable */ }
       }}>
         <div ref={content} hidden={!!query.trim()}>
-          <DirectoryChildren scope={scope} path="" active={active && !query.trim()} expanded={expanded} selected={path}
+          <DirectoryChildren scope={scope} isAdmin={isAdmin} path="" active={active && !query.trim()} expanded={expanded} selected={path}
                              currentFile={currentFile} onCurrentRow={onCurrentRow}
                              revision={`${revision}:${reloadTick}`} onOpenFile={onOpenFile} toggle={(next) => {
               const opens = !expanded.includes(next);
@@ -508,11 +518,16 @@ export function WorkspaceBrowser({
               <>
                 {!results.paths.length && <p className="ws-muted">{S.files.empty}</p>}
                 {results.truncated && <p className="ws-muted">{S.files.searchLimited}</p>}
-                {results.paths.map((match) => <button key={match} type="button" className="ws-row" title={match}
-                  onClick={() => { clearSearch(); onOpenFile(match); }}>
-                  <span className="ws-tree-caret" aria-hidden="true" /><FileTypeIcon path={match} size={16} />
-                  <span className="ws-row-name">{match}</span>
-                </button>)}
+                {results.paths.map((match) => {
+                  const open = () => { clearSearch(); onOpenFile(match); };
+                  return <FileContextMenu key={match} path={match} source={{ target: scope, path: match }}
+                                          canOpenHost={isAdmin} onOpenSidebar={open}>
+                    <button type="button" className="ws-row" title={match} onClick={open}>
+                      <span className="ws-tree-caret" aria-hidden="true" /><FileTypeIcon path={match} size={16} />
+                      <span className="ws-row-name">{match}</span>
+                    </button>
+                  </FileContextMenu>;
+                })}
               </>
             )}
           </div>

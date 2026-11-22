@@ -453,8 +453,8 @@ export function ChatPage() {
   const workspace = cur?.dir || s.pendingNewChatDir || s.serverDir || "";
   const files = useFilesPanel(s.curSess, workspace);
   const fileContext = useMemo<ChatFileContext | undefined>(() => s.curSess ? {
-    sessionId: s.curSess, workspace, canOpenHost: s.accountRole === "admin", platform: s.serverPlatform,
-  } : undefined, [s.curSess, workspace, s.accountRole, s.serverPlatform]);
+    sessionId: s.curSess, workspace, canOpenHost: s.accountRole === "admin",
+  } : undefined, [s.curSess, workspace, s.accountRole]);
   useEffect(() => { setCtxOpen(false); setTitleEditing(false); }, [s.curSess]);
   // This page is where the session was left; reopening it comes back here.
   useEffect(() => {

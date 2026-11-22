@@ -19,6 +19,7 @@ const vite = await createServer({
   server: { middlewareMode: true },
 });
 const { ChatMarkdown, MarkdownLink } = await vite.ssrLoadModule("/src/components/ChatMarkdown.tsx");
+const { FilesPanel } = await vite.ssrLoadModule("/src/workspace/FilesPanel.tsx");
 after(() => vite.close());
 
 function render(text, streaming) {
@@ -86,7 +87,7 @@ test("ordinary web links never become local actions based on their query string"
 test("chat file menu is exposed only for structured local links and respects host access", () => {
   const text = "[report](file:///repo/report.pdf) [private](file:///elsewhere/readme.md) [website](https://example.com/report.pdf)";
   const markup = (canOpenHost) => renderToStaticMarkup(React.createElement(ChatMarkdown, {
-    text, onOpenFile() {}, fileContext: { sessionId: "test", workspace: "/repo", canOpenHost, platform: "darwin" },
+    text, onOpenFile() {}, fileContext: { sessionId: "test", workspace: "/repo", canOpenHost },
   }));
   const admin = markup(true);
   assert.equal((admin.match(/aria-haspopup="menu"/g) || []).length, 2);
@@ -95,6 +96,22 @@ test("chat file menu is exposed only for structured local links and respects hos
   assert.equal((member.match(/aria-haspopup="menu"/g) || []).length, 1);
   assert.match(member, /<button [^>]*aria-haspopup="menu"[^>]*>.*<\/svg>report<\/button> private /);
   assert.doesNotMatch(member, /root=|%2Felsewhere/);
+});
+
+test("workspace file tabs offer file actions without treating other tabs or unscoped member files as files", () => {
+  const panel = {
+    open: true, width: 600, active: "file:report.csv", canTerminal: false,
+    scope: { root: "/repo", session_id: "test", binding: "test-binding" },
+    tabs: [
+      { key: "files", kind: "files" },
+      { key: "file:report.csv", kind: "file", path: "report.csv" },
+      { key: "file:/elsewhere/private.md", kind: "file", path: "/elsewhere/private.md" },
+      { key: "browser:page", kind: "browser", url: "https://example.test" },
+    ],
+  };
+  const html = renderToStaticMarkup(React.createElement(FilesPanel, { root: "/repo", panel }));
+  assert.equal((html.match(/aria-haspopup="menu"/g) || []).length, 1);
+  assert.match(html, /<div [^>]*role="tab"[^>]*title="report\.csv"[^>]*aria-haspopup="menu"/);
 });
 
 test("local image URLs and nonlocal file hosts do not generate workspace requests", () => {
