@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **软件引用改为 agent harness**：README 与 `CITATION.cff` 的软件标题从 “A Human-Centric Framework for Large Language Model Agent Workflows” 改为 “An Agent Harness and All-in-One AI Workspace”。同一套 harness 既是本机工作台，也是可嵌入服务的 Python / TypeScript SDK。`CITATION.cff` 的版本与发布日期同步到 1.6.1 / 2026-11-19。自进化论文的引用不变。
+
 - **日期移出 system prompt，跨天不再整窗重算**：原先 system prompt 末尾带 `Today's date is …`，过了午夜就要换一份（窗口内靠 pin 维持，但新窗口、网关重建、`/resume` 都会重新渲染）；跨天的提醒又追加一条 `<system-reminder>`。现在日期只在会话首条用户消息里出现一次（`<session_date>2026-11-21 (Saturday), local time</session_date>`，和 `<git_snapshot>` 一样写进历史、原样回放），system prompt 和运行时状态里都不再有日期，跨天不追加提醒。需要准确时间时模型调 `execute date`。`PromptConfig.add_datetime_to_instructions` 的 SDK 默认改为 `False`，`DeepAgent` 仍默认开启（`agentica/agent/prompts.py`、`agentica/agent/config.py`）。
 
 - **系统提示里的 skills 目录改为按名字排序，去掉使用次数排序**：原先按「最近使用 + 使用次数」打分排序，每次 `get_skill_info` 都把计数写入 `users/{id}/skill_usage.json`。目录位于系统提示里带缓存断点的那一段，排序跟着使用情况变，重建 agent 时渲染出来的就不是上游缓存过的那份。这份排序本身用处不大：目录预算是上下文窗口的 2%，在实际用到的窗口（≥200K）下 29 个 skill 全部带描述放得下，排名不决定谁被截掉；dsh 也是按名字排。现在按名字排序，计数逻辑和文件都不再使用（`agentica/tools/skill_tool.py`）。旧的 `skill_usage.json` 可以直接删掉。

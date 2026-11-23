@@ -145,14 +145,14 @@ BibTeX:
 }
 ```
 
-The software itself:
+The software itself. One agent harness: the local workspace (Desktop, CLI, Web, IM) and the Python and TypeScript SDKs embedded in a service:
 
-> Xu, M. (2026). Agentica: A Human-Centric Framework for Large Language Model Agent Workflows. GitHub. https://github.com/shibing624/agentica
+> Xu, M. (2026). Agentica: An Agent Harness and All-in-One AI Workspace. GitHub. https://github.com/shibing624/agentica
 
 ```bibtex
 @misc{xu2026agentica,
   author    = {Xu, Ming},
-  title     = {Agentica: A Human-Centric Framework for Large Language Model Agent Workflows},
+  title     = {Agentica: An Agent Harness and All-in-One AI Workspace},
   year      = {2026},
   publisher = {GitHub},
   url       = {https://github.com/shibing624/agentica}

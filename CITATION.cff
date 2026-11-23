@@ -4,10 +4,10 @@ authors:
 - family-names: "Xu"
   given-names: "Ming"
   orcid: "https://orcid.org/0000-0003-3402-7159"
-title: "Agentica: A Human-Centric Framework for Large Language Model Agent Workflows"
+title: "Agentica: An Agent Harness and All-in-One AI Workspace"
 url: "https://github.com/shibing624/agentica"
-date-released: 2026-10-15
-version: 1.4.17
+date-released: 2026-11-19
+version: 1.6.1
 preferred-citation:
   type: article
   title: "When Self-Evolution Backfires: Pre-Commit Gating against Skill Contamination in LLM Agents"

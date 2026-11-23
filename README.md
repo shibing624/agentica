@@ -145,14 +145,14 @@ BibTeX：
 }
 ```
 
-软件本身：
+软件本身。同一套 agent harness，既是本机工作台（Desktop、CLI、Web、IM），也是可嵌入线上服务的 Python 与 TypeScript SDK：
 
-> Xu, M. (2026). Agentica: A Human-Centric Framework for Large Language Model Agent Workflows. GitHub. https://github.com/shibing624/agentica
+> Xu, M. (2026). Agentica: An Agent Harness and All-in-One AI Workspace. GitHub. https://github.com/shibing624/agentica
 
 ```bibtex
 @misc{xu2026agentica,
   author    = {Xu, Ming},
-  title     = {Agentica: A Human-Centric Framework for Large Language Model Agent Workflows},
+  title     = {Agentica: An Agent Harness and All-in-One AI Workspace},
   year      = {2026},
   publisher = {GitHub},
   url       = {https://github.com/shibing624/agentica}
