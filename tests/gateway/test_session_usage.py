@@ -247,3 +247,29 @@ def test_build_agent_hydrates_working_memory_from_existing_session_log(tmp_path,
     assert len(agent.working_memory.runs) == 1
     assert payload["messages"] == 2
     assert by_label.get("Conversation", 0) > 100
+
+
+def test_in_turn_compaction_reaches_the_live_turn_as_one_compact_step(tmp_path):
+    """Only the main agent's cut is relayed, and its result carries the notes."""
+    from agentica_gateway.services import live_turn
+    from agentica_gateway.services.agent_service import AgentService
+
+    svc = AgentService(workspace_path=str(tmp_path / "ws"))
+    turn = live_turn.start("s-compact", "default")
+    try:
+        class _Agent:
+            _session_log = None
+
+        publish = svc._compaction_publisher(_Agent(), "s-compact", None)
+        publish({"type": "compact.start", "is_main_agent": False})
+        publish({"type": "compact.start", "is_main_agent": True})
+        publish({"type": "compact.auto", "is_main_agent": True, "before": 40, "after": 3})
+        publish({"type": "compact.end", "is_main_agent": True})
+        publish({"type": "context.usage", "is_main_agent": True})
+        assert [(e["event"], e["data"]) for e in turn.events] == [
+            ("compact", {"phase": "start"}),
+            ("compact", {"phase": "auto", "before": 40, "after": 3, "notes": "", "notes_path": ""}),
+            ("compact", {"phase": "end"}),
+        ]
+    finally:
+        live_turn.drop("s-compact", "default")

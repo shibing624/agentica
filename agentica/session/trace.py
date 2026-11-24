@@ -229,6 +229,11 @@ def analyze_entries(entries: Iterable[Dict[str, Any]], *, lite: bool = False) ->
         if entry_type == "compact_boundary":
             compaction_count += 1
             prev_window_prompt = 0
+            if continuation and task_index >= 0 and entry.get("trigger") != "manual":
+                # Cut between two requests of one turn (the last one issued a
+                # tool call): a step of that turn, not a round of its own.
+                msg_task[mi] = task_index
+                continue
             continuation = False
             task_index += 1
             t = _ensure_task(task_stats, task_index)

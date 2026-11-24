@@ -62,7 +62,8 @@ export function lastWorkSegmentIndex(segs: PartSeg[]): number {
  * own bubble and stays visible. See `isFoldedReply` for the opt-in exception.
  */
 export function isProcessSegment(segs: PartSeg[], index: number): boolean {
-  return segs[index]?.type === "work";
+  const seg = segs[index];
+  return seg?.type === "work" || (seg?.type === "single" && seg.part.kind === "compact");
 }
 
 /**
@@ -209,9 +210,13 @@ export function settleWork(m: ChatMsg, now?: number): boolean {
       unpending = true;
     }
   }
+  // A cut the turn ended inside of (stopped, failed) never finished.
+  const parts = m.parts || [];
+  const openCut = parts.findIndex((p) => p.kind === "compact" && p.card.pending);
+  if (openCut >= 0) parts.splice(openCut, 1);
   const thinks = freezeOpenThinks(m, now);
   const tools = freezeOpenTools(m, now);
-  return dropped || unpending || thinks || tools;
+  return dropped || unpending || openCut >= 0 || thinks || tools;
 }
 
 export function appendThink(m: ChatMsg, delta: string) {
@@ -310,6 +315,37 @@ export function appendText(m: ChatMsg, delta: string) {
   const last = parts[parts.length - 1];
   if (last?.kind === "text") last.text += delta;
   else parts.push({ kind: "text", text: delta });
+}
+
+/**
+ * The live turn's context window is being cut (`start`) or was cut (`auto`).
+ * One step of the turn, like a tool call: the turn goes on after it.
+ */
+export function applyCompactStep(
+  m: ChatMsg,
+  data: { phase?: string; before?: number; after?: number; notes?: string; notes_path?: string },
+) {
+  const parts = ensureParts(m);
+  const last = parts[parts.length - 1];
+  const open = last?.kind === "compact" && last.card.pending ? last : null;
+  if (data.phase === "start") {
+    finishThink(m);
+    if (!open) parts.push({ kind: "compact", card: { pending: true, auto: true } });
+    return;
+  }
+  if (data.phase === "end") {
+    // No `auto` before it: nothing was cut.
+    if (open) parts.pop();
+    return;
+  }
+  const card = {
+    auto: true,
+    ...(data.before != null ? { before: data.before, after: data.after ?? 0 } : {}),
+    notes: data.notes || "",
+    notesPath: data.notes_path || "",
+  };
+  if (open) open.card = card;
+  else parts.push({ kind: "compact", card });
 }
 
 /**

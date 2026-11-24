@@ -42,7 +42,7 @@ import {
   forgetClientSteer, reconcileLiveTurnMsgs, rememberSteersFromMsgs, removeUndeliveredSteers,
 } from "../lib/hydrateMessages";
 import {
-  allAssistantTextOf, appendSteerPart, appendText, appendThink, appendTool, ensureTrailingFinalAnswer,
+  allAssistantTextOf, appendSteerPart, appendText, appendThink, appendTool, applyCompactStep, ensureTrailingFinalAnswer,
   finalAnswerOf, finishTool, groupParts, isFoldedReply, isProcessSegment, partsOf, removeSteerPart, settleWork,
   unfinishedToolCallId, workSummary,
 } from "../lib/msgParts";
@@ -1304,6 +1304,9 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
                          previews={seg.part.previews} onOpenSkill={onOpenSkill} />
             );
           }
+          if (seg.part.kind === "compact") {
+            return <CompactCard key={i} c={seg.part.card} onOpenFile={onOpenFile} fileContext={fileContext} />;
+          }
           const text = seg.part.kind === "text" ? seg.part.text : "";
           if (!text) return null;
           return (
@@ -1372,7 +1375,7 @@ function MessageFooter({ m, live, sessionId, idx, copyText }: {
   const S = useStrings();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
-  if (live) return null;
+  if (live || m.command) return null;
   const copy = () => {
     // Always the original message for user turns (a rendered skill chip is a view,
     // not the text the user sent). For assistant turns, copy the visible final
@@ -2112,6 +2115,11 @@ function applyLiveSseEvent(aiMsg: ChatMsg, evt: any, sessId?: string): boolean {
     bumpStream();
     return true;
   }
+  if (evt.event === "compact") {
+    applyCompactStep(aiMsg, evt.data || {});
+    flushStream();
+    return true;
+  }
   if (evt.event === "error") {
     settleWork(aiMsg, Date.now());
     markChatError(aiMsg, String(evt.data));
@@ -2647,7 +2655,7 @@ function clearIfSlash() {
 function beginCommand(sessId: string, userText: string) {
   const sess = getState().sessions[sessId];
   if (!sess) return null;
-  sess.msgs.push({ role: "user", content: userText, ts: Date.now() });
+  sess.msgs.push({ role: "user", content: userText, ts: Date.now(), command: true });
   setState({ commandRuns: { ...getState().commandRuns, [sessId]: { kind: "compact" } } });
   saveSessions();
   markSessionRead(sessId);

@@ -267,7 +267,11 @@ class CompressMixin:
         # The notes pass is a full model request; the spinner says
         # "compacting" for it instead of a turn that looks hung.
         if cb is not None:
-            cb({"type": "compact.start", "agent_name": agent.name or "Agent"})
+            cb({
+                "type": "compact.start",
+                "agent_name": agent.name or "Agent",
+                "is_main_agent": agent._parent_run_id is None,
+            })
         try:
             compacted = await cm.auto_compact(
                 messages,
@@ -279,7 +283,11 @@ class CompressMixin:
             )
         finally:
             if cb is not None:
-                cb({"type": "compact.end", "agent_name": agent.name or "Agent"})
+                cb({
+                    "type": "compact.end",
+                    "agent_name": agent.name or "Agent",
+                    "is_main_agent": agent._parent_run_id is None,
+                })
         if not compacted:
             return False
         loop_state.context_collapsed = True

@@ -442,3 +442,25 @@ test("settling a turn clears a pending mark that never got confirmed", () => {
   settleWork(m, 2000);
   assert.equal(steerParts(m)[0].pending, undefined);
 });
+
+test("a live compact step: pending, then settled with its numbers, and an open one is dropped at turn end", async () => {
+  const { applyCompactStep } = await vite.ssrLoadModule("/src/lib/msgParts.ts");
+  const m = { role: "assistant", content: "", parts: [] };
+  appendTool(m, "execute", "{}", "c1");
+  finishTool(m, "ok", undefined, "c1");
+  applyCompactStep(m, { phase: "start" });
+  assert.deepEqual(m.parts.at(-1), { kind: "compact", card: { pending: true, auto: true } });
+  applyCompactStep(m, { phase: "auto", before: 40, after: 3, notes: "- n", notes_path: "~/s.notes.md" });
+  applyCompactStep(m, { phase: "end" });
+  assert.deepEqual(m.parts.at(-1).card, { auto: true, before: 40, after: 3, notes: "- n", notesPath: "~/s.notes.md" });
+  assert.equal(isProcessSegment(groupParts(m.parts), 1), true);
+
+  const failed = { role: "assistant", content: "", parts: [] };
+  applyCompactStep(failed, { phase: "start" });
+  applyCompactStep(failed, { phase: "end" });
+  assert.deepEqual(failed.parts, []);
+  const stopped = { role: "assistant", content: "", parts: [] };
+  applyCompactStep(stopped, { phase: "start" });
+  settleWork(stopped);
+  assert.deepEqual(stopped.parts, []);
+});

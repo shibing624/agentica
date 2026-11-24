@@ -368,6 +368,7 @@ class AgentExecutionMixin:
             reasoning_content = ""
             tools_used: List[str] = []
             tool_calls = 0
+            agent._event_callback = self._compaction_publisher(agent, session_id, owner)
 
             async for chunk in agent.run_stream(
                 self.expand_skill_invocation(message),
@@ -435,6 +436,29 @@ class AgentExecutionMixin:
                 user_id=user_id,
                 error=str(e),
             )
+        finally:
+            agent._event_callback = None
+
+    def _compaction_publisher(self, agent: Any, session_id: str, owner: Optional[str]) -> Callable[[Dict[str, Any]], None]:
+        """Relay the main agent's in-turn compaction to the live turn as a
+        ``compact`` step, so a cut between two requests shows inside the turn
+        instead of looking like the turn ended there."""
+        owner_id = self._owner(owner)
+
+        def publish(event: Dict[str, Any]) -> None:
+            kind = event.get("type")
+            if kind not in ("compact.start", "compact.auto", "compact.end") or event.get("is_main_agent") is not True:
+                return
+            turn = _pkg().live_turn.active(session_id, owner_id)
+            if turn is None:
+                return
+            data: Dict[str, Any] = {"phase": kind.split(".", 1)[1]}
+            if kind == "compact.auto":
+                notes, notes_path = _read_compact_notes(agent)
+                data.update(before=event.get("before"), after=event.get("after"), notes=notes, notes_path=notes_path)
+            turn.publish({"event": "compact", "data": data})
+
+        return publish
 
     def cancel_session(self, session_id: str, owner: Optional[str] = None) -> bool:
         """Cancel the in-flight run for a specific session."""

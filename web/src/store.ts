@@ -12,6 +12,8 @@ export type MsgPart =
   | { kind: "think"; text: string; t0?: number; ms?: number }
   | { kind: "tool"; name: string; argsStr: string; result?: string; diff?: string; t0?: number; ms?: number; toolCallId?: string }
   | { kind: "text"; text: string }
+  /** The context window rolled over between two requests of this turn. */
+  | { kind: "compact"; card: NonNullable<ChatMsg["compact"]> }
   | {
     kind: "steer";
     text: string;
@@ -75,6 +77,8 @@ export type ChatMsg = {
    *  report, another session's message. The log marks the row `automated`;
    *  it renders as a notice, not as the user's query. */
   automated?: boolean;
+  /** A client command the user typed (`/compact`), not a question to the model. */
+  command?: boolean;
   /** The automation that delivered this automated turn (log `cron_job`). */
   cronJob?: { id: string; name: string };
   /** SessionLog row this message ends at (assistant: its last row). Set when

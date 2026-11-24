@@ -25,6 +25,9 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
   // `trigger` of the boundary whose preamble has not been seen yet ("" = not
   // recorded); null once that preamble is consumed.
   let pendingTrigger: string | null = null;
+  // A cut between two requests of the open turn: a step of that turn, whose
+  // notes arrive with the new window's preamble row.
+  let inTurnCompact: Extract<MsgPart, { kind: "compact" }> | null = null;
 
   const closeAssistant = (atTail = false) => {
     if (!assistant) return;
@@ -60,6 +63,13 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
         continue;
       }
       let content = row.text;
+      if (row.window && inTurnCompact) {
+        Object.assign(inTurnCompact.card, { notes: row.window.notes, notesPath: row.window.notes_path || inTurnCompact.card.notesPath || "" });
+        inTurnCompact = null;
+        pendingTrigger = null;
+        // The prose behind it is the turn's own question, replayed.
+        continue;
+      }
       if (row.window) {
         closeAssistant();
         // A new window's preamble is chrome, not something the user said: it
@@ -130,9 +140,15 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
       continue;
     }
     if (type === "compact_boundary") {
-      closeAssistant();
       const trigger = typeof e.trigger === "string" ? e.trigger : "";
       const notesPath = typeof e.notes_path === "string" ? e.notes_path : "";
+      if (assistant && !assistantTerminal && trigger !== "manual") {
+        inTurnCompact = { kind: "compact", card: { auto: true, ...(notesPath ? { notesPath } : {}) } };
+        (assistant.parts ||= []).push(inTurnCompact);
+        pendingTrigger = trigger;
+        continue;
+      }
+      closeAssistant();
       const card: ChatMsg = {
         role: "assistant",
         content: "",
@@ -182,7 +198,7 @@ const toolRowOf = (e: Record<string, unknown>) => serverRow<ToolRowView>(e);
 /** Put the `/compact` user bubble right before its card. */
 function insertCompactCommand(msgs: ChatMsg[], card: ChatMsg) {
   const at = msgs.indexOf(card);
-  msgs.splice(at < 0 ? msgs.length : at, 0, { role: "user", content: "/compact", ts: card.ts });
+  msgs.splice(at < 0 ? msgs.length : at, 0, { role: "user", content: "/compact", ts: card.ts, command: true });
 }
 
 /**

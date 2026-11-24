@@ -185,7 +185,7 @@ def test_compact_boundary_is_its_own_task_and_does_not_fold_the_next_user_turn()
     entries = [
         _e("2026-01-01T00:00:00.000Z", type="user", content="one"),
         _e("2026-01-01T00:00:01.000Z", type="event", name="request_begin"),
-        _e("2026-01-01T00:00:02.000Z", type="event", name="tool_call", tool_call_id="c1", tool_name="read_file"),
+        _e("2026-01-01T00:00:02.000Z", type="event", name="text"),
         _e("2026-01-01T00:00:03.000Z", type="event", name="request_end", status="completed"),
         _e("2026-01-01T00:00:04.000Z", type="compact_boundary", summary="sum"),
         _e("2026-01-01T00:00:05.000Z", type="user", content="two"),
@@ -1117,3 +1117,26 @@ def test_search_numbers_turns_the_way_the_page_does():
     page_turn = with_row_views(entries)[3]["row"]["turn"]
     hits = search_conversation(entries, "needle")
     assert [h["turn"] for h in hits] == [page_turn] == [2]
+
+
+def test_a_cut_between_two_requests_of_a_turn_stays_inside_that_round():
+    """An auto compact fired after a tool round is a step of the turn: the
+    round goes on after it, so the reply footer belongs to the round's end."""
+    entries = [
+        _e("2026-01-01T00:00:00.000Z", type="user", content="check params", uuid="u1"),
+        _e("2026-01-01T00:00:01.000Z", type="event", name="request_begin"),
+        _e("2026-01-01T00:00:02.000Z", type="event", name="tool_call", tool_call_id="c1", tool_name="execute"),
+        _e("2026-01-01T00:00:03.000Z", type="event", name="request_end", status="completed"),
+        _e("2026-01-01T00:00:03.100Z", type="assistant", content="", uuid="a1",
+           tool_calls=[{"id": "c1", "type": "function", "function": {"name": "execute", "arguments": "{}"}}]),
+        _e("2026-01-01T00:00:03.200Z", type="tool", tool_call_id="c1", tool_name="execute", content="ok", uuid="t1"),
+        _e("2026-01-01T00:00:04.000Z", type="compact_boundary", trigger="auto", summary=""),
+        _e("2026-01-01T00:00:05.000Z", type="event", name="request_begin"),
+        _e("2026-01-01T00:00:06.000Z", type="event", name="text"),
+        _e("2026-01-01T00:00:07.000Z", type="event", name="request_end", status="completed"),
+        _e("2026-01-01T00:00:07.100Z", type="assistant", content="done", uuid="a2"),
+    ]
+    out = analyze_entries(entries)
+    assert out["compactionCount"] == 1
+    assert [(r["title"], r["compaction"], r["replyUuid"]) for r in out["rounds"]] == [("check params", False, "a2")]
+    assert out["rounds"][0]["requests"] == 2
