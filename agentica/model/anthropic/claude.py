@@ -403,17 +403,18 @@ class Claude(Model):
             self.id,
             context_length=self.context_window,
         )
-        # Use `is not None` for numeric sampling params so legitimate falsy
-        # values (temperature=0 deterministic, top_p=0/top_k=0) reach the API
-        # instead of being silently dropped.
-        if self.temperature is not None:
-            _request_params["temperature"] = self.temperature
         if self.stop_sequences:
             _request_params["stop_sequences"] = self.stop_sequences
-        if self.top_p is not None:
-            _request_params["top_p"] = self.top_p
-        if self.top_k is not None:
-            _request_params["top_k"] = self.top_k
+        # Sampling params only when the profile sets them, and through
+        # extra_body: current SDKs dropped them from ``messages.create`` /
+        # ``messages.stream`` (a keyword raises TypeError before any request),
+        # and newer Claude models reject them. Older models still read them
+        # off the wire, so an explicit value keeps working there.
+        _sampling = {
+            key: value
+            for key, value in (("temperature", self.temperature), ("top_p", self.top_p), ("top_k", self.top_k))
+            if value is not None
+        }
         # Thinking configuration. Priority: an explicit ``thinking`` dict wins;
         # otherwise ``reasoning_effort`` enables adaptive thinking.
         if self.thinking:
@@ -422,15 +423,16 @@ class Claude(Model):
             # Adaptive thinking (opus-4-7+/sonnet-4-6+): thinking.type=adaptive
             # plus output_config.effort. output_config is not a native SDK param,
             # so it rides along in extra_body (the SDK forwards it verbatim).
-            # Adaptive thinking requires temperature=1 — enforce it here so a
-            # stale temperature can't 400 the request.
+            # Adaptive thinking takes no sampling params at all.
             _request_params["thinking"] = {"type": "adaptive"}
             if self.thinking_display:
                 _request_params["thinking"]["display"] = self.thinking_display
             _extra = _request_params.get("extra_body") or {}
             _extra["output_config"] = {"effort": self.reasoning_effort}
             _request_params["extra_body"] = _extra
-            _request_params["temperature"] = 1
+            _sampling = {}
+        if _sampling:
+            _request_params["extra_body"] = {**(_request_params.get("extra_body") or {}), **_sampling}
         if self.request_params:
             _request_params.update(self.request_params)
         return _request_params

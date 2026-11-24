@@ -97,8 +97,9 @@ class TestCLIModelParams(unittest.TestCase):
         # display=summarized: opus-4-7+ default to omitted, which streams no thinking text.
         self.assertEqual(kwargs.get("thinking"), {"type": "adaptive", "display": "summarized"})
         self.assertEqual(kwargs.get("extra_body", {}).get("output_config"), {"effort": "high"})
-        # Adaptive thinking requires temperature=1; it must be forced.
-        self.assertEqual(kwargs.get("temperature"), 1)
+        # Adaptive thinking takes no sampling params.
+        self.assertNotIn("temperature", kwargs)
+        self.assertNotIn("top_p", kwargs["extra_body"])
 
     def test_claude_opus_5_defaults_to_adaptive_high_thinking(self):
         from agentica.cli.runtime import get_model

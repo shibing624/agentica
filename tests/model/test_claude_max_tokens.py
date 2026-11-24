@@ -148,18 +148,18 @@ class TestClaudeRequestKwargs(unittest.TestCase):
         from agentica.model.anthropic.claude import Claude
         model = Claude(id="claude-opus-4-6", api_key="fake", temperature=0.0)
         kwargs = model.request_kwargs
-        self.assertIn("temperature", kwargs)
-        self.assertEqual(kwargs["temperature"], 0.0)
+        self.assertNotIn("temperature", kwargs)
+        self.assertEqual(kwargs["extra_body"]["temperature"], 0.0)
 
     def test_top_p_zero_reaches_api(self):
         from agentica.model.anthropic.claude import Claude
         model = Claude(id="claude-opus-4-6", api_key="fake", top_p=0.0)
-        self.assertEqual(model.request_kwargs["top_p"], 0.0)
+        self.assertEqual(model.request_kwargs["extra_body"]["top_p"], 0.0)
 
     def test_top_k_zero_reaches_api(self):
         from agentica.model.anthropic.claude import Claude
         model = Claude(id="claude-opus-4-6", api_key="fake", top_k=0)
-        self.assertEqual(model.request_kwargs["top_k"], 0)
+        self.assertEqual(model.request_kwargs["extra_body"]["top_k"], 0)
 
     def test_none_sampling_params_omitted(self):
         from agentica.model.anthropic.claude import Claude
@@ -303,3 +303,24 @@ class TestMaxTokensRetry(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_request_kwargs_fit_the_installed_sdk_stream_signature():
+    """``messages.stream`` raises TypeError on an unknown keyword before any
+    request; sampling params are no longer keywords there."""
+    import inspect
+    from anthropic.resources.messages import AsyncMessages
+    from agentica.model.anthropic.claude import Claude
+
+    accepted = set(inspect.signature(AsyncMessages.stream).parameters)
+    plain = Claude(id="claude-sonnet-5-5", api_key="k", temperature=0.2, top_p=0.9, top_k=5)
+    kwargs = plain.prepare_request_kwargs("sys")
+    assert set(kwargs) <= accepted, set(kwargs) - accepted
+    assert kwargs["extra_body"] == {"temperature": 0.2, "top_p": 0.9, "top_k": 5}
+
+    adaptive = Claude(id="claude-sonnet-5-5", api_key="k", temperature=0.2, reasoning_effort="high")
+    kwargs = adaptive.prepare_request_kwargs("sys")
+    assert set(kwargs) <= accepted
+    assert "temperature" not in kwargs["extra_body"]
+
+    assert "extra_body" not in Claude(id="claude-sonnet-5-5", api_key="k").prepare_request_kwargs("sys")

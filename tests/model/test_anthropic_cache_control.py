@@ -73,7 +73,7 @@ class TestSystemMessageCacheControl(unittest.TestCase):
         """cache_control injection should not break other request kwargs."""
         model = _make_claude(enable_cache_control=True, temperature=0.5)
         kwargs = model.prepare_request_kwargs("System prompt here.")
-        self.assertEqual(kwargs["temperature"], 0.5)
+        self.assertEqual(kwargs["extra_body"]["temperature"], 0.5)
         self.assertIn("max_tokens", kwargs)
 
     def test_marker_split_when_enabled(self):
