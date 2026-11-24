@@ -10,9 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **文档首页的 logo 不再铺满内容区**：Material 主题把正文图片的高度设成自动，页面上的 `height="30"` 不起作用，`docs/assets/logo.png` 就按原图宽度撑开。现在用行内样式固定为 30px 高。
+
+- **文档站改成「入门 / 开发 / 参考」三个顶部分类，并补上 Schedule 提醒和记忆 MCP**：原先是 Read the Docs 主题里一长串折叠目录。现在顶上三个分类，点开后侧栏展开。新增 [Schedule 提醒](docs/getting-started/schedule.md)（对话和「自动化任务」页怎么建、改、跑、删提醒）和 [记忆 MCP](docs/getting-started/memory-mcp.md)（外部记忆服务写在 `~/.agentica/mcp_config.json`，不替换本机 `MEMORY.md`）。桌面下载页改成按当前系统给出一个下载按钮，旁边的菜单里选其他系统。上次文档发布在产物刚上传完就去部署，GitHub 没读到产物，`/desktop/` 一直 404；发布改成先构建、再单独部署。
+
 - **桌面版有单独的下载页**：[https://shibing624.github.io/agentica/desktop/](https://shibing624.github.io/agentica/desktop/) 打开时向 GitHub 读取最新 Release 的安装包，按当前系统给出下载按钮，并写上未签名时 macOS、Windows、Linux 各自的一次放行办法。README 的桌面版下载链接改指向这一页。
 
-- **macOS Desktop 图标重新铺满 Dock 格子**：1.6.2 的安装包图标（`desktop/build/icon-mac.png`）自己画了圆角，四周还留了 10% 透明边。macOS 26 把这种自带形状的图当成旧式图标，再缩进一个灰色圆角容器，Dock 上就变成一块小底板、里面一只更小的猫。安装包改回铺满画布的不透明方图，圆角和边距由系统蒙版来做。`npm start` 仍用单独的圆角图 `icon-dock.png`，因为未打包时 `app.dock.setIcon` 不会套这层蒙版，直接用方图会变成直角方块。
+- **macOS Desktop 安装包图标不再套两层圆角**：把 `icon-dock.png` 直接当作安装包图标时，图里已有的圆角和透明边会被 macOS 再放进系统图标底板，Dock 上就是一块大圆角方块中间一小块猫。安装包改用 `icon-mac.png`，同一块底板和同一只猫铺到画布边缘并去掉全部透明像素，系统底板就是这张图。`npm start` 仍用 `icon-dock.png`，因为 `app.dock.setIcon` 按原图绘制，透明边留在文件里。
 
 - **Linux 与 Windows 的 Desktop 安装包可以完成打包检查**：1.6.2 的检查直接跑解包后的程序，两边都失败，Release 就没有挂安装包。Ubuntu 26 禁止非特权 user namespace，解包目录里的 `chrome-sandbox` 又没有 setuid，Linux 上程序约一秒就退出；检查在沙箱助手不可用时改为带 `--no-sandbox`（AppImage 本来就是这样启动的）。Windows 上网关在进程启动时导入 `fcntl` / `pty` / `termios`，这些模块只有 POSIX 才有，所以网关以退出码 1 结束，窗口起不来。现在只在 POSIX 上导入它们；Windows 打开终端仍然返回「需要 POSIX」。检查失败时日志会写出原因，不再只留断言的第一行。
 

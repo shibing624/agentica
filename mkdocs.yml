@@ -15,69 +15,85 @@ exclude_docs: |
   /tmp/
 
 theme:
-  name: readthedocs
-  locale: zh
-  highlightjs: true
-  hljs_languages:
-    - python
-    - bash
-    - yaml
-    - json
-    - shell
-    - markdown
-  navigation_depth: 3
-  collapse_navigation: false
-  titles_only: false
-  sticky_navigation: true
-  prev_next_buttons_location: bottom
-  include_homepage_in_sidebar: true
+  name: material
+  language: zh
+  logo: assets/logo.png
   favicon: assets/favicon.png
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.expand
+    - navigation.sections
+    - navigation.top
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: 切换到深色
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: 切换到浅色
+  icon:
+    repo: fontawesome/brands/github
 
 nav:
-  - 首页: index.md
-  - 快速上手:
-      - Agentica 是什么: introduction/what-is-agentica.md
-      - 安装与配置: getting-started/installation.md
-      - 5 分钟上手 (SDK): getting-started/quickstart.md
-      - CLI 终端指南: getting-started/terminal.md
-      - Web、桌面端与微信/IM: advanced/gateway.md
-  - 核心用法 (Python SDK):
-      - Agent 与 DeepAgent: concepts/agent.md
-      - 模型与提供商: concepts/model.md
-      - 工具与自定义工具: concepts/tools.md
-      - 记忆与常驻规则: concepts/memory.md
-  - 多智能体与协作:
-      - Subagent (子任务): multi-agent/subagent.md
-      - 多会话共用仓库 (Worktree): multi-agent/worktrees.md
-  - 进阶功能:
-      - 长任务循环 (/goal): advanced/goals.md
-      - 上下文压缩 (/compact): advanced/compression.md
-      - 技能系统 (Skills): advanced/skills.md
-      - 定时任务 (/cron): guides/cron_scheduler.md
-      - 运行预算与控制 (RunConfig): advanced/run-config.md
-      - 安全护栏 (Guardrails): advanced/guardrails.md
-      - 生命周期钩子 (Hooks): advanced/hooks.md
-      - MCP 外部工具集成: advanced/mcp.md
-      - ACP (IDE 集成): advanced/acp.md
-      - 多端能力对齐: advanced/surface-parity.md
-  - 配置与参考:
-      - 统一配置文件 (config.yaml): guides/config.md
-      - 模型提供商速查: guides/models.md
-      - OpenAI Responses API: guides/openai-responses.md
-      - 最佳实践与常见配方: guides/best_practices.md
-      - Agent API 参数表: api/agent.md
-      - 评测对比 (Benchmark): guides/benchmark.md
-  - 开发者选读 (架构与协议):
-      - 架构与内部实现: introduction/architecture.md
-      - 内置工具设计判据: concepts/builtin-tool-bar.md
-      - 外部进程协议：Shell Hooks: getting-started/shell-hooks.md
-      - 外部进程协议：Notify Sink: getting-started/notify-sink.md
-      - 外部进程协议：Attach Socket: getting-started/attach.md
-      - 依赖分层 RFC: rfcs/dependency-layering.md
-      - Thin Gateway 通用后端 API RFC: rfcs/thin-gateway-common-backend-api.md
-      - Public API 稳定度合约: API.md
-      - Daily Tasks: advanced/daily-tasks.md
-  - Changelog 存档: changelog-archive.md
+  - 入门:
+      - 首页: index.md
+      - 开始:
+          - Agentica 是什么: introduction/what-is-agentica.md
+          - 安装与配置: getting-started/installation.md
+          - CLI 终端: getting-started/terminal.md
+          - Web 与微信: advanced/gateway.md
+      - 使用:
+          - Schedule 提醒: getting-started/schedule.md
+          - 定时任务: guides/cron_scheduler.md
+          - 记忆与常驻规则: concepts/memory.md
+          - 记忆 MCP: getting-started/memory-mcp.md
+          - 技能: advanced/skills.md
+          - 长任务: advanced/goals.md
+  - 开发:
+      - SDK:
+          - 5 分钟上手: getting-started/quickstart.md
+          - Agent 与 DeepAgent: concepts/agent.md
+          - 模型与提供商: concepts/model.md
+          - 工具与自定义工具: concepts/tools.md
+          - 最佳实践: guides/best_practices.md
+      - 集成:
+          - MCP: advanced/mcp.md
+          - ACP: advanced/acp.md
+          - 生命周期钩子: advanced/hooks.md
+          - Shell Hooks: getting-started/shell-hooks.md
+          - Notify Sink: getting-started/notify-sink.md
+          - Attach Socket: getting-started/attach.md
+      - 多智能体:
+          - Subagent: multi-agent/subagent.md
+          - Worktree: multi-agent/worktrees.md
+      - 运行时:
+          - 上下文压缩: advanced/compression.md
+          - 运行预算: advanced/run-config.md
+          - 安全护栏: advanced/guardrails.md
+          - Daily Tasks: advanced/daily-tasks.md
+          - 多端能力对齐: advanced/surface-parity.md
+  - 参考:
+      - 配置文件: guides/config.md
+      - 模型速查: guides/models.md
+      - OpenAI Responses: guides/openai-responses.md
+      - Agent API: api/agent.md
+      - 架构: introduction/architecture.md
+      - 内置工具判据: concepts/builtin-tool-bar.md
+      - Public API: API.md
+      - 评测对比: guides/benchmark.md
+      - 协议:
+          - 依赖分层: rfcs/dependency-layering.md
+          - Thin Gateway: rfcs/thin-gateway-common-backend-api.md
+      - Changelog 存档: changelog-archive.md
 
 markdown_extensions:
   - pymdownx.highlight:

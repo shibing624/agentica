@@ -4,156 +4,181 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>下载 Agentica 桌面版</title>
-  <meta name="description" content="按你的系统下载 Agentica 桌面版。安装包自带 Python，打开即用。未签名时各系统的一次放行办法也在这页。">
+  <meta name="description" content="按当前系统下载 Agentica 桌面版。安装包自带 Python，打开即用。">
   <link rel="icon" href="../assets/favicon.png">
   <style>
-    :root { color-scheme: light; }
+    :root { color-scheme: dark; }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      background: #f6f4ef;
-      color: #1c1915;
-      font: 17px/1.55 "Iowan Old Style", Palatino, "Songti SC", "Source Han Serif SC", serif;
+      min-height: 100vh;
+      color: #f3f6fb;
+      font: 16px/1.6 "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+      background:
+        radial-gradient(900px 480px at 50% -10%, rgba(88, 140, 255, 0.28), transparent 60%),
+        radial-gradient(700px 420px at 80% 20%, rgba(70, 90, 160, 0.18), transparent 55%),
+        #070b14;
     }
-    a { color: #1d4e39; }
-    main { max-width: 40rem; margin: 0 auto; padding: 3.5rem 1.25rem 4rem; }
-    header { display: flex; gap: 0.9rem; align-items: center; }
-    header img { width: 64px; height: 64px; }
-    h1 { font-size: 1.85rem; line-height: 1.15; margin: 0; font-weight: 650; }
-    .ver { margin: 0.2rem 0 0; color: #6b645c; font: 0.85rem/1.4 ui-sans-serif, system-ui, sans-serif; }
+    a { color: inherit; }
+    .top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 22px 24px 0;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 650; }
+    .brand img { width: 28px; height: 28px; border-radius: 7px; }
+    .top nav { display: flex; gap: 18px; font-size: 14px; }
+    .top nav a { color: #c5ceda; text-decoration: none; }
+    .top nav a:hover { color: #fff; }
+    .hero { max-width: 760px; margin: 0 auto; padding: 72px 24px 0; text-align: center; }
+    .kicker { margin: 0; color: #9eb0c8; font-size: 13px; letter-spacing: 0.08em; }
+    h1 { margin: 14px 0 0; font-size: clamp(40px, 6vw, 64px); line-height: 1.12; font-weight: 650; letter-spacing: -0.03em; }
+    .lede { margin: 18px auto 0; max-width: 36rem; color: #c5ceda; }
+    .dl { position: relative; display: inline-flex; margin-top: 28px; border-radius: 999px; background: #fff; color: #111; }
+    .go, .more {
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: 600 15px/1 "Segoe UI", "PingFang SC", sans-serif;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .go { padding: 14px 8px 14px 22px; }
+    .more { padding: 14px 18px 14px 6px; border-radius: 0 999px 999px 0; font-size: 12px; }
+    .dl:hover { background: #f2f4f8; }
+    .menu {
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      width: max-content;
+      min-width: 240px;
+      padding: 6px;
+      text-align: left;
+      background: rgba(28, 34, 48, 0.96);
+      color: #f3f6fb;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+    }
+    .menu a {
+      display: block;
+      padding: 10px 12px;
+      border-radius: 10px;
+      text-decoration: none;
+    }
+    .menu a:hover, .menu a.you { background: rgba(255, 255, 255, 0.08); }
+    .menu small { display: block; color: #9aa6b8; font-size: 12px; font-weight: 400; }
+    .ver { margin: 14px 0 0; color: #8b97a8; font-size: 13px; }
     .shot {
       display: block;
-      width: 100%;
-      height: auto;
-      margin: 1.35rem 0 1.75rem;
-      border: 1px solid #e4dfd6;
-      border-radius: 12px;
+      width: min(920px, calc(100% - 32px));
+      margin: 48px auto 0;
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
     }
-    .go {
-      display: inline-block;
-      background: #1c1915;
-      color: #f6f4ef;
-      text-decoration: none;
-      font: 600 1.05rem/1 ui-sans-serif, system-ui, sans-serif;
-      padding: 0.95rem 1.25rem;
-      border-radius: 10px;
-    }
-    .go:hover { background: #3a342c; }
-    .alt { margin: 0.75rem 0 0; font: 0.95rem/1.45 ui-sans-serif, system-ui, sans-serif; }
-    h2 { font-size: 1.15rem; margin: 2.25rem 0 0.6rem; }
-    table { width: 100%; border-collapse: collapse; font: 0.95rem/1.4 ui-sans-serif, system-ui, sans-serif; }
-    th, td { text-align: left; padding: 0.55rem 0.4rem; border-bottom: 1px solid #e4dfd6; vertical-align: baseline; }
-    th { color: #6b645c; font-weight: 600; }
-    tr.you td:first-child { box-shadow: inset 3px 0 0 #1d4e39; }
-    .size { color: #6b645c; }
+    .unblock { max-width: 760px; margin: 0 auto; padding: 64px 24px 80px; }
+    .unblock h2 { margin: 0 0 8px; font-size: 22px; }
+    .unblock > p { margin: 0 0 16px; color: #c5ceda; }
     .card {
-      background: #fff;
-      border: 1px solid #e4dfd6;
-      border-radius: 12px;
-      padding: 0.85rem 1rem;
-      margin: 0.7rem 0;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      padding: 14px 16px;
+      margin: 10px 0;
     }
-    .card.you { border-color: #1d4e39; }
-    .card h3 { margin: 0 0 0.35rem; font-size: 1rem; }
-    .card p { margin: 0.35rem 0; }
-    code, .cmd {
-      font: 0.86rem/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-      background: #f0ece4;
-      border-radius: 6px;
-    }
-    code { padding: 0.05rem 0.3rem; }
-    .cmdrow { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.45rem; }
-    .cmd { display: block; flex: 1; padding: 0.45rem 0.6rem; overflow-x: auto; white-space: nowrap; }
-    button.copy {
-      font: 600 0.8rem/1 ui-sans-serif, system-ui, sans-serif;
-      border: 1px solid #cfc8bc;
-      background: #fff;
+    .card.you { border-color: rgba(150, 190, 255, 0.7); }
+    .card h3 { margin: 0 0 6px; font-size: 16px; }
+    .card p { margin: 0; color: #c5ceda; }
+    .cmdrow { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+    .cmd {
+      flex: 1;
+      overflow-x: auto;
+      white-space: nowrap;
+      padding: 8px 10px;
       border-radius: 8px;
-      padding: 0.45rem 0.6rem;
-      cursor: pointer;
+      background: rgba(0, 0, 0, 0.35);
+      font: 13px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     }
-    footer { margin-top: 2rem; color: #6b645c; font: 0.85rem/1.45 ui-sans-serif, system-ui, sans-serif; }
+    button.copy {
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      background: transparent;
+      color: #f3f6fb;
+      border-radius: 8px;
+      padding: 8px 10px;
+      cursor: pointer;
+      font: 600 13px/1 inherit;
+    }
+    footer { max-width: 760px; margin: 0 auto; padding: 0 24px 48px; color: #8b97a8; font-size: 13px; }
+    footer a { color: #d5deea; }
   </style>
 </head>
 <body>
-<main>
-  <header>
-    <img src="../assets/logo.png" alt="">
-    <div>
-      <h1>下载桌面版</h1>
-      <p class="ver" id="ver">正在读取最新版本…</p>
-    </div>
+  <header class="top">
+    <a class="brand" href="https://shibing624.github.io/agentica/">
+      <img src="../assets/logo.png" alt="">
+      Agentica
+    </a>
+    <nav>
+      <a href="https://shibing624.github.io/agentica/">文档</a>
+      <a href="https://github.com/shibing624/agentica">GitHub</a>
+    </nav>
   </header>
-  <img class="shot" src="../assets/agentica-web.png" alt="Agentica 桌面应用界面">
 
-  <p><a class="go" id="go" href="https://github.com/shibing624/agentica/releases/latest">下载最新安装包</a></p>
-  <p class="alt" id="alt" hidden></p>
+  <main>
+    <section class="hero">
+      <p class="kicker" id="ver">桌面版</p>
+      <h1>Agentica<br>现在，开箱即用</h1>
+      <p class="lede">写代码、查资料、处理手头的事，从桌面应用开始。安装包自带运行环境，打开就能用。</p>
+      <div class="dl">
+        <a class="go" id="go" href="https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-arm64.dmg">下载 macOS 版</a>
+        <button class="more" id="more" type="button" aria-label="选择系统" aria-expanded="false" aria-controls="menu">▾</button>
+        <div class="menu" id="menu" hidden role="menu">
+          <a role="menuitem" id="link-mac-arm" data-key="mac-arm" href="https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-arm64.dmg">macOS（Apple 芯片）<small>macOS 11 或更高版本</small></a>
+          <a role="menuitem" id="link-mac-intel" data-key="mac-intel" href="https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-x64.dmg">macOS（Intel）<small>macOS 11 或更高版本</small></a>
+          <a role="menuitem" id="link-win" data-key="win" href="https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-win32-x64.exe">Windows（64 位）<small>Windows 10 或更高版本</small></a>
+          <a role="menuitem" id="link-appimage" data-key="appimage" href="https://github.com/shibing624/agentica/releases/latest/download/Agentica-x86_64.AppImage">Linux AppImage<small>x64</small></a>
+          <a role="menuitem" id="link-deb" data-key="deb" href="https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-linux-amd64.deb">Linux deb<small>x64</small></a>
+        </div>
+      </div>
+    </section>
 
-  <h2>全部系统</h2>
-  <table>
-    <thead><tr><th>系统</th><th>安装包</th></tr></thead>
-    <tbody>
-      <tr id="row-mac" data-os="mac">
-        <td>macOS 11+</td>
-        <td>
-          <a id="link-mac-arm" href="https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-arm64.dmg">Apple 芯片</a>
-          <span class="size" id="size-mac-arm"></span>
-          ·
-          <a id="link-mac-intel" href="https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-x64.dmg">Intel</a>
-          <span class="size" id="size-mac-intel"></span>
-        </td>
-      </tr>
-      <tr id="row-win" data-os="win">
-        <td>Windows 10+</td>
-        <td>
-          <a id="link-win" href="https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-win32-x64.exe">x64 安装包</a>
-          <span class="size" id="size-win"></span>
-        </td>
-      </tr>
-      <tr id="row-linux" data-os="linux">
-        <td>Linux x64</td>
-        <td>
-          <a id="link-appimage" href="https://github.com/shibing624/agentica/releases/latest/download/Agentica-x86_64.AppImage">AppImage</a>
-          <span class="size" id="size-appimage"></span>
-          ·
-          <a id="link-deb" href="https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-linux-amd64.deb">deb</a>
-          <span class="size" id="size-deb"></span>
-        </td>
-      </tr>
-    </tbody>
-  </table>
+    <img class="shot" src="../assets/agentica-web.png" alt="Agentica 桌面应用界面">
 
-  <h2>第一次打开被拦住</h2>
-  <p>安装包目前没有签名。系统拦一次，按你的系统做完下面这一步就可以了。</p>
-
-  <article class="card" id="card-mac" data-os="mac">
-    <h3>macOS 说「已损坏，无法打开」</h3>
-    <p>把 <code>Agentica.app</code> 拖进「应用程序」，然后在终端执行一次：</p>
-    <div class="cmdrow">
-      <code class="cmd">sudo xattr -rd com.apple.quarantine /Applications/Agentica.app</code>
-      <button class="copy" type="button" data-copy="sudo xattr -rd com.apple.quarantine /Applications/Agentica.app">复制</button>
-    </div>
-  </article>
-
-  <article class="card" id="card-win" data-os="win">
-    <h3>Windows 说「Windows 已保护你的电脑」</h3>
-    <p>点「更多信息」，再点「仍要运行」。</p>
-  </article>
-
-  <article class="card" id="card-linux" data-os="linux">
-    <h3>Linux 上双击 AppImage 没有反应</h3>
-    <p>先给它执行权限。deb 不用这一步。</p>
-    <div class="cmdrow">
-      <code class="cmd">chmod +x Agentica-x86_64.AppImage</code>
-      <button class="copy" type="button" data-copy="chmod +x Agentica-x86_64.AppImage">复制</button>
-    </div>
-  </article>
+    <section class="unblock">
+      <h2>第一次打开被拦住</h2>
+      <p>安装包目前没有签名。系统拦一次，按你的系统做完下面这一步就可以了。</p>
+      <article class="card" id="card-mac" data-os="mac">
+        <h3>macOS 说「已损坏，无法打开」</h3>
+        <p>把 Agentica.app 拖进「应用程序」，然后在终端执行一次：</p>
+        <div class="cmdrow">
+          <code class="cmd">sudo xattr -rd com.apple.quarantine /Applications/Agentica.app</code>
+          <button class="copy" type="button" data-copy="sudo xattr -rd com.apple.quarantine /Applications/Agentica.app">复制</button>
+        </div>
+      </article>
+      <article class="card" id="card-win" data-os="win">
+        <h3>Windows 说「Windows 已保护你的电脑」</h3>
+        <p>点「更多信息」，再点「仍要运行」。</p>
+      </article>
+      <article class="card" id="card-linux" data-os="linux">
+        <h3>Linux 上双击 AppImage 没有反应</h3>
+        <p>先给它执行权限。deb 不用这一步。</p>
+        <div class="cmdrow">
+          <code class="cmd">chmod +x Agentica-x86_64.AppImage</code>
+          <button class="copy" type="button" data-copy="chmod +x Agentica-x86_64.AppImage">复制</button>
+        </div>
+      </article>
+    </section>
+  </main>
 
   <footer>
-    <p>按钮和表格里的地址指向 <a id="release-link" href="https://github.com/shibing624/agentica/releases/latest">最新的 GitHub Release</a>。这一页打开时会再向 GitHub 要一次该版本的安装包。</p>
-    <p><a href="https://shibing624.github.io/agentica/advanced/gateway/">网页、微信和其它用法</a> · <a href="https://shibing624.github.io/agentica/">文档</a></p>
+    <p>下载地址来自 <a id="release-link" href="https://github.com/shibing624/agentica/releases/latest">最新的 GitHub Release</a>。打不开这一页的脚本时，按钮仍指向该版本的安装包。</p>
   </footer>
-</main>
+
 <script>
 (function () {
   var FILES = {
@@ -163,11 +188,22 @@
     appimage: "Agentica-x86_64.AppImage",
     deb: "agentica-desktop-linux-amd64.deb"
   };
-  var fallback = function (name) {
-    return "https://github.com/shibing624/agentica/releases/latest/download/" + encodeURIComponent(name);
+  var LABELS = {
+    "mac-arm": "下载 macOS 版",
+    "mac-intel": "下载 macOS 版",
+    win: "下载 Windows 版",
+    appimage: "下载 Linux 版",
+    deb: "下载 Linux 版"
   };
   var urls = {};
-  Object.keys(FILES).forEach(function (key) { urls[key] = fallback(FILES[key]); });
+  Object.keys(FILES).forEach(function (key) {
+    urls[key] = "https://github.com/shibing624/agentica/releases/latest/download/" + FILES[key];
+  });
+
+  var go = document.getElementById("go");
+  var more = document.getElementById("more");
+  var menu = document.getElementById("menu");
+  var primary = "mac-arm";
 
   function os() {
     var p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
@@ -178,79 +214,50 @@
     return "";
   }
 
-  function macArchFromUA() {
-    if (/aarch64|ARM64|Apple ?Silicon/i.test(navigator.userAgent || "")) return "arm64";
-    return "";
-  }
-
-  function mark(name) {
+  function apply() {
+    go.href = urls[primary];
+    go.textContent = LABELS[primary];
+    document.querySelectorAll(".menu a").forEach(function (el) {
+      var key = el.getAttribute("data-key");
+      el.href = urls[key];
+      el.classList.toggle("you", key === primary);
+    });
     document.querySelectorAll("[data-os]").forEach(function (el) {
+      var name = primary.indexOf("mac") === 0 ? "mac" : (primary === "win" ? "win" : "linux");
       el.classList.toggle("you", el.getAttribute("data-os") === name);
     });
-    var card = document.getElementById("card-" + name);
-    var first = card && card.parentNode.querySelector(".card");
-    if (card && first && first !== card) card.parentNode.insertBefore(card, first);
   }
 
-  function setPrimary(osName, arch) {
-    var go = document.getElementById("go");
-    var alt = document.getElementById("alt");
-    if (osName === "mac") {
-      var arm = arch !== "x64";
-      var known = arch === "arm64" || arch === "x64";
-      go.href = arm ? urls["mac-arm"] : urls["mac-intel"];
-      go.textContent = arm ? "下载 macOS 版（Apple 芯片）" : "下载 macOS 版（Intel）";
-      alt.hidden = false;
-      alt.innerHTML = known
-        ? (arm
-          ? "Intel 芯片用 <a href=\"" + urls["mac-intel"] + "\">这个</a>"
-          : "Apple 芯片用 <a href=\"" + urls["mac-arm"] + "\">这个</a>")
-        : "没有识别出芯片。上面是 Apple 芯片；Intel 用 <a href=\"" + urls["mac-intel"] + "\">这个</a>";
-    } else if (osName === "win") {
-      go.href = urls.win;
-      go.textContent = "下载 Windows 版";
-      alt.hidden = true;
-    } else if (osName === "linux") {
-      go.href = urls.appimage;
-      go.textContent = "下载 Linux 版（AppImage）";
-      alt.hidden = false;
-      alt.innerHTML = "用 deb 安装的话，下 <a href=\"" + urls.deb + "\">这个</a>";
-    } else {
-      go.href = "https://github.com/shibing624/agentica/releases/latest";
-      go.textContent = "打开最新的安装包列表";
-      alt.hidden = true;
-    }
-  }
-
-  function applyLinks() {
-    document.getElementById("link-mac-arm").href = urls["mac-arm"];
-    document.getElementById("link-mac-intel").href = urls["mac-intel"];
-    document.getElementById("link-win").href = urls.win;
-    document.getElementById("link-appimage").href = urls.appimage;
-    document.getElementById("link-deb").href = urls.deb;
-  }
-
-  function showSize(id, bytes) {
-    if (!bytes) return;
-    document.getElementById(id).textContent = " " + Math.round(bytes / 1048576) + " MB";
+  function choose(key) {
+    if (!LABELS[key]) return;
+    primary = key;
+    apply();
   }
 
   var current = os();
-  var macArch = macArchFromUA();
-  mark(current);
-  setPrimary(current, current === "mac" ? macArch : "");
-  applyLinks();
-
-  function rememberMacArch(info) {
-    var detected = info.architecture === "arm" ? "arm64" : (info.architecture === "x86" ? "x64" : "");
-    if (!detected) return;
-    macArch = detected;
-    setPrimary("mac", macArch);
-  }
+  if (current === "win") primary = "win";
+  else if (current === "linux") primary = "appimage";
+  else if (/aarch64|ARM64|Apple ?Silicon/i.test(navigator.userAgent || "")) primary = "mac-arm";
+  apply();
 
   if (current === "mac" && navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
-    navigator.userAgentData.getHighEntropyValues(["architecture"]).then(rememberMacArch).catch(function () {});
+    navigator.userAgentData.getHighEntropyValues(["architecture"]).then(function (info) {
+      if (info.architecture === "arm") choose("mac-arm");
+      else if (info.architecture === "x86") choose("mac-intel");
+    }).catch(function () {});
   }
+
+  more.addEventListener("click", function () {
+    var open = menu.hidden;
+    menu.hidden = !open;
+    more.setAttribute("aria-expanded", open ? "true" : "false");
+  });
+  document.addEventListener("click", function (event) {
+    if (!event.target.closest(".dl")) {
+      menu.hidden = true;
+      more.setAttribute("aria-expanded", "false");
+    }
+  });
 
   document.querySelectorAll("button.copy").forEach(function (btn) {
     btn.addEventListener("click", function () {
@@ -275,18 +282,12 @@
       var asset = byName[FILES[key]];
       if (asset && asset.browser_download_url) urls[key] = asset.browser_download_url;
     });
-    applyLinks();
-    showSize("size-mac-arm", byName[FILES["mac-arm"]] && byName[FILES["mac-arm"]].size);
-    showSize("size-mac-intel", byName[FILES["mac-intel"]] && byName[FILES["mac-intel"]].size);
-    showSize("size-win", byName[FILES.win] && byName[FILES.win].size);
-    showSize("size-appimage", byName[FILES.appimage] && byName[FILES.appimage].size);
-    showSize("size-deb", byName[FILES.deb] && byName[FILES.deb].size);
+    apply();
     var tag = data.tag_name || "";
-    document.getElementById("ver").textContent = tag ? ("最新版本 " + tag) : "已连接到最新版本";
+    document.getElementById("ver").textContent = tag ? ("最新版本 " + tag) : "桌面版";
     if (data.html_url) document.getElementById("release-link").href = data.html_url;
-    setPrimary(current, current === "mac" ? macArch : "");
   }).catch(function () {
-    document.getElementById("ver").textContent = "链接指向 GitHub 上的最新版本";
+    document.getElementById("ver").textContent = "桌面版";
   });
 })();
 </script>

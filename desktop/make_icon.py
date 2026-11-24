@@ -5,8 +5,8 @@ macOS / iOS app icons use: a square with continuously curved corners, not a
 circle and not a hard-cornered square. One source drives every output:
 
   desktop/build/icon.png        1024  electron-builder master (it refuses < 512)
-  desktop/build/icon-mac.png    1024  macOS bundle: full-bleed square, the OS rounds it
-  desktop/build/icon-dock.png   1024  unpackaged Dock only: squircle, setIcon draws as-is
+  desktop/build/icon-mac.png    1024  macOS bundle: same badge, opaque to the edges
+  desktop/build/icon-dock.png   1024  unpackaged Dock: squircle with a transparent margin
   web/src/assets/app-icon.png    256  sidebar / welcome / login brand mark
   web/public/favicon.png          64  browser tab
   web/public/favicon.ico           multi-resolution ICO, same artwork
@@ -47,13 +47,9 @@ SQUIRCLE_N = 4.6
 # roughly 20-30% air around the glyph; 0.66 leaves that without shrinking the
 # cat illegible at 16px.
 CAT_FILL = 0.66
-# Same, for the full-bleed macOS icon, as a share of the whole canvas. The
-# system mask trims the corners, so the cat sits a little smaller than
-# CAT_FILL * (1 - 2 * MARGIN) would suggest to keep it clear of the rounded edge.
-MAC_CAT_FILL = 0.62
-# Unpackaged Dock only. setIcon does not apply the icon grid, so this margin
-# is drawn into the file. The packaged icon must not use it: macOS 26 treats a
-# pre-rounded image with transparent padding as a legacy icon and shrinks it.
+# Unpackaged Dock only. setIcon draws the PNG as-is, so the margin is in the
+# file. The installed bundle must not use this file: a transparent margin makes
+# macOS nest the picture inside the system icon plate.
 MAC_MARGIN = 0.10
 BADGE = (234, 243, 255, 255)  # the logo's own pale blue
 BORDER = (196, 219, 250, 255)  # a hairline so the pale badge reads on a light sidebar
@@ -128,40 +124,29 @@ def build(size: int = SIZE, margin: float = MARGIN) -> Image.Image:
     return canvas.resize((size, size), Image.LANCZOS)
 
 
-def build_mac(size: int = SIZE) -> Image.Image:
-    """Full-bleed square for the macOS app bundle.
-
-    macOS 26 applies the icon mask itself. An icon that carries its own rounded
-    shape and transparent margin is treated as a legacy icon and shrunk into a
-    grey rounded container, which is the small tile with a cat inside it. A
-    flat opaque square that reaches every edge is masked directly, so the
-    artwork fills the tile. No margin, no corners, no border: the system
-    supplies all three.
-    """
-    scale = 4
-    work = size * scale
-    canvas = Image.new("RGBA", (work, work), BADGE)
-    cat = cut_out(Image.open(SOURCE).convert("RGBA").crop(CROP))
-    factor = work * MAC_CAT_FILL / max(cat.size)
-    cat = cat.resize((round(cat.width * factor), round(cat.height * factor)), Image.LANCZOS)
-    canvas.paste(cat, ((work - cat.width) // 2, (work - cat.height) // 2 + round(work * 0.012)), cat)
-    return canvas.resize((size, size), Image.LANCZOS)
-
-
 def build_dock(size: int = SIZE) -> Image.Image:
-    """Squircle for ``app.dock.setIcon`` on unpackaged runs.
-
-    setIcon draws the PNG as-is and does not round or inset it, so a full-bleed
-    square would be a hard-cornered tile. The packaged icon stays full-bleed;
-    this file is only for ``npm start``.
-    """
+    """Squircle for ``app.dock.setIcon``. The transparent margin is intentional."""
     return build(size, margin=MAC_MARGIN)
+
+
+def build_mac(size: int = SIZE) -> Image.Image:
+    """Same badge and cat as ``build_dock``, opaque to the canvas edge.
+
+    ``icon-dock.png`` in the bundle is a legacy icon: macOS draws that
+    already-rounded picture inside the system plate, so the Dock shows a small
+    badge inside a larger rounded square. Flattening onto the badge color leaves
+    no transparent pixel for that treatment. The system plate is the icon.
+    """
+    art = build(size, margin=0)
+    flat = Image.new("RGBA", art.size, BADGE)
+    flat.alpha_composite(art)
+    return flat
 
 
 def main() -> None:
     mac = HERE / "build" / "icon-mac.png"
     build_mac(SIZE).save(mac)
-    print(f"wrote {mac.relative_to(ROOT)} ({SIZE}x{SIZE}, full-bleed)")
+    print(f"wrote {mac.relative_to(ROOT)} ({SIZE}x{SIZE}, opaque)")
 
     dock = HERE / "build" / "icon-dock.png"
     build_dock(SIZE).save(dock)

@@ -179,6 +179,7 @@ log.export("trace.json", kind="analysis")  # 导出结构化分析 JSON
 
 ## 下一步
 
+- [记忆 MCP](../getting-started/memory-mcp.md) — 把外部记忆服务接到工具列表
 - [Agent 与 DeepAgent](agent.md) — Agent 的完整配置方式
 - [上下文压缩 (/compact)](../advanced/compression.md) — 长会话换窗与 `search_session` 用法
 - [技能系统 (Skills)](../advanced/skills.md) — 用 `SKILL.md` 沉淀可复用的领域工作流

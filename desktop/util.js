@@ -59,9 +59,9 @@ function parsePort(content) {
  * to having configured no icon at all — anywhere else.
  *
  * Unpackaged macOS uses `icon-dock.png`. `app.dock.setIcon` draws the PNG as-is,
- * so the squircle has to be in the file. The installed app does not: its bundle
- * icon is the full-bleed `icon-mac.png`, and macOS 26 masks that itself. Feeding
- * setIcon's pre-rounded file to the bundle shrinks it into a small tile.
+ * so the squircle and its transparent margin are in the file. The installed
+ * bundle uses `icon-mac.png`: the same badge flattened opaque to the edges.
+ * The dock file's transparent margin is what gets nested inside the system plate.
  */
 function iconPath(platform = process.platform) {
   return path.join(__dirname, "build", platform === "darwin" ? "icon-dock.png" : "icon.png");
