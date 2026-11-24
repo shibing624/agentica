@@ -29,7 +29,23 @@ from agentica import (
 )
 ```
 
-> 兼容 OpenAI API 的任意自定义端点：直接用 `OpenAIChat(id=..., api_key=..., base_url=...)`。
+> 兼容 OpenAI API 的任意自定义端点：直接用 `OpenAIChat(id=..., api_key=..., base_url=...)`。本地 Ollama：`Ollama(id="llama3.1")`，不需要 API Key。
+
+## 副模型与备用模型
+
+CLI 和网页把这两项写在 [config.yaml](../guides/config.md) 的 profile 里。在代码里则传模型对象。每家厂商读自己的环境变量，同一家的主模型和副模型共用一把 key。
+
+```python
+from agentica import Agent, OpenAIChat, DeepSeek, ZhipuAI
+
+agent = Agent(
+    model=OpenAIChat(id="gpt-4o"),
+    auxiliary_model=DeepSeek(id="deepseek-v4-flash"),  # 记忆抽取、纠正分类、/goal 裁判
+    fallback_models=[ZhipuAI(id="glm-4.7-flash")],      # 主模型 5xx / 429 / 超时后换它
+)
+```
+
+`auto` 档的审查要单独指定模型时，用 `auxiliary_task_models={"auto_review": review_model}`，优先于 `auxiliary_model`。换窗写 notes 走主模型，不走副模型。
 
 ## 通用参数
 

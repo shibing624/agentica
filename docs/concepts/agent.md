@@ -541,6 +541,112 @@ Agentica 将 System Prompt 分为三个区域，最大化 LLM prefix-cache 命�
 
 日期精确到**天**（`YYYY-MM-DD`），同一天的请求 datetime 字段完全相同，前缀 cache 可复用。
 
+## 长期记忆
+
+普通 `Agent()` 每次 `run()` 是独立的单轮调用，也不会自己去读 `MEMORY.md`。CLI、网页和 `DeepAgent` 默认打开下面这些开关。产品侧怎么用见 [记忆与常驻规则](memory.md)。
+
+多轮对话打开 `add_history_to_context=True`。要落盘成 `.jsonl`，再传 `session_id`：
+
+```python
+from agentica import Agent, OpenAIChat
+
+agent = Agent(
+    model=OpenAIChat(id="gpt-4o-mini"),
+    session_id="user-1001-chat",
+    add_history_to_context=True,
+    # num_history_turns=10,  # 可选：只保留最近 10 轮；默认重放当前窗口全部轮次
+)
+```
+
+跨会话记忆要绑 `Workspace`，并打开 `enable_long_term_memory`。不论调用方传 `message="..."` 还是 `messages=[历史..., 本轮 user]`，召回都改写最后一条 user 消息的副本，不动调用方传进来的对象。
+
+```python
+from agentica import Agent, OpenAIChat, Workspace
+from agentica.agent.config import WorkspaceMemoryConfig
+
+agent = Agent(
+    model=OpenAIChat(id="gpt-4o-mini"),
+    workspace=Workspace(path="./my_workspace", user_id="alice"),
+    enable_long_term_memory=True,
+    long_term_memory_config=WorkspaceMemoryConfig(
+        load_workspace_context=True,   # 加载 AGENTS.md
+        load_workspace_memory=True,    # 加载 MEMORY.md 索引
+        recall_memories=True,          # 每轮挑选相关记忆（普通 Agent 默认关闭）
+        recall_sessions=True,          # 每轮拼 <session_recall>
+        track_intents=True,            # 后台整理未完成的工作项
+        max_memory_entries=5,
+        auto_archive=True,
+        auto_extract_memory=False,
+    ),
+)
+```
+
+多租户时每个用户一个 `Workspace(path="./workspace", user_id=user_id)`，文件落在 `users/<user_id>/`。
+
+不经过模型、直接读写：
+
+```python
+from agentica import Workspace
+
+ws = Workspace("./my_workspace", user_id="alice")
+ws.initialize()
+await ws.write_memory_entry(
+    title="Python 风格偏好",
+    content="优先使用类型注解和简洁的函数拆分。",
+    memory_type="feedback",
+    description="python coding style type hints",
+)
+hits = ws.search_memory("python 风格", limit=5)
+```
+
+设了 `session_id` 之后可以导出和 CLI `/trace` 同源的日志：
+
+```python
+log = agent.session_log
+print(log.path)
+print(log.format_trace())
+log.export("my-session-001.jsonl")
+log.export("trace.json", kind="analysis")
+```
+
+## 长任务
+
+CLI 和网页用 `/goal`。代码里用 `run_goal`。预算、暂停和恢复的产品说明见 [长任务](../advanced/goals.md)。
+
+```python
+from agentica import Agent, DeepSeek
+
+agent = Agent(
+    session_id="refactor-task",
+    model=DeepSeek(id="deepseek-v4-pro"),
+    auxiliary_model=DeepSeek(id="deepseek-v4-flash", max_completion_tokens=4096),
+)
+
+result = await agent.run_goal(
+    "在 examples/ 下新增一个 mcp_client 示例并验证可运行",
+    token_budget=200_000,
+    wall_clock_budget_sec=1800,
+    turn_budget=None,
+)
+print(result.status)            # "complete" | "paused" | "budget_limited"
+print(result.reason)
+print(result.turns_used)
+print(result.response_content)
+```
+
+三个预算互相独立，先到的那个触发收尾，状态为 `budget_limited`。推理模型当副模型时加上 `max_completion_tokens=4096`，避免裁判的 JSON 被思维链截断。
+
+```python
+from agentica.run.events import RunEventType
+
+def on_goal_event(event_type: RunEventType, payload: dict) -> None:
+    print(event_type.value, payload)
+
+await agent.run_goal("完成数据清洗脚本", event_callback=on_goal_event)
+```
+
+事件有 `goal.set`、`goal.continuing`、`goal.completed`、`goal.paused`。
+
 ## SandboxConfig（沙箱安全）
 
 对不受信任的代码执行场景，启用沙箱限制：

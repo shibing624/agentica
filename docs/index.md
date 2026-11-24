@@ -21,7 +21,8 @@
 |---|---|
 | **在终端里写代码、查问题、跑长任务** | 1. [安装与配置](getting-started/installation.md)（`uv tool install agentica`）<br>2. [CLI 终端指南](getting-started/terminal.md)（`@文件`、`/model`、`/resume`、`/goal`、`/worktree`） |
 | **用桌面端，打开即用** | [下载桌面版](https://shibing624.github.io/agentica/desktop/) |
-| **用网页，或在手机微信里遥控电脑上的会话** | [Web 与微信/IM](advanced/gateway.md)（`uv tool install "agentica[gateway]"` → `agentica-gateway`） |
+| **用网页** | [Web 与桌面端](advanced/gateway.md)（`uv tool install "agentica[gateway]"` → `agentica-gateway`） |
+| **在手机微信里遥控电脑上的会话** | [微信与 IM](advanced/im.md) |
 | **在自己的 Python 项目里嵌入 Agent** | 1. [5 分钟上手 (SDK)](getting-started/quickstart.md)（`uv add agentica`）<br>2. [Agent 与 DeepAgent](concepts/agent.md) · [最佳实践配方](guides/best_practices.md) |
 | **了解内部架构与设计原因（开发者选读）** | [架构与内部实现](introduction/architecture.md) · [内置工具设计判据](concepts/builtin-tool-bar.md) |
 
@@ -29,27 +30,13 @@
 
 ## 30 秒体验
 
-### 方式一：交互式 CLI
-
 ```bash
 uv tool install agentica
 export ZAI_API_KEY="your-api-key"   # 或 OPENAI_API_KEY / DEEPSEEK_API_KEY / ANTHROPIC_API_KEY
 agentica
 ```
 
-### 方式二：Python SDK
-
-```bash
-uv add agentica
-```
-
-```python
-from agentica import Agent, ZhipuAI
-
-agent = Agent(model=ZhipuAI())
-result = agent.run_sync("一句话介绍北京")
-print(result.content)
-```
+嵌进 Python 项目见「开发」里的 [5 分钟上手 (SDK)](getting-started/quickstart.md)。
 
 ---
 
@@ -62,9 +49,10 @@ print(result.content)
 | 文档 | 内容 |
 |------|------|
 | [Agentica 是什么](introduction/what-is-agentica.md) | 产品形态与核心能力 |
-| [安装与配置](getting-started/installation.md) | 安装 CLI / Web / SDK，配置模型 API Key |
+| [安装与配置](getting-started/installation.md) | 安装 CLI / Web，配置模型 API Key |
 | [CLI 终端](getting-started/terminal.md) | 命令行参数、`@文件`、斜杠命令 |
-| [Web 与微信](advanced/gateway.md) | 本地网页、微信扫码、手机遥控本机会话 |
+| [Web 与桌面端](advanced/gateway.md) | 本地网页、桌面端工作区与审批 |
+| [微信与 IM](advanced/im.md) | 微信扫码、手机遥控本机会话 |
 | [Schedule 提醒](getting-started/schedule.md) | 在对话或「自动化任务」里创建、修改、运行提醒 |
 | [定时任务](guides/cron_scheduler.md) | CLI `/cron` 与独立 daemon |
 | [记忆与常驻规则](concepts/memory.md) | 会话历史、`MEMORY.md`、`AGENTS.md` |

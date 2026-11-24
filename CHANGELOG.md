@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **思考强度没单独设置时，菜单显示 default**：中文原先是「端点默认」，英文是「Endpoint default」。现在两种语言都显示 `default`。
+
+- **入门文档不再夹 Python SDK 示例**：安装、首页、「是什么」、记忆、技能和长任务这几篇只讲桌面端、网页、CLI 和微信。`uv add`、`Agent()`、记忆开关、`run_goal` 和 `SkillTool` 改到「开发」里的 [5 分钟上手](docs/getting-started/quickstart.md)、[Agent](docs/concepts/agent.md)、[模型](docs/concepts/model.md) 和 [工具](docs/concepts/tools.md)。副模型和备用模型在安装页改为指向 `config.yaml`。
+
+- **文档把网页/桌面端和微信/IM 拆成两页**：原先 [Web、桌面端与微信/IM](docs/advanced/gateway.md) 写在同一篇里。现在 `/advanced/gateway/` 只讲本地网页和桌面应用，微信扫码、手机遥控和各 IM 渠道改到 [微信与 IM](docs/advanced/im.md)（`/advanced/im/`）。
+
 - **队列里的「立刻插话」悬停立刻可见**：上箭头的提示画在按钮上方，而排队条的面板是 `overflow: hidden`、列表又在滚动，提示被裁掉，悬停几秒也看不到。现在提示改到按钮左侧、不延迟，文案是「立刻插话」。
 
 - **在会话内调整模型的思考程度**：Web / Desktop 的输入框模型菜单和 CLI `/model --effort` 共享会话档位，Profile 通过 `reasoning_effort_options` 声明端点支持的值。调整档位会固定当前 Profile，避免把档位套到其他端点；恢复默认只清除档位覆盖，不解除 Profile 固定。进行中的回复不受影响。

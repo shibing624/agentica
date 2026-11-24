@@ -50,7 +50,8 @@ nav:
           - Agentica 是什么: introduction/what-is-agentica.md
           - 安装与配置: getting-started/installation.md
           - CLI 终端: getting-started/terminal.md
-          - Web 与微信: advanced/gateway.md
+          - Web 与桌面端: advanced/gateway.md
+          - 微信与 IM: advanced/im.md
       - 使用:
           - Schedule 提醒: getting-started/schedule.md
           - 定时任务: guides/cron_scheduler.md

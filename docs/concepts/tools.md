@@ -651,6 +651,28 @@ agent = Agent(tools=[search_tool, crawl_tool, analyze_tool])
 # 避免：超过 10 个工具（LLM 选择准确率下降）
 ```
 
+## 技能
+
+CLI 和网页会从标准目录以及包内 `agentica/skills/bundled/` 加载技能。自己构造的 `Agent()` / `DeepAgent()` 不会自动带上这些内置技能，也不会注入 `/worktree`、`cronjob` 这类只在产品里有的概念。需要时把 `SkillTool` 放进 `tools`。目录和 `SKILL.md` 的写法见 [技能](../advanced/skills.md)。
+
+```python
+from agentica import Agent, OpenAIChat
+from agentica.tools.skill_tool import SkillTool
+from agentica.run.config import RunConfig
+
+agent = Agent(
+    model=OpenAIChat(id="gpt-4o"),
+    tools=[SkillTool(custom_skill_dirs=["./team-skills/data-engineering"])],
+)
+
+result = await agent.run(
+    "用 data-engineering skill 帮我设计数据管道",
+    config=RunConfig(enabled_skills=["data-engineering"]),
+)
+```
+
+`enabled_skills` 是这一轮的白名单；不传就用 `SkillTool` 扫到的全部技能。Worktree 不在默认工具里，要自己调用 `agentica.git.worktree.ensure()`，或把 `WorktreeTool` 放进 `tools`。各端差异见 [多端能力对齐](../advanced/surface-parity.md)。
+
 ## 下一步
 
 - [Agent 概念](agent.md) -- Agent 如何调度工具

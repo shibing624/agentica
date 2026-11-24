@@ -39,6 +39,12 @@ profiles:
       base_url: https://open.bigmodel.cn/api/paas/v4
       api_key: your-zhipu-key
 
+    # 可选：主模型 5xx / 429 / 超时后按顺序换这些模型。字段与 auxiliary_model 相同。
+    fallback_models:
+      - model_provider: zhipuai
+        model_name: glm-4.7-flash
+        api_key: your-zhipu-key
+
     # 可选：auto 档的逐调用 LLM 审查用哪个模型（默认 auxiliary_model，
     # 没配 auxiliary 就退回主模型）。块结构与 auxiliary_model 相同。
     auto_review_model:
@@ -142,6 +148,7 @@ agentica --profile gpt_responses
 | `base_url` | `str` | API 接口地址（官方地址或你的代理网关地址） |
 | `api_key` | `str` | API 密钥 |
 | `auxiliary_model` | `dict` | 副模型配置块（支持与主模型相同的字段），用于 `task` 子任务、记忆提取、`/goal` 裁判等后台任务；不配则默认复用主模型 |
+| `fallback_models` | `list` | 主模型遇到 5xx、429、超时或内容过滤后按顺序尝试的模型块；同厂商继承主模型的地址和 key |
 | `auto_review_model` | `dict` | 可选，auto 档 LLM 审查使用的模型块（结构同 `auxiliary_model`）；不配则用 `auxiliary_model`，再退回主模型 |
 | `wire_api` | `str` | 仅 `model_provider: openai` 使用：`chat_completions`（默认）或 `responses`（启用 OpenAI Responses API） |
 | `reasoning_effort` | `str` | Chat Completions 思考强度（如 `low` / `medium` / `high` / `max`），原样传给服务端 |

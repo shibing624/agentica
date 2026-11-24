@@ -91,33 +91,13 @@ metadata:
 3. `AGENTICA_EXTRA_SKILL_PATH` 指定的外部目录（支持用 `:` 分隔多个路径，也支持直接指向单个 skill 目录）
 4. `~/.claude/skills/`（用户级）
 5. `~/.agentica/skills/`（用户级）
-6. 包内 `agentica/skills/bundled/`（**仅 CLI / gateway**，`load_system_skills()`；SDK 的 `load_skills()` 不扫这一层）
+6. 包内 `agentica/skills/bundled/`（CLI 和网页会加载；自己写的 `Agent()` 不会自动带上，见 [工具与自定义工具](../concepts/tools.md#技能)）
 
 同名 Skill，项目级覆盖用户级；用户级覆盖包内内置（`agentica` / `browser` / `cron` / `long-running-jobs` / `worktree`）。内置 skill 直接从包内目录原位加载，不往 `$AGENTICA_HOME` 拷贝任何文件（升级即随包更新）。覆盖方式是在 `~/.agentica/skills/<name>/` 写同名 skill。
 
-`Agent()` / `DeepAgent()` 作为 SDK 使用时不会自动出现这些内置 skill。SDK 是显式组合：模型、工具、记忆、工作目录由宿主进程自己传；CLI / gateway 专属概念（`/worktree` 面板、`session_id` / `owner`、缓存 agent 失效、`self_manage`、`cronjob` 等）不会隐式注入。需要 worktree 时，可直接调用 `agentica.git.worktree.ensure()`，或把 `WorktreeTool(WorktreeBinder(...))` 显式放进 `tools=[...]`；详见 [多端能力对齐](surface-parity.md#python-sdk)。
-
 ## 加载与使用
 
-### 方式一：SkillTool（程序化）
-
-```python
-from agentica import Agent, OpenAIChat
-from agentica.tools.skill_tool import SkillTool
-
-agent = Agent(
-    model=OpenAIChat(id="gpt-4o"),
-    tools=[SkillTool()],           # 自动扫描标准目录
-)
-
-# 也可指定自定义目录
-agent = Agent(
-    model=OpenAIChat(id="gpt-4o"),
-    tools=[SkillTool(custom_skill_dirs=["./my-skills/web-research"])],
-)
-```
-
-也可以直接挂外部 skill 仓库，而不必复制到项目目录：
+外部目录不用复制进项目，直接指过去：
 
 ```bash
 export AGENTICA_EXTRA_SKILL_PATH="/home/user/skills/learn-from-experience:/opt/shared/skills"
@@ -125,14 +105,14 @@ export AGENTICA_EXTRA_SKILL_PATH="/home/user/skills/learn-from-experience:/opt/s
 
 当路径本身就是一个包含 `SKILL.md` 的 skill 目录时，`SkillLoader` 会直接加载它。
 
-### 方式二：DeepAgent 内置（CLI 推荐）
+### CLI
 
 ```bash
 agentica --enable-skills
 # Skills 自动从标准目录加载，对话中可直接使用
 ```
 
-`DeepAgent` 现在默认也会自动加载当前工作目录下的 `mcp_config.json/yaml/yml`，所以 CLI 里不需要再单独把 MCP 打开，skills 和 MCP 都是开箱即用。
+CLI 还会自动加载当前工作目录下的 `mcp_config.json` / `yaml` / `yml`，技能和 MCP 都不用再单独打开。
 
 安装外部 skill 集合：
 
@@ -162,23 +142,9 @@ agentica extensions install /path/to/skill-repo --target-dir ~/.agentica/skills
 > /extensions reload
 ```
 
-如果你希望 Agent 带有持续学习 workflow，推荐做法是：
-- 用 `DeepAgent` 作为默认运行时
-- 把 `learn-from-experience` 安装到 `~/.agentica/skills/`，或通过 `AGENTICA_EXTRA_SKILL_PATH` 指向外部目录
-- 确认过的常驻偏好直接写进该用户的 `~/.agentica/workspace/users/{user_id}/AGENTS.md`（CLI 为 `.../users/default/AGENTS.md`，也可通过 symlink `~/.agentica/AGENTS.md` 改同一份文件；人手写或 agent `apply_patch`；不要再走 memory→AGENTS 编译）
+持续学习：把 `learn-from-experience` 安装到 `~/.agentica/skills/`，或用 `AGENTICA_EXTRA_SKILL_PATH` 指到外部目录。确认过的常驻偏好写进 `~/.agentica/AGENTS.md`。
 
-### 方式三：按需激活（RunConfig 白名单）
-
-```python
-from agentica.run.config import RunConfig
-
-result = await agent.run(
-    "审查这段代码",
-    config=RunConfig(enabled_skills=["code-reviewer"]),
-)
-```
-
-### CLI 中使用
+### 对话里使用
 
 ```
 > /skills                           # 列出所有可用 skills
@@ -412,35 +378,9 @@ description: "Python 异步代码专家，处理 asyncio、aiohttp、FastAPI 相
 3. 建议添加索引或改写查询
 ```
 
-## 在代码中集成 Skill
-
-```python
-import asyncio
-from agentica import Agent, OpenAIChat
-from agentica.tools.skill_tool import SkillTool
-
-async def main():
-    agent = Agent(
-        model=OpenAIChat(id="gpt-4o"),
-        tools=[
-            SkillTool(
-                # 自动扫描 .agentica/skills/ 和 ~/.agentica/skills/
-                # 加上指定的自定义目录
-                custom_skill_dirs=["./team-skills/data-engineering"],
-            )
-        ],
-    )
-
-    # Agent 可以通过 list_skills 查看可用 skills
-    # 通过 get_skill_info 加载具体 skill 的指令
-    result = await agent.run("用 data-engineering skill 帮我设计数据管道")
-    print(result.content)
-
-asyncio.run(main())
-```
+在 Python 里挂 `SkillTool`，见 [工具与自定义工具](../concepts/tools.md#技能)。
 
 ## 下一步
 
-- [Agent 概念](../concepts/agent.md) — `enable_agentic_prompt` 与 Skills 的关系
 - [CLI 终端](../getting-started/terminal.md) — CLI 中使用 Skills
-- [Tools](../concepts/tools.md) — SkillTool API 详解
+- [工具与自定义工具](../concepts/tools.md#技能) — 在代码里挂载 SkillTool

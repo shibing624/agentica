@@ -174,6 +174,7 @@ settings:
 
 ## 下一步
 
-- [Web、桌面端与微信/IM](../advanced/gateway.md) — 在网页、桌面端或手机微信里使用 Agentica
+- [Web 与桌面端](../advanced/gateway.md) — 本地网页与桌面应用
+- [微信与 IM](../advanced/im.md) — 在手机微信里遥控本机会话
 - [长任务循环 (/goal)](../advanced/goals.md) — 让 Agent 自动迭代直到任务完成
 - [统一配置文件 (config.yaml)](../guides/config.md) — 管理多个模型 Profile 与全局设置

@@ -37,7 +37,8 @@ Every surface shares the same local memory, skills, and session history on your 
 |---|---|---|
 | **🖥️ Desktop App** | Standalone native window, zero environment setup | [Download the Desktop App](https://shibing624.github.io/agentica/desktop/) |
 | **⌨️ CLI Terminal** | Coding, debugging, and running parallel sessions in the terminal | [CLI installation & terminal guide](https://shibing624.github.io/agentica/getting-started/terminal) |
-| **🌐 Local Web & Mobile IM** | Browser workspaces, multi-account setup, or controlling your machine from WeChat / Feishu / WeCom / Telegram | [Web & IM setup guide](https://shibing624.github.io/agentica/advanced/gateway) |
+| **🌐 Local Web** | Browser workspaces and multiple accounts | [Web & Desktop](https://shibing624.github.io/agentica/advanced/gateway) |
+| **📱 WeChat / IM** | Control this machine from WeChat, Feishu, WeCom, or Telegram | [WeChat & IM](https://shibing624.github.io/agentica/advanced/im) |
 | **🐍 Python SDK & 📦 npm SDK** | Embedding agents in Python services or calling the gateway from Node / TypeScript | [Python Quickstart](https://shibing624.github.io/agentica/getting-started/quickstart) · [TypeScript SDK (`@agentica-ai/sdk`)](https://shibing624.github.io/agentica/advanced/gateway) |
 
 For model API keys, free starter models, and Docker self-hosting, see the **[Installation & Configuration Guide](https://shibing624.github.io/agentica/getting-started/installation)**.

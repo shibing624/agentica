@@ -56,52 +56,7 @@ uv tool install --force "agentica[gateway,wechat,telegram]"
 
 Desktop 安装包自带 Python 和同版本的 `agentica`、`agentica-gateway`，打开即用，不需要另装 Python、Node、uv，也不用联网。下载和第一次被系统拦住时的处理见 [下载桌面版](https://shibing624.github.io/agentica/desktop/)。它和 `uv tool install` 装的 CLI 共用 `~/.agentica` 数据，但各用各的可执行包。
 
-## 当库用（自己的项目）
-
-把 Agentica 嵌进另一个 Python 项目，用项目里的 `uv add`，不要 `pip install` 进系统 Python：
-
-```bash
-uv add agentica
-uv add "agentica[mcp]"          # 可选 extras
-```
-
-## 开发本仓库
-
-改 Agentica 源码才把包装进当前解释器：
-
-```bash
-git clone https://github.com/shibing624/agentica.git
-cd agentica
-pip install -e .                         # SDK + CLI
-pip install -e ./gateway                 # + Web 后端（agentica-gateway），改 gateway / Web 时需要
-# 或：uv pip install -e ".[dev]" -e "./gateway[all]"
-cd web && npm ci && npm run build        # Web UI → web/dist，网关直接读这里
-```
-
-开发模式下，代码修改立即生效，无需重新安装；改了前端重新 `npm run build` 后刷新页面即可。
-
-不要用 `pip install -e ".[gateway]"`：这个 extra 指向 PyPI 上的 `agentica-gateway`，装不到你本地 checkout 的网关代码。
-
-仓库布局：`agentica/`（SDK + CLI，PyPI `agentica`）、`gateway/`（PyPI `agentica-gateway`）、`web/`（Web UI，构建产物打进 gateway wheel）、`desktop/`（Electron 安装包）、`sdk-ts/`（npm `@agentica-ai/sdk`）。全部同版本，由 `python scripts/versions.py set X.Y.Z` 一次改齐，推 `vX.Y.Z` tag 后 `.github/workflows/release.yml` 统一发布。
-
-### 可选依赖
-
-产品安装用 extras（见上）。开发 / 当库用时再按需加：
-
-```bash
-# MCP 协议
-uv add mcp                      # McpTool（Model Context Protocol）
-
-# 本地模型
-# Ollama 无需 Python 包：https://ollama.ai
-
-# 文档解析
-uv add pypdf
-uv add python-docx
-
-# 评测
-uv pip install -e ".[dev]"
-```
+把 Agentica 嵌进自己的 Python 项目，见 [5 分钟上手 (SDK)](quickstart.md)。改这个仓库的源码，见文末。
 
 ## 配置 API Key
 
@@ -130,62 +85,9 @@ export ZAI_API_KEY="your-api-key"          # 推荐：智谱免费 glm-4.7-flash
 # export ARK_API_KEY="your-api-key"        # 火山引擎，跑豆包模型
 ```
 
-完整 provider 列表见 `agentica/__init__.py`（顶层 `XxxChat` 工厂函数）。
+副模型、备用模型和审查模型写在 `~/.agentica/config.yaml` 的 profile 里，见 [配置文件](../guides/config.md)。同一家厂商的主模型和副模型共用一把 key。
 
-### 进阶：多 Provider 组合（不需要新 env，只用 Python）
-
-`auxiliary_model` 和 `fallback_models` 是**对象传参**，不是 env，所以多 provider 协作时只需各自 export 自己的 key，构造时分别注入：
-
-**A. Auxiliary Model — 用便宜小模型跑副任务**（记忆抽取、用户纠正分类、goal 判断等；换窗 notes 走主模型，不走 auxiliary）
-
-```python
-from agentica import Agent, OpenAIChat, DeepSeekChat
-
-agent = Agent(
-    model=OpenAIChat(id="gpt-4o"),                          # 主流程读 OPENAI_API_KEY
-    auxiliary_model=DeepSeekChat(id="deepseek-v4-flash"),   # 副任务读 DEEPSEEK_API_KEY
-)
-# export OPENAI_API_KEY=...   # 主流程
-# export DEEPSEEK_API_KEY=... # auxiliary
-
-# 只想让 auto 档的 LLM 审查用某个特定模型（而不是副模型）：
-agent = DeepAgent(
-    model=main,
-    auxiliary_model=aux,
-    auxiliary_task_models={"auto_review": review_model},  # 优先级最高
-)
-```
-
-**B. Fallback Models — 生产高可用**（content_filter / 5xx / 429 / timeout 自动跳到下一个）
-
-```python
-from agentica import Agent, OpenAIChat, DeepSeekChat, ZhipuAIChat
-
-agent = Agent(
-    model=OpenAIChat(id="gpt-4o"),
-    fallback_models=[
-        DeepSeekChat(id="deepseek-v4-flash"),
-        ZhipuAIChat(id="glm-4.7-flash"),
-    ],
-)
-# 三家各 export 一份；RunResponse.model 反映实际应答的 provider
-```
-
-**C. main + auxiliary + fallback 全开**
-
-```python
-from agentica import Agent, OpenAIChat, DeepSeekChat, ZhipuAIChat
-
-agent = Agent(
-    model=OpenAIChat(id="gpt-4o"),
-    auxiliary_model=DeepSeekChat(id="deepseek-v4-flash"),
-    fallback_models=[ZhipuAIChat(id="glm-4.7-flash")],
-)
-```
-
-> 每个工厂内部硬编码了 `base_url` 与默认 env 名（如 `DeepSeekChat` 读 `DEEPSEEK_API_KEY`）。私有部署 / 代理传 `base_url=` 显式覆盖即可。完整工厂列表见 `agentica/__init__.py`。
-
-> **同 provider 复用**：如果 main / auxiliary / fallback 都在同一家（比如全用智谱不同 size），只需一份 env，所有 Model 实例共享。
+在 Python 里构造 `Agent` 时再传模型对象，见 [模型与提供商](../concepts/model.md)。
 
 ### `.env` 文件（替代 shell export）
 
@@ -198,29 +100,11 @@ OPENAI_API_KEY=sk-xxx
 DEEPSEEK_API_KEY=your-api-key
 ```
 
-### 代码内直接传 `api_key`（最显式）
-
-```python
-from agentica import Agent, OpenAIChat
-
-agent = Agent(
-    model=OpenAIChat(
-        id="gpt-4o",
-        api_key="sk-xxx",
-        base_url="https://...",    # 代理 / 私有部署
-    )
-)
-```
-
 ## 验证安装
 
 ```bash
-# 产品（uv tool 装的走这条，不要用当前 python -c import）
 agentica --version
 agentica --query "你好"          # 需要配置 API Key
-
-# 当库 / 开发本仓库
-python -c "import agentica; print(agentica.__version__)"
 ```
 
 ## 免费快速入门（零成本）
@@ -245,19 +129,26 @@ ollama pull llama3.1
 agentica --model_provider ollama --model_name llama3.1
 ```
 
-代码中使用：
+## 改这个仓库
 
-```python
-from agentica import Agent
-from agentica.model.ollama import OllamaChat
+只在改 Agentica 源码时把包装进当前解释器：
 
-agent = Agent(model=OllamaChat(id="llama3.1"))
-result = agent.run_sync("你好")
-print(result.content)
+```bash
+git clone https://github.com/shibing624/agentica.git
+cd agentica
+pip install -e .                         # CLI
+pip install -e ./gateway                 # 再加 Web 后端，改 gateway / Web 时需要
+# 或：uv pip install -e ".[dev]" -e "./gateway[all]"
+cd web && npm ci && npm run build        # Web UI → web/dist，网关直接读这里
 ```
+
+代码改完不用重装；前端改完重新 `npm run build` 再刷新。不要用 `pip install -e ".[gateway]"`，那个 extra 会去 PyPI 装 `agentica-gateway`，装不到你本地的网关代码。跑测试再装 `uv pip install -e ".[dev]"`。
+
+仓库是 `agentica/`（CLI）、`gateway/`（Web 后端）、`web/`、`desktop/`、`sdk-ts/`。版本由 `python scripts/versions.py set X.Y.Z` 一次改齐。
 
 ## 下一步
 
-- [快速入门](quickstart.md) -- 5 分钟上手第一个 Agent
-- [CLI 终端](terminal.md) -- 命令行交互模式全功能介绍
-- [模型提供商](../guides/models.md) -- 模型配置指南
+- [CLI 终端](terminal.md) — 命令行交互模式
+- [Web 与桌面端](../advanced/gateway.md) — 本地网页与桌面应用
+- [配置文件](../guides/config.md) — `~/.agentica/config.yaml`
+- [5 分钟上手 (SDK)](quickstart.md) — 嵌进自己的 Python 项目（在「开发」里）

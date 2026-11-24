@@ -1,9 +1,15 @@
 # Quickstart
 
-本指南帮助你在 5 分钟内创建并运行第一个 AI 智能体。
+把 Agentica 嵌进自己的 Python 项目。桌面端、网页和 CLI 的安装在 [安装与配置](installation.md)。
 
-!!! tip "前置条件"
-    确保已完成 [安装](installation.md) 并配置了 API Key。
+```bash
+uv add agentica
+uv add "agentica[mcp]"          # 需要 MCP 时
+uv add pypdf                    # 需要解析 PDF 时
+uv add python-docx              # 需要解析 Word 时
+```
+
+API Key 仍用 [安装与配置](installation.md) 里的环境变量，或写在 `~/.agentica/config.yaml`。
 
 ## 第一个 Agent
 

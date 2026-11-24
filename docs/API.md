@@ -175,7 +175,7 @@ from agentica_gateway.channels import (
 
 `agentica-gateway` 与 `agentica` 同版本发布，并精确锁定同版本的 `agentica`。旧路径 `agentica.gateway.*` 已移除，请改用 `agentica_gateway.*`。
 
-详见 [Gateway 文档](advanced/gateway.md)。
+详见 [Web 与桌面端](advanced/gateway.md)、[微信与 IM](advanced/im.md)。
 
 ### CLI（默认装的 Product Surface）
 

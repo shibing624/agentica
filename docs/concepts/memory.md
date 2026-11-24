@@ -42,7 +42,7 @@
 
 Agent 会自动调用 `save_memory` 把它分类存进 `~/.agentica/workspace/users/default/memory/`，并更新 `MEMORY.md` 索引。之后你新开任何会话问起「测试库端口是多少」，它都能找出来。
 
-**每轮自动召回**：CLI、Web 和 `DeepAgent` 默认开启。每次你发消息前，辅助模型（`auxiliary_model`，未配置时用主模型）会读一次**最新的** `MEMORY.md` 索引，挑出这条消息真正需要的条目（最多 5 条），把正文放进 `<memory_recall>` 块，拼在你这条消息的**前面**，你的原话留在消息最底部（长上下文模型对中间部分注意力最弱，最新的问题放在最后读）。用 SDK 时，不论传 `message="..."` 还是 `messages=[历史..., 本轮 user]`（IM 适配器每轮自己重建历史的写法）都会触发召回，后者只改写列表最后一条 user 消息的副本，不动调用方传进来的对象。要点：
+**每轮自动召回**：CLI、Web 和桌面端默认开启。每次你发消息前，辅助模型（`auxiliary_model`，未配置时用主模型）会读一次**最新的** `MEMORY.md` 索引，挑出这条消息真正需要的条目（最多 5 条），把正文放进 `<memory_recall>` 块，拼在你这条消息的**前面**，你的原话留在消息最底部（长上下文模型对中间部分注意力最弱，最新的问题放在最后读）。要点：
 - 系统提示词里仍然只有会话开始时冻结的索引，召回块追加在本轮用户消息上，不改动已发送的前缀，不影响缓存命中。
 - 读的是实时索引，所以**另一个会话刚存下的记忆，这个会话下一轮就能召回**。
 - 当前窗口里已经召回过的条目不会重复召回；换窗后旧召回块被移出，相关时会再次召回。
@@ -67,7 +67,7 @@ Agent 会自动调用 `save_memory` 把它分类存进 `~/.agentica/workspace/us
 
 ### 3. 接上之前的会话（`<session_recall>` 与工作项）
 
-长期记忆只存事实，"做到一半的事"不进去。可新开一个会话时，最需要的恰恰是"上次停在哪"：「继续」「推一下」这种话本身没内容，指的就是上次没收尾的那件事。CLI、Web 和 `DeepAgent` 默认开启这两项：
+长期记忆只存事实，"做到一半的事"不进去。可新开一个会话时，最需要的恰恰是"上次停在哪"：「继续」「推一下」这种话本身没内容，指的就是上次没收尾的那件事。CLI、Web 和桌面端默认开启这两项：
 
 - **工作项（`track_intents`）**：每 3 轮由辅助模型（`intent_track` 任务）在后台把这几轮整理成工作项，包括你要做什么、做到哪（commit hash、文件、数字）、状态（`open` / `done` / `dropped`）和下一步。同一件事会更新已有条目，不会重复新建；你说"已经推了"，对应条目就改成 `done`。待整理的轮次先落盘，会话来不及整理就退出的，下一个会话在同一项目里的第一轮补上。
 - **会话召回（`recall_sessions`）**：每次发消息前，在你的消息前面拼一个 `<session_recall>` 块。数据来自本地 SQLite 索引（`~/.agentica/projects/<user>/session_index.db`）。
@@ -79,107 +79,12 @@ Agent 会自动调用 `save_memory` 把它分类存进 `~/.agentica/workspace/us
 
 索引平时随会话日志同步写入。第一次用时，后台会把已有的会话记录补进索引，之后只读新增部分（实测约 6000 条提问，首次 3.6 秒，之后约 0.05 秒）。
 
----
-
-## 在 Python SDK 里怎么用
-
-### 1. 开启会话内多轮历史（`add_history_to_context`）
-
-默认情况下，普通 `Agent()` 每次 `run()` 是独立的单轮调用。做多轮对话时，打开 `add_history_to_context=True`：
-
-```python
-from agentica import Agent, OpenAIChat
-
-agent = Agent(
-    model=OpenAIChat(id="gpt-4o-mini"),
-    add_history_to_context=True,
-    # num_history_turns=10,  # 可选：只保留最近 10 轮；默认 None 重放当前窗口全部轮次
-)
-
-agent.run_sync("我叫小明，在做一个 FastAPI 项目")
-res = agent.run_sync("你还记得我在做什么项目吗？")
-print(res.content)
-```
-
-如果希望把会话落盘到 `.jsonl` 以便下次进程重启后接着聊，传入 `session_id` 即可：
-
-```python
-agent = Agent(
-    model=OpenAIChat(id="gpt-4o-mini"),
-    session_id="user-1001-chat",
-    add_history_to_context=True,
-)
-```
-
-### 2. 开启跨会话长期记忆（`Workspace`）
-
-给 `Agent` 绑定一个 `Workspace` 并开启 `enable_long_term_memory=True`，Agent 就会自动获得 `save_memory` 和 `search_memory` 工具，并在每次会话启动时加载该用户的 `AGENTS.md` 与 `MEMORY.md` 索引：
-
-```python
-from agentica import Agent, OpenAIChat, Workspace
-from agentica.agent.config import WorkspaceMemoryConfig
-
-agent = Agent(
-    model=OpenAIChat(id="gpt-4o-mini"),
-    workspace=Workspace(path="./my_workspace", user_id="alice"),
-    enable_long_term_memory=True,
-    long_term_memory_config=WorkspaceMemoryConfig(
-        load_workspace_context=True,   # 加载 AGENTS.md 常驻规则
-        load_workspace_memory=True,    # 加载 MEMORY.md 记忆索引
-        recall_memories=True,          # 每轮由辅助模型挑选相关记忆，正文拼在用户消息前（普通 Agent 默认关闭）
-        recall_sessions=True,          # 每轮拼 <session_recall>：未完成工作项 + 模型挑出的相关工作项（与记忆挑选共用一次调用）
-        track_intents=True,            # 后台整理跨会话工作项（open/done/dropped），每 intent_every_n_turns 轮一次
-        max_memory_entries=5,          # 单轮最多召回条数
-        auto_archive=True,             # 每轮结束后将原始对话归档到 conversations/YYYY-MM-DD.md（不调 LLM）
-        auto_extract_memory=False,     # 是否在后台自动用副模型抽取记忆条目（会消耗少量 token）
-    ),
-)
-```
-
-> **多租户隔离**：在服务端为不同用户创建 Agent 时，传入各自的 `Workspace(path="./workspace", user_id=user_id)`，每个用户的 `AGENTS.md`、`MEMORY.md` 和对话归档都会隔离在 `users/<user_id>/` 目录下。
-
-### 3. 在代码里直接读写记忆
-
-你也可以不经过 LLM，直接用 Python 操作 `Workspace`：
-
-```python
-from agentica import Workspace
-
-ws = Workspace("./my_workspace", user_id="alice")
-ws.initialize()
-
-# 写入一条记忆
-await ws.write_memory_entry(
-    title="Python 风格偏好",
-    content="优先使用类型注解和简洁的函数拆分，避免多余的 try/except。",
-    memory_type="feedback",
-    description="python coding style type hints",
-)
-
-# 搜索记忆
-hits = ws.search_memory("python 风格", limit=5)
-```
-
-### 4. 导出与分析会话日志（`agentica.session.log`）
-
-当设置了 `session_id` 时，可以在代码中导出完整 JSONL 或查看统计分析（与 CLI `/trace`、Web `/traces` 同源）：
-
-```python
-agent = Agent(model=OpenAIChat(id="gpt-4o-mini"), session_id="my-session-001")
-await agent.run("帮我检查 README")
-
-log = agent.session_log
-print(log.path)                            # JSONL 文件路径
-print(log.format_trace())                  # 打印与 CLI /trace 相同的轮次耗时与 token 统计
-log.export("my-session-001.jsonl")         # 导出原始 JSONL
-log.export("trace.json", kind="analysis")  # 导出结构化分析 JSON
-```
+在 Python 里打开同一套记忆，见 [Agent 与 DeepAgent](agent.md#长期记忆)。
 
 ---
 
 ## 下一步
 
 - [记忆 MCP](../getting-started/memory-mcp.md) — 把外部记忆服务接到工具列表
-- [Agent 与 DeepAgent](agent.md) — Agent 的完整配置方式
 - [上下文压缩 (/compact)](../advanced/compression.md) — 长会话换窗与 `search_session` 用法
 - [技能系统 (Skills)](../advanced/skills.md) — 用 `SKILL.md` 沉淀可复用的领域工作流
