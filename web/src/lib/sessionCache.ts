@@ -8,7 +8,7 @@
 
 const STAT_KEYS = [
   "tokIn", "tokOut", "tokTotal", "requests", "totalTime",
-  "lastInputTokens", "contextTokens", "costUsd",
+  "lastInputTokens", "contextTokens", "contextWindow", "costUsd",
 ] as const;
 
 type StatKey = (typeof STAT_KEYS)[number];
@@ -19,7 +19,10 @@ export function sessionStatsCache(
 ): Record<string, SessionStats> {
   const out: Record<string, SessionStats> = {};
   for (const [id, sess] of Object.entries(sessions)) {
-    if (!sess.requests) continue;
+    // A session this browser only opened still has a measured window worth
+    // keeping, so the composer ring can paint it before the next /usage.
+    // Listing thousands of untouched CLI sessions still writes nothing.
+    if (!sess.requests && !(sess.contextWindow > 0)) continue;
     const stats = {} as SessionStats;
     for (const key of STAT_KEYS) stats[key] = sess[key];
     out[id] = stats;

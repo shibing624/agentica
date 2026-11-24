@@ -63,6 +63,7 @@ export function sessionRingPercent(sessionId: string | null, sess: Session | nul
     hasLog: !!sessionId && !!sess && (!!sess.sizeBytes || sess.msgs.length > 0),
     settled: !!sessionId && settled.has(sessionId),
     localTokens: sess?.contextTokens || sess?.lastInputTokens || 0,
+    localWindow: sess?.contextWindow || 0,
     fallbackWindow: getState().serverContextWindow,
   });
 }
@@ -77,6 +78,7 @@ export function applySessionUsage(sessionId: string, usage: SessionUsage) {
     if (usage.context_tokens > 0 || !sess.contextTokens) {
       sess.contextTokens = usage.context_tokens;
     }
+    if (usage.window) sess.contextWindow = usage.window;
     if (usage.cost_usd > 0 || !sess.costUsd) {
       sess.costUsd = usage.cost_usd;
     }

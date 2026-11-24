@@ -898,6 +898,22 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .foot-btn{height:30px;border:none;border-radius:var(--radius-sm);background:transparent;color:var(--fg2);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background var(--t),color var(--t);padding:0 8px;font-size:12.5px;font-weight:500}
 .foot-btn:hover{background:var(--hover);color:var(--fg)}
 .foot-btn svg{flex-shrink:0}
+/* Fast hover hint. The native `title` tip waits on the browser (often a
+   second, and a re-render during a running turn resets that wait), so the
+   composer buttons never showed "插话" while it mattered. */
+.has-hint{position:relative}
+.has-hint[data-hint]:not([data-hint=""]):is(:hover,:focus-visible)::after{
+  content:attr(data-hint);
+  position:absolute;z-index:40;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);
+  width:max-content;max-width:280px;box-sizing:border-box;
+  padding:5px 8px;border-radius:8px;background:var(--fg);color:var(--bg);
+  font-size:12px;font-weight:450;line-height:1.4;text-align:left;white-space:normal;
+  pointer-events:none;box-shadow:var(--elev-pop);
+  animation:hint-in 80ms ease 120ms both;
+}
+.has-hint.hint-start[data-hint]:not([data-hint=""]):is(:hover,:focus-visible)::after{left:0;transform:none}
+.has-hint.hint-end[data-hint]:not([data-hint=""]):is(:hover,:focus-visible)::after{left:auto;right:0;transform:none}
+@keyframes hint-in{from{opacity:0}to{opacity:1}}
 /* attach button */
 .attach-btn{width:30px;padding:0}
 .input-plus-wrap,.approval-wrap{position:relative}

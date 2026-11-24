@@ -15,7 +15,7 @@ after(() => vite.close());
 
 const stats = {
   tokIn: 10, tokOut: 2, tokTotal: 12, requests: 1, totalTime: 3,
-  lastInputTokens: 10, contextTokens: 9, costUsd: 0.01,
+  lastInputTokens: 10, contextTokens: 9, contextWindow: 200_000, costUsd: 0.01,
 };
 
 test("keeps only the counters, never the transcript", () => {
@@ -29,7 +29,8 @@ test("keeps only the counters, never the transcript", () => {
 test("sessions this browser never ran a turn in are not cached", () => {
   // Thousands of CLI sessions listed from the server: none of them belongs here.
   const sessions = {};
-  for (let i = 0; i < 5000; i++) sessions[`cli-${i}`] = { ...stats, requests: 0, msgs: [] };
+  for (let i = 0; i < 5000; i++) sessions[`cli-${i}`] = { ...stats, requests: 0, contextWindow: 0, msgs: [] };
   sessions.web = stats;
-  assert.deepEqual(Object.keys(sessionStatsCache(sessions)), ["web"]);
+  sessions.opened = { ...stats, requests: 0, contextWindow: 200_000 };
+  assert.deepEqual(Object.keys(sessionStatsCache(sessions)).sort(), ["opened", "web"]);
 });

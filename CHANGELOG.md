@@ -10,7 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- **软件引用改为 agent harness**：README 与 `CITATION.cff` 的软件标题从 “A Human-Centric Framework for Large Language Model Agent Workflows” 改为 “An Agent Harness and All-in-One AI Workspace”。同一套 harness 既是本机工作台，也是可嵌入服务的 Python / TypeScript SDK。`CITATION.cff` 的版本与发布日期同步到 1.6.1 / 2026-11-19。自进化论文的引用不变。
+## [1.6.2] - 2026-11-24
+
+- **输入栏按钮的提示改为悬停约 0.1 秒就出现**：原先用浏览器自带的 `title`，要等一秒左右，生成过程中按钮一重绘计时就清零，插话按钮经常悬停也没有提示。输入栏、队列操作和发送按钮改成自己的提示，打开菜单时不挡菜单。
+
+- **切到已经量过的旧会话时，输入框的上下文占用立刻显示**：此前有历史的会话要等这次的 `/usage` 回来才把圆环画出来，页面内容先到、占用空一拍。现在用这个会话自己上次记下的占用和窗口，第一帧就显示，请求回来再就地更新数字；没量过的会话仍然先不画，避免套用别的会话的窗口。
+
+- **软件引用改为 agent harness**：README 与 `CITATION.cff` 的软件标题从 “A Human-Centric Framework for Large Language Model Agent Workflows” 改为 “An Agent Harness and All-in-One AI Workspace”。同一套 harness 既是本机工作台，也是可嵌入服务的 Python / TypeScript SDK。`CITATION.cff` 的版本与发布日期随这次发布写到 1.6.2 / 2026-11-24。自进化论文的引用不变。
 
 - **日期移出 system prompt，跨天不再整窗重算**：原先 system prompt 末尾带 `Today's date is …`，过了午夜就要换一份（窗口内靠 pin 维持，但新窗口、网关重建、`/resume` 都会重新渲染）；跨天的提醒又追加一条 `<system-reminder>`。现在日期只在会话首条用户消息里出现一次（`<session_date>2026-11-21 (Saturday), local time</session_date>`，和 `<git_snapshot>` 一样写进历史、原样回放），system prompt 和运行时状态里都不再有日期，跨天不追加提醒。需要准确时间时模型调 `execute date`。`PromptConfig.add_datetime_to_instructions` 的 SDK 默认改为 `False`，`DeepAgent` 仍默认开启（`agentica/agent/prompts.py`、`agentica/agent/config.py`）。
 

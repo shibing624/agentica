@@ -89,6 +89,7 @@ export function loadSessions(scope: "recent" | "all" = getState().sessionScope):
         requests: mem?.requests || lc.requests || 0, totalTime: mem?.totalTime || lc.totalTime || 0,
         lastInputTokens: mem?.lastInputTokens || lc.lastInputTokens || 0,
         contextTokens: mem?.contextTokens || lc.contextTokens || 0,
+        contextWindow: mem?.contextWindow || lc.contextWindow || 0,
         costUsd: mem?.costUsd || lc.costUsd || 0,
         dir,
         projectDir: sv.project_dir || dir,
@@ -585,7 +586,7 @@ export function createSession(dir: string) {
   const id = uid();
   st.sessions[id] = {
     title: "New Chat", msgs: [], ts: Date.now(), lastTs: Date.now(), tokIn: 0, tokOut: 0, tokTotal: 0,
-    requests: 0, totalTime: 0, lastInputTokens: 0, contextTokens: 0, costUsd: 0,
+    requests: 0, totalTime: 0, lastInputTokens: 0, contextTokens: 0, contextWindow: 0, costUsd: 0,
     dir, projectId: projectIdForDir(dir),
   };
   saveSessions();

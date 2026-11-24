@@ -521,11 +521,11 @@ export function ChatPage() {
               {/* dsh: the way in only shows while the panel is closed; the open
                   panel carries its own collapse button in its head. */}
               {!files.open && (
-                <button type="button" className="ib" onClick={() => {
+                <button type="button" className="ib has-hint hint-end" onClick={() => {
                   if (!s.curSess && workspace) createSession(workspace);
                   files.setOpen(true);
                 }}
-                        title={S.chat.openWorkspace} aria-label={S.chat.openWorkspace}>
+                        data-hint={S.chat.openWorkspace} aria-label={S.chat.openWorkspace}>
                   <IconSidebarRight />
                 </button>
               )}
@@ -606,7 +606,7 @@ export function ChatPage() {
             onLeaveFollow={() => { followRef.current.leave(); saveCurrentSessionScroll(); }}
           />
           {showJump && (
-            <button type="button" className="scroll-bottom-btn visible" title={S.chat.jumpLatest} aria-label={S.chat.jumpLatest}
+            <button type="button" className="scroll-bottom-btn visible has-hint hint-end" data-hint={S.chat.jumpLatest} aria-label={S.chat.jumpLatest}
                     onClick={() => {
                       const el = msgsRef.current;
                       followRef.current.resume();
@@ -732,8 +732,8 @@ export function ChatPage() {
                       />
                       <button
                         type="button"
-                        className="goal-chip-budget-save"
-                        title={S.chat.goalBudgetSave}
+                        className="goal-chip-budget-save has-hint hint-end"
+                        data-hint={S.chat.goalBudgetSave}
                         aria-label={S.chat.goalBudgetSave}
                         disabled={goalBudgetInvalid}
                         onClick={saveGoalBudget}
@@ -746,17 +746,17 @@ export function ChatPage() {
                   ) : (
                     <button
                       type="button"
-                      className="goal-chip-budget-btn"
+                      className="goal-chip-budget-btn has-hint"
                       aria-label={goalBudgetSummary}
                       aria-expanded={false}
-                      title={S.chat.goalBudgetHint}
+                      data-hint={S.chat.goalBudgetHint}
                       onClick={openGoalBudget}
                     >
                       <span>{goalBudgetSummary}</span>
                       <IconChevronDown />
                     </button>
                   )}
-                  <button type="button" className="goal-chip-close" title={S.chat.goalRemove} onClick={() => {
+                  <button type="button" className="goal-chip-close has-hint hint-end" data-hint={S.chat.goalRemove} aria-label={S.chat.goalRemove} onClick={() => {
                     setState({ goalCompose: null });
                     taRef.current?.focus();
                   }}>
@@ -853,8 +853,9 @@ export function ChatPage() {
                   e.currentTarget.value = "";
                 }} />
                 <div className="plus-wrap" ref={plusWrapRef} inert={composerLocked ? true : undefined}>
-                  <button type="button" className={"foot-btn plus-btn" + (plusOpen ? " on" : "")}
-                          title={plusOpen ? undefined : S.chat.plusMenu} aria-haspopup="menu" aria-expanded={plusOpen}
+                  <button type="button" className={"foot-btn plus-btn has-hint hint-start" + (plusOpen ? " on" : "")}
+                          data-hint={plusOpen ? undefined : S.chat.plusMenu} aria-label={S.chat.plusMenu}
+                          aria-haspopup="menu" aria-expanded={plusOpen}
                           onClick={() => {
                             setState({ approvalMenuOpen: false, modelDDOpen: false, composerPicker: null });
                             setPlusOpen(!plusOpen);
@@ -878,7 +879,8 @@ export function ChatPage() {
                 </div>
                 <ComposerDir />
                 <div className="approval-wrap" ref={approvalWrapRef}>
-                  <button className="foot-btn approval-btn" title={S.chat.permHint(approvalMode)}
+                  <button className="foot-btn approval-btn has-hint hint-start"
+                          data-hint={s.approvalMenuOpen ? undefined : S.chat.permHint(approvalMode)}
                           onClick={() => {
                             setState({ approvalMenuOpen: !s.approvalMenuOpen, modelDDOpen: false, composerPicker: null });
                           }}>
@@ -890,7 +892,6 @@ export function ChatPage() {
                     <div className="approval-dd open">
                       {(["read-only", "auto", "allow-all"] as const).map((mode) => (
                         <button key={mode} className={"quick-item" + (approvalMode === mode ? " active" : "")}
-                                title={S.chat.permHint(mode)}
                                 onClick={() => setApprovalMode(mode)}>
                           <span className="quick-icon">{permIcon(mode)}</span>
                           <span className="approval-label">{S.chat.permLabel(mode)}</span>
@@ -903,9 +904,10 @@ export function ChatPage() {
               </div>
               <div className="input-foot-r">
                 <div className="ctx-wrap" ref={ctxWrapRef}>
-                  <button type="button" className={"foot-btn input-ctx" + (ctxOpen ? " on" : "")}
+                  <button type="button" className={"foot-btn input-ctx has-hint" + (ctxOpen ? " on" : "")}
                           style={ctxPct === null ? { visibility: "hidden" } : undefined}
-                          title={ctxOpen ? undefined : S.chat.ctxUsage} aria-haspopup="dialog" aria-expanded={ctxOpen}
+                          data-hint={ctxOpen ? undefined : S.chat.ctxUsage} aria-label={S.chat.ctxUsage}
+                          aria-haspopup="dialog" aria-expanded={ctxOpen}
                           onPointerEnter={() => prefetchSessionUsage(s.curSess)}
                           onFocus={() => prefetchSessionUsage(s.curSess)}
                           onClick={() => setCtxOpen((v) => !v)}>
@@ -917,7 +919,10 @@ export function ChatPage() {
                   )}
                 </div>
                 <div className="input-model-wrap" ref={modelWrapRef}>
-                  <button className="foot-btn model-sel" style={modelPending ? { visibility: "hidden" } : undefined}
+                  <button className="foot-btn model-sel has-hint hint-end"
+                          style={modelPending ? { visibility: "hidden" } : undefined}
+                          data-hint={s.modelDDOpen ? undefined : S.chat.switchProfile}
+                          aria-label={S.chat.switchProfile}
                           onClick={() => {
                     setState({ modelDDOpen: !s.modelDDOpen, approvalMenuOpen: false, composerPicker: null });
                   }}>
@@ -933,10 +938,11 @@ export function ChatPage() {
                     />
                   )}
                 </div>
-                <button className={"act-btn " + (showStop ? "stop" : "send")}
+                <button className={"act-btn has-hint hint-end " + (showStop ? "stop" : "send")}
                         // dsh: an empty draft dims the send button; anything to send lights it.
                         disabled={compacting || (!showStop && !hasDraft)}
-                        title={showStop ? S.chat.stop : sendLabel}
+                        data-hint={showStop ? S.chat.stop : sendLabel}
+                        aria-label={showStop ? S.chat.stop : sendLabel}
                         onClick={(e) => showStop
                           ? stopGen()
                           : void submit(e.metaKey || e.ctrlKey ? "chord" : "enter")}>
@@ -1673,8 +1679,8 @@ function QueueDock({ queued, streaming }: { queued: QueuedMessage[]; streaming: 
                       <>
                         <button
                           type="button"
-                          className="queue-act"
-                          title={S.chat.saveQueued}
+                          className="queue-act has-hint hint-end"
+                          data-hint={S.chat.saveQueued}
                           aria-label={S.chat.saveQueued}
                           disabled={!editing.text.trim() && !qItem.files.length}
                           onClick={() => saveEdit(qItem)}
@@ -1683,8 +1689,8 @@ function QueueDock({ queued, streaming }: { queued: QueuedMessage[]; streaming: 
                         </button>
                         <button
                           type="button"
-                          className="queue-act"
-                          title={S.chat.cancelEditQueued}
+                          className="queue-act has-hint hint-end"
+                          data-hint={S.chat.cancelEditQueued}
                           aria-label={S.chat.cancelEditQueued}
                           onClick={() => setEditing(null)}
                         >
@@ -1695,8 +1701,8 @@ function QueueDock({ queued, streaming }: { queued: QueuedMessage[]; streaming: 
                       <>
                         <button
                           type="button"
-                          className="queue-act"
-                          title={S.chat.editQueued}
+                          className="queue-act has-hint hint-end"
+                          data-hint={S.chat.editQueued}
                           aria-label={S.chat.editQueued}
                           onClick={() => setEditing({ id: qItem.id, text: qItem.text })}
                         >
@@ -1704,8 +1710,8 @@ function QueueDock({ queued, streaming }: { queued: QueuedMessage[]; streaming: 
                         </button>
                         <button
                           type="button"
-                          className="queue-act"
-                          title={S.chat.removeQueued}
+                          className="queue-act has-hint hint-end"
+                          data-hint={S.chat.removeQueued}
                           aria-label={S.chat.removeQueued}
                           onClick={() => removeQueued(qItem.id)}
                         >
@@ -1714,8 +1720,8 @@ function QueueDock({ queued, streaming }: { queued: QueuedMessage[]; streaming: 
                         {streaming && qItem.files.every(isImageFile) && (
                           <button
                             type="button"
-                            className="queue-act"
-                            title={S.chat.steerQueued}
+                            className="queue-act has-hint hint-end"
+                            data-hint={S.chat.steerQueued}
                             aria-label={S.chat.steerQueued}
                             onClick={() => void steerNow(qItem)}
                           >

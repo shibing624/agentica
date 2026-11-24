@@ -106,6 +106,8 @@ export type Session = {
   totalTime: number;
   lastInputTokens: number;
   contextTokens: number;
+  /** Working budget this session was last measured against. 0 until then. */
+  contextWindow: number;
   costUsd: number;
   dir: string;
   /** The user picked this title; the first message must not replace it. */

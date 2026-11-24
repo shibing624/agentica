@@ -99,7 +99,8 @@ export function ComposerDir() {
 
   return (
     <div className="composer-dir" ref={wrapRef}>
-      <button type="button" className="foot-btn composer-dir-btn" title={dir || S.dir.title} onClick={toggle}>
+      <button type="button" className="foot-btn composer-dir-btn has-hint hint-start"
+              data-hint={open ? undefined : (dir || S.dir.title)} aria-label={S.dir.title} onClick={toggle}>
         <IconFolder />
         <span>{projectNameForDir(dir) || S.dir.title}</span>
         <IconChevronDown />

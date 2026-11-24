@@ -19,6 +19,12 @@ test("a session with history shows nothing until its own usage arrives", () => {
   assert.equal(ringPercent({ hasLog: true, settled: false, localTokens: 50_000, fallbackWindow: 1_000_000 }), null);
 });
 
+test("a window this session already measured shows on the first frame", () => {
+  assert.equal(ringPercent({
+    hasLog: true, settled: false, localTokens: 50_000, localWindow: 200_000, fallbackWindow: 1_000_000,
+  }), 25);
+});
+
 test("its own window wins over the one another chat published", () => {
   const usage = { window: 200_000, context_tokens: 114_000 };
   assert.equal(ringPercent({ usage, hasLog: true, settled: true, localTokens: 9, fallbackWindow: 1_000_000 }), 57);
