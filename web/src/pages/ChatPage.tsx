@@ -1257,11 +1257,14 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
         : S.chat.turnProcessWorked;
   const finalAnswer = m.role === "assistant" ? finalAnswerOf(m) : "";
   const filesCardText = m.role === "assistant" ? finalAnswer : (m.content || "");
-  // Copy what is on screen: with replies folded away that is the answer alone,
-  // otherwise the whole turn (copying must never silently drop a visible line).
-  const copyText = m.role === "assistant"
+  const errorText = m.error ? `${S.chat.error(m.error)} - ${formatErrorStamp(m.errorTs ?? m.ts)}` : "";
+  // Preserve the folded/expanded reply text, then include the visible run error.
+  const replyCopyText = m.role === "assistant"
     ? ((!effectiveProcessOpen && foldedReplies === "final" && finalAnswer) ? finalAnswer : allAssistantTextOf(m))
     : m.content;
+  const copyText = m.role === "assistant" && errorText
+    ? [replyCopyText, errorText].filter(Boolean).join("\n\n")
+    : replyCopyText;
   return (
     <div id={"msg-" + idx} data-turn={turn} data-role={m.role}
          className={"m " + (m.role === "user" ? "m-u" : "m-a") + (live ? " streaming" : "") + (searchFocused ? " search-focus" : "")}>
@@ -1342,12 +1345,7 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
           role={m.role}
         />
         {m.aborted && <div className="msg-note">{S.chat.aborted}</div>}
-        {m.error && (
-          <div className="msg-error">
-            {S.chat.error(m.error)}
-            {` - ${formatErrorStamp(m.errorTs ?? m.ts)}`}
-          </div>
-        )}
+        {errorText && <div className="msg-error">{errorText}</div>}
         <MessageFooter m={m} live={!!live} sessionId={sessionId} idx={idx} copyText={copyText} />
       </div>
     </div>
@@ -1376,7 +1374,7 @@ function MessageFooter({ m, live, sessionId, idx, copyText }: {
   const copy = () => {
     // Always the original message for user turns (a rendered skill chip is a view,
     // not the text the user sent). For assistant turns, copy the visible final
-    // answer when collapsed, or clean paragraph-joined text when expanded.
+    // answer when collapsed, or paragraph-joined text when expanded, plus any error.
     const text = copyText ?? m.content;
     if (!text) return;
     void navigator.clipboard.writeText(text).then(() => showToast(S.common.copied));

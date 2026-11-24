@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- **Linux 与 Windows 的 Desktop 安装包可以完成打包检查**：1.6.2 的检查直接跑解包后的程序。Ubuntu 26 禁止非特权 user namespace，解包目录里的 `chrome-sandbox` 又没有 setuid，程序约一秒就退出，Linux 和 Windows 的安装包都没能挂到 Release 上。Linux 在沙箱助手不可用时改为带 `--no-sandbox` 做这次检查（AppImage 本来就是这样启动的）。Windows 检查加上 `--disable-gpu`，首次启动等待从 45 秒放到 120 秒；失败时日志写出原因，不再只留断言的第一行。
+- **Linux 与 Windows 的 Desktop 安装包可以完成打包检查**：1.6.2 的检查直接跑解包后的程序，两边都失败，Release 就没有挂安装包。Ubuntu 26 禁止非特权 user namespace，解包目录里的 `chrome-sandbox` 又没有 setuid，Linux 上程序约一秒就退出；检查在沙箱助手不可用时改为带 `--no-sandbox`（AppImage 本来就是这样启动的）。Windows 上网关在进程启动时导入 `fcntl` / `pty` / `termios`，这些模块只有 POSIX 才有，所以网关以退出码 1 结束，窗口起不来。现在只在 POSIX 上导入它们；Windows 打开终端仍然返回「需要 POSIX」。检查失败时日志会写出原因，不再只留断言的第一行。
 
 ## [1.6.2] - 2026-11-24
 

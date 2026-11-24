@@ -19,6 +19,34 @@ import pytest
 
 pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 pytest.importorskip("httpx")
+
+
+def test_gateway_imports_without_posix_tty_modules():
+    """Windows has no fcntl/pty/termios. Importing the gateway must still succeed."""
+    import subprocess
+    import sys
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as home:
+        env = os.environ.copy()
+        env["AGENTICA_HOME"] = home
+        env["AGENTICA_CACHE_DIR"] = os.path.join(home, "cache")
+        script = (
+            "import sys\n"
+            "class _Block:\n"
+            "    def find_spec(self, name, path, target=None):\n"
+            "        if name in {'fcntl', 'pty', 'termios'}:\n"
+            "            raise ModuleNotFoundError(name)\n"
+            "        return None\n"
+            "sys.meta_path.insert(0, _Block())\n"
+            "import agentica_gateway.main\n"
+            "import agentica_gateway.terminals as terminals\n"
+            "assert terminals.pty is None\n"
+        )
+        proc = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+
+
 if os.name != "posix":
     pytest.skip("terminals need a POSIX pty", allow_module_level=True)
 

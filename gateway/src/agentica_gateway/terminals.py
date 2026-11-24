@@ -11,14 +11,24 @@ POSIX only — the pty module has no Windows backend.
 from __future__ import annotations
 
 import asyncio
-import fcntl
 import os
-import pty
 import signal
 import struct
 import subprocess
-import termios
 import time
+
+# POSIX only. Importing these on Windows raises ModuleNotFoundError, and
+# `main` imports this module while the process is still starting — the
+# packaged Windows app then exits before it can serve a page. `create()`
+# already refuses a non-POSIX host.
+try:
+    import fcntl
+    import pty
+    import termios
+except ImportError:
+    fcntl = None
+    pty = None
+    termios = None
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path

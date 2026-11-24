@@ -45,9 +45,6 @@ async function main(executable, stateRoot, mode) {
   // passes --no-sandbox itself). Launching the raw binary then aborts in
   // about a second. Root cannot use the sandbox either.
   if (process.platform === "linux" && linuxSandboxBlocked(exe)) args.push("--no-sandbox");
-  // The Windows runner has no GPU. Software rendering is what this check can
-  // rely on; the installed app does not pass the flag.
-  if (process.platform === "win32") args.push("--disable-gpu");
 
   async function launch(spawned) {
     let stdout = "";

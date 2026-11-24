@@ -24,10 +24,8 @@ const { choosePort, readPreferredPort, rememberPort } = require("./port-memory")
 const { resolveCommand } = require("./runtime");
 
 /** How long to wait for a freshly spawned gateway to answer. The first start
- *  loads the model config and builds an Agent, which is not instant. Windows
- *  also scans a freshly unpacked interpreter before the first import returns,
- *  and 45s expires while that scan is still running. */
-const START_TIMEOUT_MS = process.platform === "win32" ? 120_000 : 45_000;
+ *  loads the model config and builds an Agent, which is not instant. */
+const START_TIMEOUT_MS = 45_000;
 const POLL_MS = 250;
 /** How long the gateway gets to wind itself down after being asked. */
 const SHUTDOWN_GRACE_MS = 6_000;
