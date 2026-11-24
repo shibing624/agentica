@@ -53,18 +53,18 @@ function parsePort(content) {
  *
  * The same waving cat as the browser tab and the SPA sidebar — the shell is a
  * window onto that UI, so a different mark here would be a second brand to keep
- * in sync. It is the 1024² master electron-builder packages from
- * (`make_icon.py` rebuilds it from `docs/assets/logo.png`), and one file covers
- * every platform: `nativeImage` decodes PNG everywhere, whereas the ICO the
- * favicon ships as decodes **only** on Windows and yields an empty image — which
- * looks identical to having configured no icon at all — anywhere else.
+ * in sync. `make_icon.py` rebuilds the PNGs from `docs/assets/logo.png`.
+ * `nativeImage` decodes PNG everywhere, whereas the ICO the favicon ships as
+ * decodes **only** on Windows and yields an empty image — which looks identical
+ * to having configured no icon at all — anywhere else.
  *
- * macOS gets its own `icon-mac.png`: the same squircle with the larger margin
- * the Dock's icon grid uses. `app.dock.setIcon` draws the PNG as-is, so the
- * shape has to be in the file.
+ * Unpackaged macOS uses `icon-dock.png`. `app.dock.setIcon` draws the PNG as-is,
+ * so the squircle has to be in the file. The installed app does not: its bundle
+ * icon is the full-bleed `icon-mac.png`, and macOS 26 masks that itself. Feeding
+ * setIcon's pre-rounded file to the bundle shrinks it into a small tile.
  */
 function iconPath(platform = process.platform) {
-  return path.join(__dirname, "build", platform === "darwin" ? "icon-mac.png" : "icon.png");
+  return path.join(__dirname, "build", platform === "darwin" ? "icon-dock.png" : "icon.png");
 }
 
 /**
