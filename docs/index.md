@@ -20,7 +20,8 @@
 | 你的目标 | 从哪里开始 |
 |---|---|
 | **在终端里写代码、查问题、跑长任务** | 1. [安装与配置](getting-started/installation.md)（`uv tool install agentica`）<br>2. [CLI 终端指南](getting-started/terminal.md)（`@文件`、`/model`、`/resume`、`/goal`、`/worktree`） |
-| **用网页 / 桌面端，或在手机微信里遥控电脑上的会话** | [Web、桌面端与微信/IM](advanced/gateway.md)（`uv tool install "agentica[gateway]"` → `agentica-gateway`） |
+| **用桌面端，打开即用** | [下载桌面版](https://shibing624.github.io/agentica/desktop/) |
+| **用网页，或在手机微信里遥控电脑上的会话** | [Web 与微信/IM](advanced/gateway.md)（`uv tool install "agentica[gateway]"` → `agentica-gateway`） |
 | **在自己的 Python 项目里嵌入 Agent** | 1. [5 分钟上手 (SDK)](getting-started/quickstart.md)（`uv add agentica`）<br>2. [Agent 与 DeepAgent](concepts/agent.md) · [最佳实践配方](guides/best_practices.md) |
 | **了解内部架构与设计原因（开发者选读）** | [架构与内部实现](introduction/architecture.md) · [内置工具设计判据](concepts/builtin-tool-bar.md) |
 
@@ -62,7 +63,8 @@ print(result.content)
 | [安装与配置](getting-started/installation.md) | 安装 CLI / Web / SDK，配置各家模型 API Key |
 | [5 分钟上手 (SDK)](getting-started/quickstart.md) | 同步/异步调用、流式输出、绑定工具、结构化输出 |
 | [CLI 终端指南](getting-started/terminal.md) | 命令行参数、`@文件` 引用、斜杠命令、多任务协作、系统沙箱 |
-| [Web、桌面端与微信/IM](advanced/gateway.md) | 本地网页、Desktop App、微信扫码接入、手机遥控本机 CLI 会话 |
+| [下载桌面版](https://shibing624.github.io/agentica/desktop/) | 按系统下载安装包，以及未签名时的一次放行 |
+| [Web、桌面端与微信/IM](advanced/gateway.md) | 本地网页、微信扫码接入、手机遥控本机 CLI 会话 |
 
 ### 核心用法 (Python SDK)
 

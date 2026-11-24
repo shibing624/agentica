@@ -47,21 +47,9 @@ agentica-gateway --port 8890         # 指定监听端口
 
 ### 3. 桌面应用（Desktop App）
 
-直接下载对应系统的安装包（每个 [GitHub Release](https://github.com/shibing624/agentica/releases/latest) 页面同样附带）：
-
-| 系统 | 安装包下载 |
-|---|---|
-| **macOS** 11+ | [Apple Silicon (arm64)](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-arm64.dmg) · [Intel (x64)](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-x64.dmg) |
-| **Windows** 10+ | [x64 安装包 (.exe)](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-win32-x64.exe) |
-| **Linux** x64 | [AppImage](https://github.com/shibing624/agentica/releases/latest/download/Agentica-x86_64.AppImage) · [deb](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-linux-amd64.deb) |
+下载、按系统选择安装包，以及未签名时的一次放行办法，都在 **[下载桌面版](https://shibing624.github.io/agentica/desktop/)**。那一页打开时读取最新 Release，并按当前系统给出下载按钮。
 
 桌面版与 CLI、Web 共用同一个 `~/.agentica` 配置与历史记录。安装包自带 Python 3.12 和同版本的 `agentica` + `agentica-gateway[feishu]`，不依赖本机 Python、Node、uv，首次打开也不需要联网。
-
-安装包当前**未签名**，首次启动若被系统拦截，按对应系统处理一次即可：
-
-- **macOS 提示「已损坏，无法打开」**：把 `Agentica.app` 拖进「应用程序」后，在终端执行一次 `sudo xattr -rd com.apple.quarantine /Applications/Agentica.app`。
-- **Windows 提示「Windows 已保护你的电脑」**：点「更多信息」→「仍要运行」。
-- **Linux 双击 AppImage 无反应**：先赋执行权限 `chmod +x Agentica-x86_64.AppImage`。
 
 几点说明（开发者与进阶用户）：
 

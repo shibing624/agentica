@@ -54,7 +54,7 @@ uv tool install --force "agentica[gateway,wechat,telegram]"
 - 不用 uv 时：`pip install agentica-gateway`（加飞书：`"agentica-gateway[feishu]"`，全部渠道：`"agentica-gateway[all]"`）。
 - 只装 `agentica` 时运行 `agentica-gateway`，会提示你装哪个包，而不是报 `command not found`。
 
-Desktop 安装包自带 Python 和同版本的 `agentica`、`agentica-gateway`，打开即用，不需要另装 Python、Node、uv，也不用联网。它和 `uv tool install` 装的 CLI 共用 `~/.agentica` 数据，但各用各的可执行包。
+Desktop 安装包自带 Python 和同版本的 `agentica`、`agentica-gateway`，打开即用，不需要另装 Python、Node、uv，也不用联网。下载和第一次被系统拦住时的处理见 [下载桌面版](https://shibing624.github.io/agentica/desktop/)。它和 `uv tool install` 装的 CLI 共用 `~/.agentica` 数据，但各用各的可执行包。
 
 ## 当库用（自己的项目）
 

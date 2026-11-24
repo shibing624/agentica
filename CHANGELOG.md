@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **桌面版有单独的下载页**：[https://shibing624.github.io/agentica/desktop/](https://shibing624.github.io/agentica/desktop/) 打开时向 GitHub 读取最新 Release 的安装包，按当前系统给出下载按钮，并写上未签名时 macOS、Windows、Linux 各自的一次放行办法。README 的桌面版下载链接改指向这一页。
+
 - **Linux 与 Windows 的 Desktop 安装包可以完成打包检查**：1.6.2 的检查直接跑解包后的程序，两边都失败，Release 就没有挂安装包。Ubuntu 26 禁止非特权 user namespace，解包目录里的 `chrome-sandbox` 又没有 setuid，Linux 上程序约一秒就退出；检查在沙箱助手不可用时改为带 `--no-sandbox`（AppImage 本来就是这样启动的）。Windows 上网关在进程启动时导入 `fcntl` / `pty` / `termios`，这些模块只有 POSIX 才有，所以网关以退出码 1 结束，窗口起不来。现在只在 POSIX 上导入它们；Windows 打开终端仍然返回「需要 POSIX」。检查失败时日志会写出原因，不再只留断言的第一行。
 
 ## [1.6.2] - 2026-11-24

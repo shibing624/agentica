@@ -9,7 +9,7 @@
 <p align="center"><b>跑在你自己电脑上的全能 AI 工作台。</b><br />桌面端、CLI 终端、本地网页、手机微信随时开干，记忆与技能越用越熟 —— 同时提供 Python & TypeScript SDK。</p>
 
 <h3 align="center">
-  <a href="https://github.com/shibing624/agentica/releases/latest">⬇️ 下载桌面版 Desktop App</a>
+  <a href="https://shibing624.github.io/agentica/desktop/">⬇️ 下载桌面版 Desktop App</a>
   &nbsp;·&nbsp;
   <a href="https://shibing624.github.io/agentica">📖 使用文档</a>
 </h3>
@@ -35,7 +35,7 @@ https://github.com/user-attachments/assets/39fb961e-3979-4629-a87d-81dce9196597
 
 | 产品 | 适合谁 | 立即开始 |
 |---|---|---|
-| **🖥️ Desktop App（桌面端）** | 想要独立窗口应用，零环境配置、打开即用 | [前往 Releases 下载安装包](https://github.com/shibing624/agentica/releases/latest)（[桌面端说明](https://shibing624.github.io/agentica/advanced/gateway)） |
+| **🖥️ Desktop App（桌面端）** | 想要独立窗口应用，零环境配置、打开即用 | [下载桌面版](https://shibing624.github.io/agentica/desktop/) |
 | **⌨️ CLI 终端** | 在终端里写代码、查 Bug、开多个窗口并行干活 | [CLI 安装与终端指南](https://shibing624.github.io/agentica/getting-started/terminal) |
 | **🌐 本地 Web & 手机 IM** | 浏览器多工作区 / 多账号管理，或用微信、飞书、企微、Telegram 远程指挥本机 | [Web 与微信/IM 接入指南](https://shibing624.github.io/agentica/advanced/gateway) |
 | **🐍 Python SDK & 📦 npm SDK** | 把 Agent 嵌入你自己的 Python 服务或 Node / TypeScript 应用 | [Python 5 分钟上手](https://shibing624.github.io/agentica/getting-started/quickstart) · [TypeScript SDK (`@agentica-ai/sdk`)](https://shibing624.github.io/agentica/advanced/gateway) |
@@ -98,7 +98,7 @@ https://github.com/user-attachments/assets/39fb961e-3979-4629-a87d-81dce9196597
 ## 文档与示例
 
 - **完整文档站**：**https://shibing624.github.io/agentica**
-- **快速入口**：[安装与配置](https://shibing624.github.io/agentica/getting-started/installation) · [桌面端与 Web / 微信](https://shibing624.github.io/agentica/advanced/gateway) · [CLI 终端](https://shibing624.github.io/agentica/getting-started/terminal) · [Python SDK 快速上手](https://shibing624.github.io/agentica/getting-started/quickstart)
+- **快速入口**：[下载桌面版](https://shibing624.github.io/agentica/desktop/) · [安装与配置](https://shibing624.github.io/agentica/getting-started/installation) · [Web / 微信](https://shibing624.github.io/agentica/advanced/gateway) · [CLI 终端](https://shibing624.github.io/agentica/getting-started/terminal) · [Python SDK 快速上手](https://shibing624.github.io/agentica/getting-started/quickstart)
 - **代码示例库**：[examples/](https://github.com/shibing624/agentica/tree/main/examples)（基础用法、多智能体编排、MCP 与完整行业应用）
 - **开发者选读**：[架构设计与内部实现](https://shibing624.github.io/agentica/introduction/architecture)
 

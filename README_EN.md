@@ -9,7 +9,7 @@
 <p align="center"><b>Your all-in-one AI workspace running on your own machine.</b><br />Work from the Desktop App, CLI Terminal, Local Web, or Mobile IM — with memory and skills that get sharper the more you use them, plus Python & TypeScript SDKs.</p>
 
 <h3 align="center">
-  <a href="https://github.com/shibing624/agentica/releases/latest">⬇️ Download Desktop App</a>
+  <a href="https://shibing624.github.io/agentica/desktop/">⬇️ Download Desktop App</a>
   &nbsp;·&nbsp;
   <a href="https://shibing624.github.io/agentica">📖 Documentation</a>
 </h3>
@@ -35,7 +35,7 @@ Every surface shares the same local memory, skills, and session history on your 
 
 | Product | Best for | Get started |
 |---|---|---|
-| **🖥️ Desktop App** | Standalone native window, zero environment setup | [Download from Releases](https://github.com/shibing624/agentica/releases/latest) ([Desktop guide](https://shibing624.github.io/agentica/advanced/gateway)) |
+| **🖥️ Desktop App** | Standalone native window, zero environment setup | [Download the Desktop App](https://shibing624.github.io/agentica/desktop/) |
 | **⌨️ CLI Terminal** | Coding, debugging, and running parallel sessions in the terminal | [CLI installation & terminal guide](https://shibing624.github.io/agentica/getting-started/terminal) |
 | **🌐 Local Web & Mobile IM** | Browser workspaces, multi-account setup, or controlling your machine from WeChat / Feishu / WeCom / Telegram | [Web & IM setup guide](https://shibing624.github.io/agentica/advanced/gateway) |
 | **🐍 Python SDK & 📦 npm SDK** | Embedding agents in Python services or calling the gateway from Node / TypeScript | [Python Quickstart](https://shibing624.github.io/agentica/getting-started/quickstart) · [TypeScript SDK (`@agentica-ai/sdk`)](https://shibing624.github.io/agentica/advanced/gateway) |
@@ -98,7 +98,7 @@ Link WeChat (scan a QR code), Feishu, WeCom, Telegram, QQ, DingTalk, or Slack wi
 ## Documentation & Examples
 
 - **Documentation site**: **https://shibing624.github.io/agentica**
-- **Popular guides**: [Installation & Configuration](https://shibing624.github.io/agentica/getting-started/installation) · [Desktop, Web & IM](https://shibing624.github.io/agentica/advanced/gateway) · [CLI Terminal](https://shibing624.github.io/agentica/getting-started/terminal) · [Python SDK Quickstart](https://shibing624.github.io/agentica/getting-started/quickstart)
+- **Popular guides**: [Download the Desktop App](https://shibing624.github.io/agentica/desktop/) · [Installation & Configuration](https://shibing624.github.io/agentica/getting-started/installation) · [Web & IM](https://shibing624.github.io/agentica/advanced/gateway) · [CLI Terminal](https://shibing624.github.io/agentica/getting-started/terminal) · [Python SDK Quickstart](https://shibing624.github.io/agentica/getting-started/quickstart)
 - **Runnable examples**: [examples/](https://github.com/shibing624/agentica/tree/main/examples) (basics, multi-agent patterns, MCP, and end-to-end applications)
 - **Developer internals**: [Architecture & Execution Engine](https://shibing624.github.io/agentica/introduction/architecture)
 
