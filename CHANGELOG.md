@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **桌面下载页的图片改为 GitHub 上的绝对地址**：`docs/desktop/index.html` 里的 logo、favicon 和界面截图不再用 `../assets/`。页面单独打开时相对路径会指错目录。三张图都指向 `https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/` 下的同名文件。
+
 - **文档首页的 logo 不再铺满内容区**：Material 主题把正文图片的高度设成自动，页面上的 `height="30"` 不起作用，`docs/assets/logo.png` 就按原图宽度撑开。现在用行内样式固定为 30px 高。
 
 - **文档站改成「入门 / 开发 / 参考」三个顶部分类，并补上 Schedule 提醒和记忆 MCP**：原先是 Read the Docs 主题里一长串折叠目录。现在顶上三个分类，点开后侧栏展开。新增 [Schedule 提醒](docs/getting-started/schedule.md)（对话和「自动化任务」页怎么建、改、跑、删提醒）和 [记忆 MCP](docs/getting-started/memory-mcp.md)（外部记忆服务写在 `~/.agentica/mcp_config.json`，不替换本机 `MEMORY.md`）。桌面下载页改成按当前系统给出一个下载按钮，旁边的菜单里选其他系统。上次文档发布在产物刚上传完就去部署，GitHub 没读到产物，`/desktop/` 一直 404；发布改成先构建、再单独部署。
