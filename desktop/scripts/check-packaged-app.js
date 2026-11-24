@@ -40,15 +40,28 @@ async function main(executable, stateRoot, mode) {
   fs.mkdirSync(state.home, { recursive: true });
   // The predecessor may not recognize AGENTICA_DESKTOP_STATE_DIR.
   const args = [`--user-data-dir=${state.profile}`];
-  if (process.platform === "linux" && process.getuid() === 0) args.push("--no-sandbox");
+  // Ubuntu 26 blocks unprivileged user namespaces, and the unpacked tree's
+  // chrome-sandbox is not setuid (the deb postinst does that, the AppImage
+  // passes --no-sandbox itself). Launching the raw binary then aborts in
+  // about a second. Root cannot use the sandbox either.
+  if (process.platform === "linux" && linuxSandboxBlocked(exe)) args.push("--no-sandbox");
+  // The Windows runner has no GPU. Software rendering is what this check can
+  // rely on; the installed app does not pass the flag.
+  if (process.platform === "win32") args.push("--disable-gpu");
 
   async function launch(spawned) {
-    const { stdout } = await promisify(execFile)(exe, args, { timeout: 90_000, maxBuffer: 4 * 1024 * 1024 });
-    const prefix = "DESKTOP-SMOKE-RESULT ";
-    const lines = stdout.split(/\r?\n/).filter((line) => line.startsWith(prefix));
-    assert.equal(lines.length, 1, "expected one readiness report");
-    const result = JSON.parse(lines[0].slice(prefix.length));
-    assert.equal(result.error, undefined);
+    let stdout = "";
+    try {
+      ({ stdout } = await promisify(execFile)(exe, args, { timeout: 180_000, maxBuffer: 4 * 1024 * 1024 }));
+    } catch (error) {
+      // A non-zero exit still prints the readiness line on the smoke path.
+      // The child's stderr stays out of this log: it can contain the token.
+      stdout = typeof error.stdout === "string" ? error.stdout : "";
+      if (!readSmokeResult(stdout)) throw error;
+    }
+    const result = readSmokeResult(stdout);
+    assert.ok(result, "expected one readiness report");
+    assert.equal(result.error, undefined, result.detail || result.error);
     assert.equal(result.probe.composer, true);
     assert.equal(result.probe.login, false);
     assert.equal(result.spawned, spawned);
@@ -99,8 +112,49 @@ async function main(executable, stateRoot, mode) {
   }
 }
 
+function linuxSandboxBlocked(exe) {
+  if (typeof process.getuid === "function" && process.getuid() === 0) return true;
+  try {
+    return (fs.statSync(path.join(path.dirname(exe), "chrome-sandbox")).mode & 0o4000) === 0;
+  } catch {
+    return true;
+  }
+}
+
+function readSmokeResult(stdout) {
+  const prefix = "DESKTOP-SMOKE-RESULT ";
+  const lines = String(stdout || "").split(/\r?\n/).filter((line) => line.startsWith(prefix));
+  if (lines.length !== 1) return null;
+  return JSON.parse(lines[0].slice(prefix.length));
+}
+
+function redact(text) {
+  return String(text)
+    .replace(/((?:token|password|secret|authorization)[=:]\s*)\S+/gi, "$1<redacted>")
+    .replace(/[A-Za-z0-9_-]{40,}/g, "<redacted>");
+}
+
 main(process.argv[2], process.argv[3], process.argv[4]).catch((error) => {
   // Do not print child stdout/stderr: the gateway may log its local token.
-  console.error(error.message.split("\n", 1)[0]);
+  const result = readSmokeResult(error.stdout);
+  if (result) {
+    let pathname = "";
+    try {
+      pathname = result.url ? new URL(result.url).pathname : "";
+    } catch {
+      pathname = "";
+    }
+    console.error(redact(
+      `smoke ${result.error || "mismatch"}`
+      + ` detail=${result.detail || ""}`
+      + ` spawned=${result.spawned} path=${pathname}`
+      + ` composer=${result.probe && result.probe.composer}`
+      + ` login=${result.probe && result.probe.login}`,
+    ));
+  } else if (error.stdout || error.stderr) {
+    console.error(redact(String(error.message || error).split(/\r?\n/, 1)[0]));
+  } else {
+    console.error(redact(String(error.message || error).split(/\r?\n/).slice(0, 8).join("\n")));
+  }
   process.exitCode = 1;
 });

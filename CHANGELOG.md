@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Linux 与 Windows 的 Desktop 安装包可以完成打包检查**：1.6.2 的检查直接跑解包后的程序。Ubuntu 26 禁止非特权 user namespace，解包目录里的 `chrome-sandbox` 又没有 setuid，程序约一秒就退出，Linux 和 Windows 的安装包都没能挂到 Release 上。Linux 在沙箱助手不可用时改为带 `--no-sandbox` 做这次检查（AppImage 本来就是这样启动的）。Windows 检查加上 `--disable-gpu`，首次启动等待从 45 秒放到 120 秒；失败时日志写出原因，不再只留断言的第一行。
+
 ## [1.6.2] - 2026-11-24
 
 - **输入栏按钮的提示改为悬停约 0.1 秒就出现**：原先用浏览器自带的 `title`，要等一秒左右，生成过程中按钮一重绘计时就清零，插话按钮经常悬停也没有提示。输入栏、队列操作和发送按钮改成自己的提示，打开菜单时不挡菜单。

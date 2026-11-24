@@ -81,7 +81,10 @@ let restarts = 0;
 
 function fatal(context, err) {
   if (smoke) {
-    process.stdout.write(`DESKTOP-SMOKE-RESULT ${JSON.stringify({ error: context, version: app.getVersion() })}\n`);
+    // First line only: the gateway's own explanation often continues with a
+    // stderr tail, and that tail can contain the local token.
+    const detail = (err instanceof Error ? err.message : String(err || "")).split(/\r?\n/, 1)[0].slice(0, 300);
+    process.stdout.write(`DESKTOP-SMOKE-RESULT ${JSON.stringify({ error: context, detail, version: app.getVersion() })}\n`);
     process.exitCode = 1;
     app.quit();
     return;
@@ -533,6 +536,9 @@ async function refreshDockMenu(forceFetch = false) {
 // A second launch must reach the window that already exists, not start a
 // second gateway against the same ~/.agentica.
 if (!app.requestSingleInstanceLock()) {
+  if (smoke) {
+    process.stdout.write(`DESKTOP-SMOKE-RESULT ${JSON.stringify({ error: "single-instance lock held", version: app.getVersion() })}\n`);
+  }
   app.quit();
 } else {
   app.on("second-instance", () => {
