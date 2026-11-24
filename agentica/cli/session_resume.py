@@ -223,6 +223,7 @@ def prepare_startup_resume(
     if session.get("profile_name"):
         agent_config["_resume_session_profile_name"] = session["profile_name"]
         agent_config["_resume_session_profile_source"] = session.get("profile_source") or "session"
+        agent_config["_resume_session_effort_override"] = session.get("reasoning_effort_override")
     if choice.work_dir:
         if not enter_work_dir(choice.work_dir):
             say(f"[red]Cannot enter {choice.work_dir}; resume aborted.[/red]")

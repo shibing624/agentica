@@ -99,12 +99,17 @@ export const pinSessionApi = (id: string, pinned: boolean) => postJson(`/api/ses
 export type SessionModel = {
   session_id: string; profile: string; source: "session" | "project" | "default";
   model_provider: string; model_name: string; reasoning_effort: string;
+  reasoning_effort_override: string | null;
+  reasoning_effort_options: string[];
+  detail?: string;
 };
 const workDirQuery = (workDir: string) => (workDir ? `?work_dir=${encodeURIComponent(workDir)}` : "");
 export const fetchSessionModel = (id: string, workDir: string) =>
   request<SessionModel>(`/api/sessions/${encodeURIComponent(id)}/model${workDirQuery(workDir)}`);
-export const setSessionModelApi = (id: string, profile: string, workDir: string) =>
-  postJson<SessionModel>(`/api/sessions/${encodeURIComponent(id)}/model${workDirQuery(workDir)}`, { profile });
+export const setSessionModelApi = (id: string, profile: string, workDir: string, reasoningEffortOverride?: string | null) =>
+  postJson<SessionModel>(`/api/sessions/${encodeURIComponent(id)}/model${workDirQuery(workDir)}`, {
+    profile, reasoning_effort_override: reasoningEffortOverride,
+  });
 export const unarchiveSessionApi = (id: string) => request(`/api/sessions/${id}/unarchive`, { method: "POST" });
 export const renameSessionApi = (id: string, name: string) => postJson(`/api/sessions/${id}/rename`, { name });
 export type BackgroundJob = {

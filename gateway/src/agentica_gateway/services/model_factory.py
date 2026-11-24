@@ -69,6 +69,11 @@ def create_model(
     """
     _ANTHROPIC_PROVIDERS = {"kimi", "anthropic", "claude"}
     _CLAUDE_PROVIDERS = {"anthropic", "claude"}
+    if model_provider in _CLAUDE_PROVIDERS and reasoning_effort == "off":
+        from agentica.model.anthropic.claude import is_claude_opus_5
+
+        if is_claude_opus_5(model_name):
+            reasoning_effort = ""
     effective_wire_api = wire_api or "chat_completions"
     if effective_wire_api not in ("chat_completions", "responses"):
         raise ValueError("wire_api must be either 'chat_completions' or 'responses'")
@@ -78,7 +83,9 @@ def create_model(
         raise ValueError("reasoning requires wire_api='responses'")
     if effective_wire_api == "responses" and reasoning_effort:
         raise ValueError("Responses API uses reasoning, not reasoning_effort")
-    if reasoning and reasoning not in ("none", "minimal", "low", "medium", "high", "xhigh", "max"):
+    from agentica.config.profiles import RESPONSES_REASONING_CHOICES
+
+    if reasoning and reasoning not in RESPONSES_REASONING_CHOICES:
         raise ValueError(f"Invalid Responses reasoning effort: {reasoning!r}")
 
     params: dict[str, Any] = {"id": model_name, "timeout": 300}

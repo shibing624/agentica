@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **队列里的「立刻插话」悬停立刻可见**：上箭头的提示画在按钮上方，而排队条的面板是 `overflow: hidden`、列表又在滚动，提示被裁掉，悬停几秒也看不到。现在提示改到按钮左侧、不延迟，文案是「立刻插话」。
 
+- **在会话内调整模型的思考程度**：Web / Desktop 的输入框模型菜单和 CLI `/model --effort` 共享会话档位，Profile 通过 `reasoning_effort_options` 声明端点支持的值。调整档位会固定当前 Profile，避免把档位套到其他端点；恢复默认只清除档位覆盖，不解除 Profile 固定。进行中的回复不受影响。
+
 - **桌面下载页的图片改为 GitHub 上的绝对地址**：`docs/desktop/index.html` 里的 logo、favicon 和界面截图不再用 `../assets/`。页面单独打开时相对路径会指错目录。三张图都指向 `https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/` 下的同名文件。
 
 - **文档首页的 logo 不再铺满内容区**：Material 主题把正文图片的高度设成自动，页面上的 `height="30"` 不起作用，`docs/assets/logo.png` 就按原图宽度撑开。现在用行内样式固定为 30px 高。

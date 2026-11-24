@@ -262,7 +262,7 @@ class AgentBuilderMixin:
         )
         return agent
 
-    async def _get_agent(self, session_id: str, owner: Optional[str] = None) -> DeepAgent:
+    async def _get_agent(self, session_id: str, owner: Optional[str] = None, *, for_run: bool = False) -> DeepAgent:
         """Return the cached Agent for a session, creating one if absent.
 
         Concurrent callers share one build. Otherwise a usage poll racing a
@@ -270,24 +270,39 @@ class AgentBuilderMixin:
         cache, and steer / cancel reach the idle copy.
         """
         key = self._sk(session_id, owner)
-        agent = self._cache.get(key)
-        if agent is not None and agent.user_id == self._owner(owner):
-            if key not in self._stale_agents or self.is_session_active(session_id, owner):
+
+        def current(agent: DeepAgent) -> bool:
+            return (
+                key not in self._stale_agents
+                and agent._session_model_selection == self.session_log_for(session_id, owner).model_selection()
+            )
+
+        # If the selection changes during construction, give the run one
+        # rebuild. Further changes must not keep a request waiting indefinitely.
+        for _ in range(2):
+            agent = self._cache.get(key)
+            if agent is not None and agent.user_id == self._owner(owner):
+                if (not for_run and self.is_session_active(session_id, owner)) or current(agent):
+                    return agent
+            build = self._agent_builds.get(key)
+            if build is None:
+                build = asyncio.ensure_future(self._build_and_cache_agent(key, session_id, owner))
+                self._agent_builds[key] = build
+
+                def _forget(done: asyncio.Future) -> None:
+                    if self._agent_builds.get(key) is done:
+                        del self._agent_builds[key]
+
+                build.add_done_callback(_forget)
+            agent = await asyncio.shield(build)
+            # A usage poll can have started building before a model update.
+            if not for_run or current(agent):
                 return agent
-        build = self._agent_builds.get(key)
-        if build is None:
-            build = asyncio.ensure_future(self._build_and_cache_agent(key, session_id, owner))
-            self._agent_builds[key] = build
-
-            def _forget(done: asyncio.Future) -> None:
-                if self._agent_builds.get(key) is done:
-                    del self._agent_builds[key]
-
-            build.add_done_callback(_forget)
-        return await asyncio.shield(build)
+        raise RuntimeError("Session model changed repeatedly while it was being prepared. Please retry.")
 
     async def _build_and_cache_agent(self, key: str, session_id: str, owner: Optional[str]) -> DeepAgent:
         self._stale_agents.discard(key)
+        selection = self.session_log_for(session_id, owner).model_selection()
 
         try:
             agent = await asyncio.wait_for(
@@ -300,6 +315,7 @@ class AgentBuilderMixin:
                 f"for session {session_id}. Check MCP server connectivity."
             )
 
+        agent._session_model_selection = selection
         agent.set_permission_mode(self.get_session_approval_mode(session_id, owner))
         self._cache.put(key, agent)
         await self._drain_released_agents()

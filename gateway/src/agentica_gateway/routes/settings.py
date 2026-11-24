@@ -28,6 +28,7 @@ from agentica.config.profiles import (
     get_active_profile_name,
     get_profile,
     get_setting,
+    reasoning_effort_field,
     upsert_profile,
     delete_profile,
     load_global_config,
@@ -70,6 +71,7 @@ class ProfileFields:
     wire_api: str = ""
     reasoning: str = ""
     reasoning_effort: str = ""
+    reasoning_effort_options: Optional[list[str]] = None
     max_tokens: int = 0
     context_window: int = 0
     compact_token_limit: int = 0
@@ -460,6 +462,7 @@ def _profile_summary(name: str, profile: dict) -> dict:
         "model_provider": profile.get("model_provider", ""),
         "model_name": profile.get("model_name", ""),
         "base_url": profile.get("base_url", ""),
+        "reasoning_effort": profile.get(reasoning_effort_field(profile)) or "",
         "api_key_masked": _mask_key(profile.get("api_key", "")),
         "has_api_key": bool(profile.get("api_key")),
         "tuning": tuning,
@@ -533,6 +536,7 @@ async def get_profile_detail(name: str):
         "api_key_masked": _mask_key(p.get("api_key", "")),
         "has_api_key": bool(p.get("api_key")),
         **{field_name: p.get(field_name) for field_name in TUNING_FIELD_NAMES},
+        "reasoning_effort_options": p.get("reasoning_effort_options"),
         "extra_body": p.get("extra_body"),
         "extra_headers": p.get("extra_headers"),
         "default_headers": p.get("default_headers"),

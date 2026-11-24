@@ -29,12 +29,21 @@ PROFILES = {
         "fast": {
             "model_provider": "deepseek", "model_name": "deepseek-chat", "api_key": "k-fast",
             "reasoning_effort": "high",
+            "reasoning_effort_options": ["high", "max"],
             "auxiliary_model": {"model_name": "deepseek-lite"},
             "auto_review_model": {
                 "model_provider": "zhipuai", "model_name": "glm-4.7-flash", "api_key": "k-review",
             },
         },
         "proj": {"model_provider": "openai", "model_name": "gpt-4o-mini"},
+        "responses": {
+            "model_provider": "openai", "model_name": "gpt-5", "api_key": "k-responses",
+            "wire_api": "responses", "reasoning": "medium", "reasoning_effort_options": ["low", "medium", "unsupported"],
+        },
+        "claude": {
+            "model_provider": "anthropic", "model_name": "claude-opus-5", "api_key": "k-claude",
+            "reasoning_effort": "high", "reasoning_effort_options": ["off", "high"],
+        },
         "cached_proxy": {
             "model_provider": "openai",
             "model_name": "claude-opus-5-5",
@@ -289,6 +298,155 @@ def test_session_model_routes(svc, monkeypatch):
     assert client.get("/api/sessions/b/model").json()["source"] == "default"
 
     assert client.post("/api/sessions/a/model", json={"profile": "nope"}).status_code == 404
+
+    url = "/api/sessions/a/model"
+    assert client.get(url).json()["reasoning_effort_options"] == ["high", "max"]
+    assert client.post(url, json={"profile": "fast", "reasoning_effort_override": "unknown"}).status_code == 422
+    assert client.post(url, json={"profile": "proj", "reasoning_effort_override": "max"}).status_code == 409
+    changed = client.post(url, json={"profile": "fast", "reasoning_effort_override": "max"})
+    assert changed.status_code == 200
+    assert changed.json()["reasoning_effort_override"] == changed.json()["reasoning_effort"] == "max"
+    assert svc.session_model_config("a")["reasoning_effort"] == "max"
+    assert svc.session_log_for("a").get_reasoning_effort_override() == "max"
+    assert client.post(url, json={"profile": "fast", "reasoning_effort_override": None}).json()["reasoning_effort"] == "high"
+    client.post(url, json={"profile": "fast", "reasoning_effort_override": "max"})
+    assert client.post(url, json={"profile": "proj"}).json()["reasoning_effort_override"] is None
+    assert client.post(url, json={"profile": "fast"}).json()["reasoning_effort"] == "high"
+
+
+def test_responses_effort_override_reaches_wire_format(svc):
+    asyncio.run(svc.set_session_profile("a", "responses"))
+    assert svc.session_model_config("a")["reasoning_effort_options"] == ["low", "medium"]
+    asyncio.run(svc.set_session_reasoning_effort("a", "responses", "low"))
+    agent = svc._build_agent("a")
+    assert agent.model.request_kwargs["reasoning"]["effort"] == "low"
+    assert "reasoning_effort" not in agent.model.request_kwargs
+
+
+def test_effort_pins_an_inherited_profile_even_after_reset(svc):
+    work_dir = svc.get_session_work_dir("a")
+    set_project_profile(work_dir, "fast")
+    assert svc.session_profile_source("a") == "project"
+    asyncio.run(svc.set_session_reasoning_effort("a", "fast", "max"))
+    set_project_profile(work_dir, "proj")
+    assert svc.session_log_for("a").model_selection() == ("fast", "max")
+    asyncio.run(svc.set_session_reasoning_effort("a", "fast", None))
+    cfg = svc.session_model_config("a")
+    assert (cfg["profile"], cfg["profile_source"], cfg["reasoning_effort"]) == ("fast", "session", "high")
+    assert svc.session_log_for("a").model_selection() == ("fast", None)
+    assert svc.session_model_config("b")["profile"] == "proj"
+
+
+def test_effort_and_cached_agent_are_isolated_by_owner_for_the_same_session_id(svc, monkeypatch):
+    sid = "shared-id"
+    work_dir = svc.get_session_work_dir("a")
+    for owner in ("alice", "bob"):
+        svc.set_session_work_dir(sid, work_dir, owner=owner)
+
+    monkeypatch.setattr(svc, "_build_agent", lambda sid, owner: SimpleNamespace(
+        user_id=svc._owner(owner), set_permission_mode=lambda mode: None,
+        effort=svc.session_model_config(sid, owner)["reasoning_effort"],
+    ))
+
+    async def scenario():
+        await svc.set_session_profile(sid, "fast", owner="alice")
+        await svc.set_session_profile(sid, "fast", owner="bob")
+        alice = await svc._get_agent(sid, owner="alice")
+        bob = await svc._get_agent(sid, owner="bob")
+        await svc.set_session_reasoning_effort(sid, "fast", "max", owner="alice")
+
+        next_alice = await svc._get_agent(sid, owner="alice", for_run=True)
+        assert next_alice is not alice and next_alice.effort == "max"
+        assert await svc._get_agent(sid, owner="bob", for_run=True) is bob
+        assert bob.effort == "high"
+        assert svc.session_log_for(sid, owner="alice").model_selection() == ("fast", "max")
+        assert svc.session_log_for(sid, owner="bob").model_selection() == ("fast", None)
+
+    asyncio.run(scenario())
+
+
+def test_claude_off_uses_same_mode_as_the_cli(svc):
+    from agentica.cli.runtime import get_model
+
+    asyncio.run(svc.set_session_profile("a", "claude"))
+    asyncio.run(svc.set_session_reasoning_effort("a", "claude", "off"))
+    gateway_model = svc._build_agent("a").model
+    cli_model = get_model("anthropic", "claude-opus-5", api_key="k-claude", reasoning_effort="off")
+    assert gateway_model.request_kwargs.get("thinking") == cli_model.request_kwargs.get("thinking") is None
+    assert "output_config" not in (gateway_model.request_kwargs.get("extra_body") or {})
+
+
+def test_effort_written_by_cli_rebuilds_cached_agent(svc, monkeypatch):
+    monkeypatch.setattr(svc, "_build_agent", lambda sid, owner: SimpleNamespace(
+        user_id=svc._owner(owner), set_permission_mode=lambda mode: None,
+        effort=svc.session_model_config(sid, owner)["reasoning_effort"],
+    ))
+
+    async def scenario():
+        await svc.set_session_profile("a", "fast")
+        running = await svc._get_agent("a")
+        async with svc._get_session_lock("a"):
+            svc.session_log_for("a").set_profile_effort("fast", "max")
+            assert await svc._get_agent("a") is running
+        async with svc._get_session_lock("a"):
+            assert (await svc._get_agent("a", for_run=True)).effort == "max"
+
+    asyncio.run(scenario())
+
+
+def test_new_run_waits_for_latest_effort_if_old_agent_is_building(svc, monkeypatch):
+    started = threading.Event()
+    finish = threading.Event()
+
+    def build(sid, owner):
+        effort = svc.session_model_config(sid, owner)["reasoning_effort"]
+        started.set()
+        assert finish.wait(5)
+        return SimpleNamespace(user_id=svc._owner(owner), set_permission_mode=lambda mode: None, effort=effort)
+
+    monkeypatch.setattr(svc, "_build_agent", build)
+
+    async def scenario():
+        await svc.set_session_profile("a", "fast")
+        poll = asyncio.create_task(svc._get_agent("a"))
+        try:
+            assert await asyncio.to_thread(started.wait, 5)
+            await svc.set_session_reasoning_effort("a", "fast", "max")
+        finally:
+            finish.set()
+        assert (await svc._get_agent("a", for_run=True)).effort == "max"
+        assert (await poll).effort == "high"
+
+    asyncio.run(scenario())
+
+
+def test_new_run_stops_rebuilding_when_effort_keeps_changing(svc, monkeypatch):
+    built = []
+
+    def build(sid, owner):
+        effort = svc.session_model_config(sid, owner)["reasoning_effort"]
+        built.append(effort)
+        # Make the first two builds stale, then stop changing the sidecar.
+        # The old unbounded loop returns a third agent instead of asking to retry.
+        if len(built) <= 2:
+            svc.session_log_for(sid, owner).set_profile_effort("fast", "max" if effort == "high" else "high")
+        return SimpleNamespace(user_id=svc._owner(owner), set_permission_mode=lambda mode: None, effort=effort)
+
+    monkeypatch.setattr(svc, "_build_agent", build)
+
+    async def scenario():
+        await svc.set_session_profile("a", "fast")
+        lock = svc._get_session_lock("a")
+        async with lock:
+            with pytest.raises(RuntimeError) as exc:
+                await asyncio.wait_for(svc._get_agent("a", for_run=True), timeout=5)
+            assert str(exc.value) == "Session model changed repeatedly while it was being prepared. Please retry."
+            assert built == ["high", "max"]
+        async with lock:
+            assert (await svc._get_agent("a", for_run=True)).effort == "high"
+        assert built == ["high", "max", "high"]
+
+    asyncio.run(scenario())
 
 
 def test_sdk_gateway_and_self_manage_inherit_cli_cache_and_resilience_fields(svc, tmp_path, monkeypatch):

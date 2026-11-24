@@ -827,6 +827,7 @@ async def pin_session(
 
 class SessionModelRequest(BaseModel):
     profile: str
+    reasoning_effort_override: Optional[str] = None
 
 
 def _session_model_payload(svc: AgentService, session_id: str, account: str) -> dict:
@@ -835,10 +836,12 @@ def _session_model_payload(svc: AgentService, session_id: str, account: str) -> 
         "session_id": session_id,
         "profile": cfg["profile"],
         # "session": picked for this chat; "project" / "default": inherited.
-        "source": svc.session_profile_source(session_id, owner=account),
+        "source": cfg["profile_source"],
         "model_provider": cfg["model_provider"],
         "model_name": cfg["model_name"],
-        "reasoning_effort": cfg["reasoning_effort"],
+        "reasoning_effort": cfg["reasoning"] if cfg["wire_api"] == "responses" else cfg["reasoning_effort"],
+        "reasoning_effort_options": cfg["reasoning_effort_options"],
+        "reasoning_effort_override": cfg["reasoning_effort_override"],
     }
 
 
@@ -871,7 +874,15 @@ async def set_session_model(
     account = _account(request)
     if work_dir:
         await _apply_session_work_dir(svc, session_id, work_dir, request)
-    await svc.set_session_profile(session_id, name, owner=account)
+    if "reasoning_effort_override" in body.model_fields_set:
+        try:
+            await svc.set_session_reasoning_effort(session_id, name, body.reasoning_effort_override, owner=account)
+        except LookupError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    else:
+        await svc.set_session_profile(session_id, name, owner=account)
     return _session_model_payload(svc, session_id, account)
 
 

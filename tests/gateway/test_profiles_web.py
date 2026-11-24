@@ -43,9 +43,11 @@ def test_list_profiles_shape(client):
             "model_provider": "deepseek",
             "model_name": "deepseek-v4-flash",
             "base_url": "https://api.deepseek.com",
+            "reasoning_effort": "high",
             "context_window": 1000000,
             "compact_token_limit": 300000,
         },
+        "responses": {"model_provider": "openai", "model_name": "gpt-5", "wire_api": "responses", "reasoning": "low"},
     }
     with patch("agentica_gateway.routes.settings.get_profiles", return_value=profiles), \
          patch("agentica_gateway.routes.settings.get_active_profile_name", return_value="default"):
@@ -54,12 +56,28 @@ def test_list_profiles_shape(client):
     data = resp.json()
     assert data["active"] == "default"
     names = [p["name"] for p in data["profiles"]]
-    assert names == ["default", "cheap"]
+    assert names == ["default", "cheap", "responses"]
     cheap = next(p for p in data["profiles"] if p["name"] == "cheap")
     assert cheap["model_provider"] == "deepseek"
     assert cheap["base_url"] == "https://api.deepseek.com"
+    assert {p["name"]: p["reasoning_effort"] for p in data["profiles"]} == {
+        "default": "", "cheap": "high", "responses": "low",
+    }
     assert "compact_token_limit=300000" in cheap["tuning"]
     assert "context_window=1000000" in cheap["tuning"]
+
+
+def test_profile_effort_options_can_be_saved_and_cleared(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTICA_HOME", str(tmp_path))
+    c, _ = client
+    body = {"name": "reasoner", "model_provider": "openai", "model_name": "gpt-5", "reasoning_effort": "high"}
+    assert c.post("/api/profile", json={**body, "reasoning_effort_options": ["low", "high"]}).status_code == 200
+    url = "/api/profile/reasoner"
+    assert c.get(url).json()["reasoning_effort_options"] == ["low", "high"]
+    assert c.put(url, json={**body, "reasoning_effort_options": []}).status_code == 200
+    detail = c.get(url).json()
+    assert detail["reasoning_effort_options"] == []
+    assert detail["reasoning_effort"] == "high"
 
 
 def test_create_switch_delete_profile(client):

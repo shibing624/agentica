@@ -57,6 +57,7 @@ async function editProfile(name: string) {
       base_url: d.base_url || "",
       api_key: "",
       reasoning_effort: d.reasoning_effort || "",
+      reasoning_effort_options: (d.reasoning_effort_options || []).join(", "),
       max_tokens: d.max_tokens ? String(d.max_tokens) : "",
       context_window: d.context_window ? String(d.context_window) : "",
       compact_token_limit: d.compact_token_limit ? String(d.compact_token_limit) : "",
@@ -97,6 +98,7 @@ async function saveProfile() {
     base_url: f.base_url.trim(),
     api_key: f.api_key || undefined,
     reasoning_effort: f.reasoning_effort.trim() || undefined,
+    reasoning_effort_options: f.reasoning_effort_options.split(",").map((value) => value.trim()).filter(Boolean),
     max_tokens: parseInt(f.max_tokens, 10) || undefined,
     context_window: parseInt(f.context_window, 10) || undefined,
     compact_token_limit: parseInt(f.compact_token_limit, 10) || undefined,
@@ -765,6 +767,10 @@ function ProfileForm() {
       <div className="pf-grid">
         <Field label="reasoning_effort">
           <input className="pf-input" placeholder="max / high / …" value={f.reasoning_effort} onChange={(e) => patch({ reasoning_effort: e.target.value })} />
+        </Field>
+        <Field label={S.settings.effortOptions} wide>
+          <input className="pf-input" placeholder={S.settings.effortOptionsHint} value={f.reasoning_effort_options}
+                 onChange={(e) => patch({ reasoning_effort_options: e.target.value })} />
         </Field>
         {num("max_tokens")}
         {num("context_window")}

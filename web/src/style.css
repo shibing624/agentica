@@ -970,6 +970,10 @@ a.side-nav-item{text-decoration:none;color:inherit}
 .dd-config-card{display:flex;flex-direction:column;gap:6px;margin:0 12px 10px;padding:10px 12px;border:var(--hair) solid var(--border);border-radius:10px;background:var(--bg2)}
 .dd-config-row{display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--fg2)}
 .dd-config-row strong{color:var(--fg);font-weight:600;font-family:var(--mono)}
+.dd-effort-row{align-items:center}
+.dd-effort-row select{min-width:0;max-width:60%;padding:3px 5px;border:var(--hair) solid var(--border);border-radius:5px;background:var(--bg);color:var(--fg);font:inherit}
+.dd-effort-row select:disabled{opacity:.55}
+.dd-effort-note{font-size:11px;line-height:1.35;color:var(--fg2)}
 /* disclaimer at bottom */
 /* ===== WELCOME ===== */
 .welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;text-align:center;color:var(--fg2);gap:12px}

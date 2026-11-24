@@ -18,9 +18,7 @@ export async function loadStatus() {
     serverVersion: data.version || "",
     serverConfigPath: data.config_path || "",
     serverProfile: data.active_profile || "",
-    // Tuning is nested; reading a flat `reasoning_effort` left it blank until
-    // the first profile switch.
-    serverReasoningEffort: data.tuning?.reasoning_effort || "",
+    serverReasoningEffort: (data.tuning?.wire_api === "responses" ? data.tuning.reasoning : data.tuning?.reasoning_effort) || "",
     serverContextWindow: data.context_window || getState().serverContextWindow,
     serverSupportsImages: !!data.supports_images,
     serverMediaModel: data.media_model || "",

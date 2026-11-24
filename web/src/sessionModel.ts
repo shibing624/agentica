@@ -14,6 +14,7 @@ function view(id: string, m: api.SessionModel): View {
   return {
     id, profile: m.profile, source: m.source,
     provider: m.model_provider, model: m.model_name, effort: m.reasoning_effort,
+    effortOptions: m.reasoning_effort_options, effortOverride: m.reasoning_effort_override,
   };
 }
 
@@ -23,6 +24,7 @@ function workDirOf(id: string): string {
 }
 
 let seq = 0;
+let effortWrite: Promise<unknown> | null = null;
 /** Last known model per chat, so switching back shows it at once instead of
  *  the gateway default until the request returns. */
 const known = new Map<string, View>();
@@ -50,6 +52,7 @@ export async function loadSessionModel(id: string | null) {
   if (!id) { setState({ sessionModel: null }); return; }
   const cached = known.get(id);
   if (cached && getState().sessionModel !== cached) setState({ sessionModel: cached });
+  if (getState().sessionModelSaving === id) return;
   const { ok, data } = await api.fetchSessionModel(id, workDirOf(id));
   settled.add(id);
   if (nonce !== seq || getState().curSess !== id) return;
@@ -62,6 +65,7 @@ export async function loadSessionModel(id: string | null) {
 export async function pickSessionModel(profile: string) {
   const st = getState();
   const S = getStrings();
+  if (st.sessionModelSaving === st.curSess && st.curSess) return;
   setState({ modelDDOpen: false });
   const id = st.curSess;
   if (!id) { setState({ pendingModel: profile }); return; }
@@ -74,8 +78,33 @@ export async function pickSessionModel(profile: string) {
   showToast(S.settings.switchedTo(profile));
 }
 
+export async function pickSessionEffort(id: string, profile: string, effort: string | null) {
+  if (effortWrite || getState().curSess !== id) return;
+  const S = getStrings();
+  ++seq;
+  setState({ sessionModelSaving: id });
+  const request = api.setSessionModelApi(id, profile, workDirOf(id), effort);
+  effortWrite = request;
+  let profileChanged = false;
+  try {
+    const { ok, data, status } = await request;
+    if (!ok || !data) {
+      profileChanged = status === 409;
+      showToast(data?.detail || S.chat.effortFailed, 3000);
+      return;
+    }
+    const picked = remember(id, data);
+    if (getState().curSess === id) setState({ sessionModel: picked });
+  } finally {
+    effortWrite = null;
+    setState({ sessionModelSaving: null });
+    if (profileChanged && getState().curSess === id) void loadSessionModel(id);
+  }
+}
+
 /** The first message of a new chat: record the model picked before it existed. */
 export async function applyPendingModel(id: string) {
+  if (getState().sessionModelSaving === id) await effortWrite;
   const profile = getState().pendingModel;
   if (!profile) return;
   setState({ pendingModel: "" });
