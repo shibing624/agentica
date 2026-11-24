@@ -1413,7 +1413,7 @@ const zh: Strings = {
     saveQueued: "保存",
     cancelEditQueued: "取消编辑",
     removeQueued: "删除",
-    steerQueued: "插话发送",
+    steerQueued: "立刻插话",
     turnProcessWorked: "已完成",
     turnProcessTook: "已完成，用时 ",
     turnProcessRunningFor: (duration: string) => `已处理 ${duration}`,

@@ -1218,6 +1218,13 @@ a.side-nav-item{text-decoration:none;color:inherit}
 .queue-act:hover:not(:disabled){background:var(--hover);color:var(--fg)}
 .queue-act:disabled{opacity:.45;cursor:default}
 .queue-act svg{width:13px;height:13px}
+/* The shared hint opens above the control. This bar clips that: the panel is
+   overflow:hidden and the list scrolls, so the tip never becomes visible.
+   Draw it to the left, inside the row, and skip the delay. */
+.queue-act.has-hint[data-hint]:not([data-hint=""]):is(:hover,:focus-visible)::after{
+  top:50%;bottom:auto;left:auto;right:calc(100% + 8px);transform:translateY(-50%);
+  animation-delay:0ms;z-index:5;
+}
 .goal-chip-row{display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px 0}
 .goal-chip{display:inline-flex;align-items:center;gap:8px;border:var(--hair) solid var(--border);border-radius:8px;background:var(--bg2);color:var(--fg2);padding:4px 8px;font-size:12px}
 .goal-chip-label{font-weight:600;color:var(--fg)}
