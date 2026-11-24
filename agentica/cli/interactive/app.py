@@ -480,9 +480,13 @@ def run_interactive(
         return
     resume_profile = agent_config.pop("_resume_session_profile_name", None)
     agent_config.pop("_resume_session_profile_source", None)
-    if resume_profile and not agent_config.get("_model_config_explicit"):
+    resume_effort = agent_config.pop("_resume_session_effort_override", None)
+    if resume_profile and agent_config.get("_model_config_explicit"):
+        # Explicit startup flags apply to this process, not the saved selection.
+        agent_config["_skip_session_profile_persist"] = True
+    elif resume_profile:
         try:
-            apply_named_profile_to_agent_config(agent_config, resume_profile, source="session")
+            apply_named_profile_to_agent_config(agent_config, resume_profile, source="session", effort_override=resume_effort)
         except ValueError as exc:
             agent_config["_skip_session_profile_persist"] = True
             get_console().print(

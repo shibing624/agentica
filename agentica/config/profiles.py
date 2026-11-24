@@ -54,6 +54,7 @@ Schema (``~/.agentica/config.yaml``)::
         # wire_api: responses        # OpenAI only; omit for Chat Completions
         # reasoning: high            # Responses API: none|minimal|low|medium|high|xhigh|max
         # reasoning_effort: max      # Chat Completions: any string, passed through
+        # reasoning_effort_options: [high, max]  # Confirmed endpoint values for conversation overrides
         # max_tokens: 8192           # output token limit
         # context_window: 1000000    # context limit; overrides catalog value
         # temperature: 0.7
@@ -278,6 +279,44 @@ def get_profile(name: Optional[str] = None, config: Optional[Dict[str, Any]] = N
         name = get_active_profile_name(data)
     profile = profiles.get(name)
     return profile if isinstance(profile, dict) else {}
+
+
+RESPONSES_REASONING_CHOICES = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+
+def reasoning_effort_field(config: Dict[str, Any]) -> str:
+    return "reasoning" if config.get("wire_api") == "responses" else "reasoning_effort"
+
+
+def reasoning_effort_options(profile: Dict[str, Any], effective: Dict[str, Any]) -> List[str]:
+    """Use the endpoint's declared values, not a model-name capability guess."""
+    if any(profile.get(key) != effective.get(key) for key in ("model_provider", "model_name")):
+        return []
+    if reasoning_effort_field(profile) != reasoning_effort_field(effective):
+        return []
+    if profile.get("base_url") and profile["base_url"].rstrip("/") != (effective.get("base_url") or "").rstrip("/"):
+        return []
+    # The native Kimi adapter uses a thinking budget, not the effort field.
+    if effective.get("model_provider") == "kimi":
+        return []
+    field = reasoning_effort_field(effective)
+    if field in (effective.get("extra_body") or {}):
+        return []
+    options = profile.get("reasoning_effort_options")
+    if not isinstance(options, list):
+        return []
+    declared = dict.fromkeys(option.strip() for option in options if isinstance(option, str) and option.strip())
+    if field == "reasoning":
+        return [option for option in declared if option in RESPONSES_REASONING_CHOICES]
+    return list(declared)
+
+
+def session_reasoning_kwargs(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep the profile defaults intact so a new session never inherits an override."""
+    result = {key: config.get(key) for key in ("reasoning", "reasoning_effort")}
+    if effort := config.get("reasoning_effort_override"):
+        result[reasoning_effort_field(config)] = effort
+    return result
 
 
 def set_active_profile(name: str) -> bool:

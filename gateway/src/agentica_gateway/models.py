@@ -229,6 +229,7 @@ class ProfileUpsertRequest(BaseModel):
     wire_api: Optional[str] = None
     reasoning: Optional[str] = None
     reasoning_effort: Optional[str] = None
+    reasoning_effort_options: Optional[list[str]] = None
     max_tokens: Optional[int] = None
     context_window: Optional[int] = None
     compact_token_limit: Optional[int] = None

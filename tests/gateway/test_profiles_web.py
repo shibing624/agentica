@@ -62,6 +62,19 @@ def test_list_profiles_shape(client):
     assert "context_window=1000000" in cheap["tuning"]
 
 
+def test_profile_effort_options_can_be_saved_and_cleared(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTICA_HOME", str(tmp_path))
+    c, _ = client
+    body = {"name": "reasoner", "model_provider": "openai", "model_name": "gpt-5", "reasoning_effort": "high"}
+    assert c.post("/api/profile", json={**body, "reasoning_effort_options": ["low", "high"]}).status_code == 200
+    url = "/api/profile/reasoner"
+    assert c.get(url).json()["reasoning_effort_options"] == ["low", "high"]
+    assert c.put(url, json={**body, "reasoning_effort_options": []}).status_code == 200
+    detail = c.get(url).json()
+    assert detail["reasoning_effort_options"] == []
+    assert detail["reasoning_effort"] == "high"
+
+
 def test_create_switch_delete_profile(client):
     c, svc = client
     with patch("agentica_gateway.routes.settings.upsert_profile") as upsert:

@@ -12,6 +12,8 @@ from typing import Any, Dict, List, Optional
 from agentica.config.profiles import (
     apply_global_config,
     provider_api_key_env,
+    reasoning_effort_field,
+    reasoning_effort_options,
     set_active_profile,
 )
 from agentica.utils.log import logger
@@ -168,7 +170,7 @@ class AgentModelMixin:
             ),
         }
 
-    def _session_profile(self, session_id: str, owner: Optional[str] = None) -> tuple[str, str]:
+    def _session_profile(self, session_id: str, owner: Optional[str], picked: Optional[str]) -> tuple[str, str]:
         """``(profile, source)`` a session runs on; ``("", "default")`` is the
         gateway default.
 
@@ -180,7 +182,6 @@ class AgentModelMixin:
         """
         pkg = _pkg()
         profiles = pkg.get_profiles()
-        picked = self.session_log_for(session_id, owner).get_profile_name()
         if picked and picked in profiles:
             return picked, "session"
         project = pkg.get_project_profile(self.get_session_work_dir(session_id, owner))
@@ -189,19 +190,29 @@ class AgentModelMixin:
         return "", "default"
 
     def session_profile_name(self, session_id: str, owner: Optional[str] = None) -> str:
-        return self._session_profile(session_id, owner)[0]
+        picked = self.session_log_for(session_id, owner).get_profile_name()
+        return self._session_profile(session_id, owner, picked)[0]
 
     def session_profile_source(self, session_id: str, owner: Optional[str] = None) -> str:
-        return self._session_profile(session_id, owner)[1]
+        picked = self.session_log_for(session_id, owner).get_profile_name()
+        return self._session_profile(session_id, owner, picked)[1]
 
     def session_model_config(self, session_id: str, owner: Optional[str] = None) -> Dict[str, Any]:
         """The flat model config a session's agent is built from."""
-        name = self.session_profile_name(session_id, owner)
-        if name:
-            profile = _pkg().get_profile(name)
-            if profile and profile.get("model_provider") and profile.get("model_name"):
-                return _profile_model_config(name, profile)
-        return self._default_model_config()
+        picked, effort = self.session_log_for(session_id, owner).model_selection()
+        name, source = self._session_profile(session_id, owner, picked)
+        profile = _pkg().get_profile(name) if name else {}
+        if profile.get("model_provider") and profile.get("model_name"):
+            cfg = _profile_model_config(name, profile)
+        else:
+            cfg = self._default_model_config()
+            profile = _pkg().get_profile(cfg["profile"]) if cfg["profile"] else {}
+        options = reasoning_effort_options(profile, cfg)
+        override = effort if source == "session" and picked == cfg["profile"] and effort in options else None
+        cfg.update(profile_source=source, reasoning_effort_options=options, reasoning_effort_override=override)
+        if override is not None:
+            cfg[reasoning_effort_field(cfg)] = override
+        return cfg
 
     async def set_session_profile(self, session_id: str, name: str, owner: Optional[str] = None) -> Dict[str, Any]:
         """Pin a session to a profile; other sessions keep theirs.
@@ -209,14 +220,31 @@ class AgentModelMixin:
         A run in flight finishes on its current model; the session rebuilds on
         its next request.
         """
-        self.session_log_for(session_id, owner).set_profile(name, "session")
+        self.session_log_for(session_id, owner).set_profile(name, "session", clear_effort=True)
+        self._invalidate_session_model(session_id, owner)
+        return self.session_model_config(session_id, owner)
+
+    async def set_session_reasoning_effort(
+        self, session_id: str, profile: str, effort: Optional[str], owner: Optional[str] = None,
+    ) -> None:
+        cfg = self.session_model_config(session_id, owner)
+        if cfg["profile"] != profile:
+            raise LookupError("The session profile changed. Reopen the model menu and try again.")
+        if effort is not None and effort not in cfg["reasoning_effort_options"]:
+            raise ValueError("That reasoning effort is not declared by the session profile.")
+        log = self.session_log_for(session_id, owner)
+        if effort is None and log.get_reasoning_effort_override() is None:
+            return
+        log.set_profile_effort(profile, effort)
+        self._invalidate_session_model(session_id, owner)
+
+    def _invalidate_session_model(self, session_id: str, owner: Optional[str]) -> None:
         key = self._sk(session_id, owner)
         lock = self._session_locks.get(key)
-        if lock is not None and lock.locked():
+        if (lock is not None and lock.locked()) or key in self._agent_builds:
             self._stale_agents.add(key)
         else:
             self._cache.delete(key)
-        return self.session_model_config(session_id, owner)
 
     def _session_provider(self, session_id: str, owner: Optional[str] = None) -> str:
         """Provider slug of the session's model, for the ``provider/model`` label."""

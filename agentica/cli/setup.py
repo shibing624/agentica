@@ -31,6 +31,8 @@ from prompt_toolkit import prompt as pt_prompt
 from agentica.config.profiles import (
     DEFAULT_PROFILE_NAME,
     get_profile,
+    reasoning_effort_options,
+    RESPONSES_REASONING_CHOICES as _RESPONSES_REASONING_CHOICES,
     get_profiles,
     get_active_profile_name,
     resolve_active_profile_name,
@@ -255,7 +257,6 @@ def _select_provider(console, current: Optional[str] = None) -> str:
 
 
 _REASONING_EFFORT_CHOICES = ("low", "medium", "high", "max")
-_RESPONSES_REASONING_CHOICES = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 _WIRE_API_CHOICES = ("chat_completions", "responses")
 
 
@@ -1371,11 +1372,16 @@ def apply_named_profile_to_agent_config(
     agent_config: Dict[str, Any],
     name: str,
     source: str = "session",
+    *,
+    effort_override: Optional[str] = None,
 ) -> None:
     """Replace model/profile fields on ``agent_config`` from a saved profile."""
     resolved = resolve_named_profile_config(name, source=source)
     for key in _PROFILE_CONFIG_KEYS:
         agent_config[key] = resolved.get(key)
+    agent_config.pop("reasoning_effort_override", None)
+    if effort_override in reasoning_effort_options(get_profile(name), resolved):
+        agent_config["reasoning_effort_override"] = effort_override
 
 
 def session_profile(agent_config: Dict, work_dir: Optional[str] = None) -> Tuple[str, str]:

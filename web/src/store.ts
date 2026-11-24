@@ -161,6 +161,7 @@ export type ProfileForm = {
   base_url: string;
   api_key: string;
   reasoning_effort: string;
+  reasoning_effort_options: string;
   max_tokens: string;
   context_window: string;
   compact_token_limit: string;
@@ -244,7 +245,11 @@ export type AppState = {
   serverContextWindow: number;
   serverProfile: string;
   /** The model the open chat runs on; null until the gateway answers. */
-  sessionModel: { id: string; profile: string; source: string; provider: string; model: string; effort: string } | null;
+  sessionModel: {
+    id: string; profile: string; source: string; provider: string; model: string; effort: string;
+    effortOverride: string | null; effortOptions: string[];
+  } | null;
+  sessionModelSaving: string | null;
   /** A model picked on the new-chat screen, applied when the chat is created. */
   pendingModel: string;
     serverSupportsImages: boolean;
@@ -341,7 +346,7 @@ export type AppState = {
 export function emptyProfileForm(): ProfileForm {
   return {
     name: "", editing: false, model_provider: "", model_name: "", base_url: "", api_key: "",
-    reasoning_effort: "", max_tokens: "", context_window: "", compact_token_limit: "", temperature: "", top_p: "",
+    reasoning_effort: "", reasoning_effort_options: "", max_tokens: "", context_window: "", compact_token_limit: "", temperature: "", top_p: "",
     enable_cache_control: false, cache_control_session_header: "",
     aux_provider: "", aux_model: "", aux_base_url: "", aux_api_key: "",
     envRows: [],
@@ -416,6 +421,7 @@ const state: AppState = {
   serverContextWindow: 128000,
   serverProfile: "",
   sessionModel: null,
+  sessionModelSaving: null,
   pendingModel: "",
     serverSupportsImages: false,
     serverMediaModel: "",

@@ -1762,6 +1762,7 @@ class SessionLog:
             "pinned": cls._meta_pinned(meta),
             "profile_name": cls._meta_profile_name(meta),
             "profile_source": cls._meta_profile_source(meta),
+            "reasoning_effort_override": cls._meta_reasoning_effort_override(meta),
             "last_read_at": cls._meta_last_read_at(meta),
             "cli": cls._meta_cli(meta),
             "source": cls._meta_source(meta),
@@ -2065,6 +2066,11 @@ class SessionLog:
         return None
 
     @staticmethod
+    def _meta_reasoning_effort_override(data: Dict[str, Any]) -> Optional[str]:
+        value = data.get("reasoning_effort_override")
+        return value if isinstance(value, str) and value else None
+
+    @staticmethod
     def _meta_last_read_at(data: Dict[str, Any]) -> Optional[str]:
         value = data.get("last_read_at")
         if isinstance(value, str) and value.strip():
@@ -2308,7 +2314,14 @@ class SessionLog:
         """Return where this session profile came from, if recorded."""
         return self._meta_profile_source(self._read_meta(self.meta_path))
 
-    def set_profile(self, name: str, source: str = "") -> None:
+    def model_selection(self) -> tuple[Optional[str], Optional[str]]:
+        meta = self._read_meta(self.meta_path)
+        return self._meta_profile_name(meta), self._meta_reasoning_effort_override(meta)
+
+    def get_reasoning_effort_override(self) -> Optional[str]:
+        return self.model_selection()[1]
+
+    def set_profile(self, name: str, source: str = "", *, clear_effort: bool = False) -> None:
         """Persist the config.yaml profile used by this session.
 
         The profile body itself stays in config.yaml; the sidecar only records
@@ -2319,9 +2332,15 @@ class SessionLog:
         if not isinstance(name, str) or not name.strip():
             raise ValueError("session profile name must be a non-empty string")
         updates = {"profile_name": name.strip()}
+        if clear_effort or updates["profile_name"] != self.get_profile_name():
+            updates["reasoning_effort_override"] = None
         if isinstance(source, str) and source.strip():
             updates["profile_source"] = source.strip()
         self._write_meta(updates)
+
+    def set_profile_effort(self, name: str, effort: Optional[str]) -> None:
+        """Save the profile and its conversation-only override in one sidecar update."""
+        self._write_meta({"profile_name": name, "profile_source": "session", "reasoning_effort_override": effort})
 
     def get_forked_from(self) -> Optional[str]:
         """Return the session this one was branched from, if it was a fork."""
@@ -2563,7 +2582,7 @@ class SessionLog:
         source_meta = self._read_meta(self.meta_path)
         fork_meta = {
             key: source_meta[key]
-            for key in ("profile_name", "profile_source", "source")
+            for key in ("profile_name", "profile_source", "reasoning_effort_override", "source")
             if isinstance(source_meta.get(key), str) and source_meta[key].strip()
         }
         # A branch is the same conversation seen from a second window; the view

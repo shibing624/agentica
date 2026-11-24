@@ -21,7 +21,7 @@ import {
   uid, UNLIMITED_TOKEN_BUDGET, updateQueuedMessageText,
 } from "../lib/format";
 import { primeSettings } from "../panels/SettingsModal";
-import { applyPendingModel, cachedSessionModel, loadSessionModel, pickSessionModel, sessionModelKnown } from "../sessionModel";
+import { applyPendingModel, cachedSessionModel, loadSessionModel, pickSessionEffort, pickSessionModel, sessionModelKnown } from "../sessionModel";
 import { chatApprovalMode, createSession, forkAt, hydrateSession, loadOlderMessages, markSessionRead, pushPendingName, rateMessage, renameSession, sessionHydrating, setChatApprovalMode as setApprovalMode, syncSessionRoundStats } from "../sessions";
 import { titleForFirstMessage } from "../lib/sessionTitle";
 import { loadCronJobs, loadPlugins } from "../data";
@@ -478,6 +478,7 @@ export function ChatPage() {
   const shownProvider = pendingProfile?.model_provider || chatModel?.provider || s.serverProvider;
   const shownModel = pendingProfile?.model_name || chatModel?.model || s.serverModelName || s.serverModel;
   const shownEffort = pendingProfile ? "" : chatModel ? chatModel.effort : s.serverReasoningEffort;
+  const modelSaving = s.curSess !== null && s.sessionModelSaving === s.curSess;
   const skillToken = leadingSkillToken(s.inputText, invocableSkills(s.pluginsData.skills || []));
   // The token is drawn in an overlay under the textarea; hit-test its boxes so
   // a click on the name opens the skill while a click elsewhere just edits.
@@ -924,8 +925,10 @@ export function ChatPage() {
                           data-hint={s.modelDDOpen ? undefined : S.chat.switchProfile}
                           aria-label={S.chat.switchProfile}
                           onClick={() => {
-                    setState({ modelDDOpen: !s.modelDDOpen, approvalMenuOpen: false, composerPicker: null });
-                  }}>
+                            const open = !s.modelDDOpen;
+                            setState({ modelDDOpen: open, approvalMenuOpen: false, composerPicker: null });
+                            if (open && s.curSess) void loadSessionModel(s.curSess);
+                          }}>
                     {shownModel}
                   </button>
                   {s.modelDDOpen && (
@@ -935,12 +938,14 @@ export function ChatPage() {
                       shownProvider={shownProvider}
                       shownModel={shownModel}
                       shownEffort={shownEffort}
+                      chatModel={chatModel}
+                      saving={modelSaving}
                     />
                   )}
                 </div>
                 <button className={"act-btn has-hint hint-end " + (showStop ? "stop" : "send")}
                         // dsh: an empty draft dims the send button; anything to send lights it.
-                        disabled={compacting || (!showStop && !hasDraft)}
+                        disabled={compacting || (!showStop && (modelSaving || !hasDraft))}
                         data-hint={showStop ? S.chat.stop : sendLabel}
                         aria-label={showStop ? S.chat.stop : sendLabel}
                         onClick={(e) => showStop
@@ -960,8 +965,9 @@ export function ChatPage() {
   );
 }
 
-function ModelDropdown({ profiles, shownProfile, shownProvider, shownModel, shownEffort }: {
+function ModelDropdown({ profiles, shownProfile, shownProvider, shownModel, shownEffort, chatModel, saving }: {
   profiles: any[]; shownProfile: string; shownProvider: string; shownModel: string; shownEffort: string;
+  chatModel: ReturnType<typeof cachedSessionModel>; saving: boolean;
 }) {
   const S = useStrings();
   const [query, setQuery] = useState("");
@@ -981,7 +987,16 @@ function ModelDropdown({ profiles, shownProfile, shownProvider, shownModel, show
       <div className="dd-config-card">
         <div className="dd-config-row"><span>Profile</span><strong>{shownProfile}</strong></div>
         <div className="dd-config-row"><span>{S.chat.model}</span><strong>{shownProvider}/{shownModel}</strong></div>
-        {shownEffort && <div className="dd-config-row"><span>effort</span><strong>{shownEffort}</strong></div>}
+        {chatModel?.effortOptions?.length ? (
+          <label className="dd-config-row dd-effort-row">
+            <span>{S.chat.reasoningEffort}</span>
+            <select value={chatModel.effortOverride ?? ""} disabled={saving} aria-busy={saving}
+                    onChange={(e) => void pickSessionEffort(chatModel.id, chatModel.profile, e.currentTarget.value || null)}>
+              <option value="">{!chatModel.effortOverride && shownEffort ? S.chat.defaultEffortWithValue(shownEffort) : S.chat.defaultEffort}</option>
+              {chatModel.effortOptions.map((effort) => <option key={effort} value={effort}>{effort}</option>)}
+            </select>
+          </label>
+        ) : shownEffort ? <div className="dd-config-row"><span>{S.chat.reasoningEffort}</span><strong>{shownEffort}</strong></div> : null}
       </div>
       <div className="dd-section">{S.chat.switchProfile}</div>
       {profiles.length > 0 && (
@@ -1011,6 +1026,7 @@ function ModelDropdown({ profiles, shownProfile, shownProvider, shownModel, show
         {profiles.length > 0 && !filtered.length && <div className="dd-empty">{S.chat.pickerNoMatch}</div>}
         {filtered.map((p: any, i: number) => (
           <button key={p.name}
+                  disabled={saving}
                   className={"dd-profile" + (p.name === shownProfile ? " active" : "") + (i === cursor ? " kb-focus" : "")}
                   onMouseEnter={() => setCursor(i)}
                   onClick={() => void pickSessionModel(p.name)}>
@@ -1899,6 +1915,7 @@ async function submit(gesture: SubmitGesture = "enter") {
   if (lockLive?.pendingApprovals?.[0] || lockLive?.pendingQuestions?.[0]) return;
   const text = st.inputText.trim();
   const files = st.pendingFiles.slice();
+  if (st.curSess && st.sessionModelSaving === st.curSess && (text || files.length)) return;
   const S = getStrings();
   if (text || files.length) lastSubmitAt = Date.now();
 

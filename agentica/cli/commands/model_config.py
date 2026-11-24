@@ -27,6 +27,9 @@ from agentica.cli.setup import (
 from agentica.config.profiles import (
     get_profile,
     get_profiles,
+    reasoning_effort_field,
+    reasoning_effort_options,
+    session_reasoning_kwargs,
     get_active_profile_name,
     resolve_active_profile_name,
     set_project_profile,
@@ -340,8 +343,7 @@ def _rebuild_live_model(ctx: CommandContext):
         "wire_api": ctx.agent_config.get("wire_api"),
         "max_tokens": ctx.agent_config.get("max_tokens"),
         "temperature": ctx.agent_config.get("temperature"),
-        "reasoning_effort": ctx.agent_config.get("reasoning_effort"),
-        "reasoning": ctx.agent_config.get("reasoning"),
+        **session_reasoning_kwargs(ctx.agent_config),
         "top_p": ctx.agent_config.get("top_p"),
         "context_window": ctx.agent_config.get("context_window"),
         "enable_cache_control": ctx.agent_config.get("enable_cache_control"),
@@ -580,7 +582,7 @@ def _apply_profile(
     # restore this session's provider/model even if another session in the same
     # work_dir switches the project active profile later.
     if ctx.current_agent is not None and ctx.current_agent._session_log is not None:
-        ctx.current_agent._session_log.set_profile(name, ctx.agent_config["profile_source"])
+        ctx.current_agent._session_log.set_profile(name, ctx.agent_config["profile_source"], clear_effort=True)
 
     model_kwargs = {
         "model_provider": new_provider,
@@ -733,6 +735,32 @@ def _list_profiles(active_name: Optional[str] = None, active_source: Optional[st
 
 
 
+def _set_session_effort(ctx: CommandContext, effort: Optional[str], *, show: bool = False) -> None:
+    con = get_console()
+    config = ctx.agent_config
+    name = config.get("profile_name")
+    options = reasoning_effort_options(get_profile(name), config) if name else []
+    current = config.get("reasoning_effort_override")
+    if show:
+        effective = current or config.get(reasoning_effort_field(config)) or "endpoint default"
+        con.print(f"Reasoning effort: {effective} ({'session override' if current else 'profile default'})", markup=False)
+        if options:
+            con.print("Available: " + ", ".join(options), markup=False)
+        return
+    if effort is not None and effort not in options:
+        con.print("This profile does not declare that effort. Run /model --effort to see available values.")
+        return
+    if effort == current:
+        return
+    if ctx.current_agent is None or ctx.current_agent._session_log is None:
+        con.print("A saved conversation is required to change session effort.")
+        return
+    config["reasoning_effort_override"] = effort
+    _rebuild_live_model(ctx)
+    ctx.current_agent._session_log.set_profile_effort(name, effort)
+    con.print(f"Session reasoning effort: {effort or 'profile default'}", markup=False)
+
+
 def _cmd_model(ctx: CommandContext, cmd_args: str = ""):
     # Profile architecture: each profile in ~/.agentica/config.yaml is a fully
     # self-contained model setup (main + optional auxiliary + tuning). `/model`
@@ -750,6 +778,12 @@ def _cmd_model(ctx: CommandContext, cmd_args: str = ""):
     if not stripped:
         return _model_list_overview(ctx)
 
+    parts = stripped.split(None, 1)
+    if parts[0] == "--effort":
+        return _set_session_effort(ctx, parts[1] if len(parts) == 2 else None, show=len(parts) == 1)
+    if stripped == "--effort-default":
+        return _set_session_effort(ctx, None)
+
     # /model --clear (or --reset) drops the project-scoped override and
     # re-applies the global default. Deliberately no `--global` flag: writing
     # global defaults is `agentica setup` / `/config` territory.
@@ -758,7 +792,6 @@ def _cmd_model(ctx: CommandContext, cmd_args: str = ""):
 
     # Tolerate (and gently redirect) the legacy `profile <name>` form so users
     # with muscle memory still get a working switch.
-    parts = stripped.split(None, 1)
     if parts[0].lower() in ("profile", "profiles"):
         if len(parts) == 1:
             return _model_list_overview(ctx)
@@ -803,6 +836,8 @@ def _model_list_overview(ctx: CommandContext) -> None:
         "  /model <profile_name>   switch to a saved profile (project-scoped; config.yaml untouched)", style="dim"
     )
     con.print("  /model --clear          drop project override, fall back to global default", style="dim")
+    con.print("  /model --effort [value] show or change reasoning effort for this conversation", style="dim")
+    con.print("  /model --effort-default use the conversation profile's default effort", style="dim")
     con.print("To add or edit a profile, run [bold]agentica setup[/bold] outside the session.", style="dim")
 
 

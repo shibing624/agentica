@@ -21,7 +21,7 @@ from agentica.agent.config import (
 )
 from agentica.agent.permissions import SANDBOX_MODES
 from agentica.config import AGENTICA_CACHE_DIR
-from agentica.config.profiles import get_setting
+from agentica.config.profiles import get_setting, session_reasoning_kwargs
 from agentica.compression.manager import parse_compact_token_limit
 from agentica.skills import load_system_skills
 from agentica.tools.base import Tool
@@ -876,8 +876,7 @@ def create_agent(
         wire_api=agent_config.get("wire_api"),
         max_tokens=agent_config.get("max_tokens"),
         temperature=agent_config.get("temperature"),
-        reasoning_effort=agent_config.get("reasoning_effort"),
-        reasoning=agent_config.get("reasoning"),
+        **session_reasoning_kwargs(agent_config),
         top_p=agent_config.get("top_p"),
         context_window=agent_config.get("context_window"),
         enable_cache_control=agent_config.get("enable_cache_control"),

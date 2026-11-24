@@ -336,6 +336,8 @@ def _start_fresh_session(ctx: CommandContext, *, source: str) -> dict:
     """
     ctx.agent_config.pop("session_id", None)
     ctx.agent_config.pop("session_base_dir", None)
+    ctx.agent_config.pop("reasoning_effort_override", None)
+    ctx.agent_config.pop("_skip_session_profile_persist", None)
     current_agent = create_agent(
         ctx.agent_config,
         ctx.extra_tools,
@@ -604,6 +606,8 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
             return
 
         agent_config = dict(ctx.agent_config)
+        agent_config.pop("reasoning_effort_override", None)
+        agent_config.pop("_skip_session_profile_persist", None)
         agent_config["session_id"] = chosen["session_id"]
         agent_config["_resume_at_uuid"] = resume_at_uuid
         # Pin storage to where the transcript already lives. Without this a
@@ -619,7 +623,9 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
         if chosen.get("profile_name"):
             profile_name = chosen["profile_name"]
             try:
-                apply_named_profile_to_agent_config(agent_config, profile_name, source="session")
+                apply_named_profile_to_agent_config(
+                    agent_config, profile_name, source="session", effort_override=chosen.get("reasoning_effort_override"),
+                )
             except ValueError as exc:
                 agent_config["_skip_session_profile_persist"] = True
                 con.print(

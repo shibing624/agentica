@@ -70,6 +70,7 @@ class ProfileFields:
     wire_api: str = ""
     reasoning: str = ""
     reasoning_effort: str = ""
+    reasoning_effort_options: Optional[list[str]] = None
     max_tokens: int = 0
     context_window: int = 0
     compact_token_limit: int = 0
@@ -533,6 +534,7 @@ async def get_profile_detail(name: str):
         "api_key_masked": _mask_key(p.get("api_key", "")),
         "has_api_key": bool(p.get("api_key")),
         **{field_name: p.get(field_name) for field_name in TUNING_FIELD_NAMES},
+        "reasoning_effort_options": p.get("reasoning_effort_options"),
         "extra_body": p.get("extra_body"),
         "extra_headers": p.get("extra_headers"),
         "default_headers": p.get("default_headers"),

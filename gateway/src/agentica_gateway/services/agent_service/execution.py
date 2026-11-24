@@ -140,7 +140,7 @@ class AgentExecutionMixin:
             )
 
         async with lock:
-            agent = await self._get_agent(session_id, owner)
+            agent = await self._get_agent(session_id, owner, for_run=True)
             message = replace_invalid_utf8(message)
             message, run_images, run_audio, media_notes = await self._prepare_run_media(
                 agent, message, media,
@@ -231,7 +231,7 @@ class AgentExecutionMixin:
             )
 
         async with lock:
-            agent = await self._get_agent(session_id, owner)
+            agent = await self._get_agent(session_id, owner, for_run=True)
             if self._workspace:
                 await asyncio.to_thread(
                     self._workspace.set_user, self._owner(owner or user_id)
@@ -266,7 +266,7 @@ class AgentExecutionMixin:
             )
 
         async with lock:
-            agent = await self._get_agent(session_id, owner)
+            agent = await self._get_agent(session_id, owner, for_run=True)
             wm = agent.working_memory
             messages = wm.messages
             msg_count = len(messages)
@@ -352,7 +352,7 @@ class AgentExecutionMixin:
     ) -> ChatResult:
         """Internal stream implementation (called under per-session lock)."""
         await self._ensure_initialized()
-        agent = await self._get_agent(session_id, owner)
+        agent = await self._get_agent(session_id, owner, for_run=True)
         message = replace_invalid_utf8(message)
         message, run_images, run_audio, media_notes = await self._prepare_run_media(
             agent, message, media,

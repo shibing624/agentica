@@ -78,6 +78,8 @@ def test_resume_restores_session_profile_before_creating_agent(tmp_path, monkeyp
             "model_name": "deepseek-v4-flash",
             "base_url": "https://api.deepseek.com",
             "api_key": "sk-resume",
+            "reasoning_effort": "high",
+            "reasoning_effort_options": ["high", "max"],
         },
         make_active=False,
     )
@@ -86,7 +88,7 @@ def test_resume_restores_session_profile_before_creating_agent(tmp_path, monkeyp
     current_log.append("user", "current")
     target_log = SessionLog("session-target", base_dir=str(tmp_path), work_dir=str(work_dir))
     target_log.append("user", "resume me")
-    target_log.set_profile("resume-prof", "session")
+    target_log.set_profile_effort("resume-prof", "max")
 
     ctx = CommandContext(
         agent_config={
@@ -144,6 +146,11 @@ def test_resume_restores_session_profile_before_creating_agent(tmp_path, monkeyp
     assert agent_config["profile_source"] == "session"
     assert agent_config["model_provider"] == "deepseek"
     assert agent_config["model_name"] == "deepseek-v4-flash"
+    from agentica.cli.runtime import get_model
+    from agentica.config.profiles import session_reasoning_kwargs
+
+    model = get_model("deepseek", "deepseek-v4-flash", **session_reasoning_kwargs(agent_config))
+    assert model.request_kwargs["reasoning_effort"] == "max"
     assert gc.get_project_profile(str(work_dir)) == "resume-prof"
 
 
@@ -155,13 +162,41 @@ def test_prepare_startup_resume_carries_session_profile(tmp_path, monkeypatch):
     work_dir.mkdir()
     log = SessionLog("startup-session", work_dir=str(work_dir))
     log.append("user", "hello")
-    log.set_profile("proxy", "session")
+    log.set_profile_effort("proxy", "low")
 
     agent_config = {"session_id": "startup-session", "work_dir": str(work_dir)}
 
     assert prepare_startup_resume(agent_config, printer=lambda _msg: None) is True
     assert agent_config["_resume_session_profile_name"] == "proxy"
     assert agent_config["_resume_session_profile_source"] == "session"
+    assert agent_config["_resume_session_effort_override"] == "low"
+
+
+def test_model_effort_changes_live_responses_request_and_resets_without_editing_profile(tmp_path, monkeypatch):
+    from agentica.cli.commands.model_config import _cmd_model
+    from agentica.cli.setup import resolve_named_profile_config
+
+    monkeypatch.setenv("AGENTICA_HOME", str(tmp_path))
+    gc.upsert_profile("responses", {
+        "model_provider": "openai", "model_name": "gpt-5", "api_key": "sk-local",
+        "wire_api": "responses", "reasoning": "medium", "reasoning_effort_options": ["low", "medium"],
+    })
+    log = SessionLog("session", base_dir=str(tmp_path))
+    log.set_profile("responses", "session")
+    agent = SimpleNamespace(_session_log=log, tool_config=SimpleNamespace(compression_manager=None), tools=[])
+    ctx = CommandContext(agent_config=resolve_named_profile_config("responses"), current_agent=agent)
+
+    _cmd_model(ctx, "--effort low")
+    assert agent.model.request_kwargs["reasoning"]["effort"] == "low"
+    assert log.model_selection() == ("responses", "low")
+    assert gc.get_profile("responses")["reasoning"] == "medium"
+
+    _cmd_model(ctx, "--effort unsupported")
+    assert agent.model.request_kwargs["reasoning"]["effort"] == "low"
+    assert log.model_selection() == ("responses", "low")
+    _cmd_model(ctx, "--effort-default")
+    assert agent.model.request_kwargs["reasoning"]["effort"] == "medium"
+    assert log.model_selection() == ("responses", None)
 
 
 def _tool_round_log(tmp_path, session_id):
