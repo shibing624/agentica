@@ -2339,7 +2339,10 @@ class SessionLog:
         self._write_meta(updates)
 
     def set_profile_effort(self, name: str, effort: Optional[str]) -> None:
-        """Save the profile and its conversation-only override in one sidecar update."""
+        """Pin the profile so an endpoint's effort is never applied to another model.
+
+        Clearing the effort restores that profile's default, not profile inheritance.
+        """
         self._write_meta({"profile_name": name, "profile_source": "session", "reasoning_effort_override": effort})
 
     def get_forked_from(self) -> Optional[str]:

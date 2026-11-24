@@ -55,6 +55,8 @@ Schema (``~/.agentica/config.yaml``)::
         # reasoning: high            # Responses API: none|minimal|low|medium|high|xhigh|max
         # reasoning_effort: max      # Chat Completions: any string, passed through
         # reasoning_effort_options: [high, max]  # Confirmed endpoint values for conversation overrides
+        # `off` disables thinking locally only for native Claude Opus 5;
+        # elsewhere declare it only if the endpoint accepts it as an effort value.
         # max_tokens: 8192           # output token limit
         # context_window: 1000000    # context limit; overrides catalog value
         # temperature: 0.7

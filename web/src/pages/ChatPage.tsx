@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { lazy, Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Link } from "react-router";
 import * as api from "../api";
 import { ChatNav } from "../components/ChatNav";
@@ -477,7 +477,7 @@ export function ChatPage() {
   const shownProfile = pendingProfile?.name || chatModel?.profile || s.serverProfile || s.profilesData.active || "default";
   const shownProvider = pendingProfile?.model_provider || chatModel?.provider || s.serverProvider;
   const shownModel = pendingProfile?.model_name || chatModel?.model || s.serverModelName || s.serverModel;
-  const shownEffort = pendingProfile ? "" : chatModel ? chatModel.effort : s.serverReasoningEffort;
+  const shownEffort = pendingProfile ? pendingProfile.reasoning_effort : chatModel ? chatModel.effort : s.serverReasoningEffort;
   const modelSaving = s.curSess !== null && s.sessionModelSaving === s.curSess;
   const skillToken = leadingSkillToken(s.inputText, invocableSkills(s.pluginsData.skills || []));
   // The token is drawn in an overlay under the textarea; hit-test its boxes so
@@ -982,21 +982,32 @@ function ModelDropdown({ profiles, shownProfile, shownProvider, shownModel, show
     const idx = filtered.findIndex((p: any) => p.name === shownProfile);
     setCursor(idx >= 0 ? idx : 0);
   }, [q, shownProfile, filtered.length]);
+  const effortHint = chatModel?.source !== "session" ? S.chat.effortPinsProfile
+    : chatModel.effortOverride ? S.chat.effortResetKeepsProfile : "";
+  const effortHintId = useId();
   return (
     <div className="model-dd open">
       <div className="dd-config-card">
         <div className="dd-config-row"><span>Profile</span><strong>{shownProfile}</strong></div>
         <div className="dd-config-row"><span>{S.chat.model}</span><strong>{shownProvider}/{shownModel}</strong></div>
         {chatModel?.effortOptions?.length ? (
-          <label className="dd-config-row dd-effort-row">
-            <span>{S.chat.reasoningEffort}</span>
-            <select value={chatModel.effortOverride ?? ""} disabled={saving} aria-busy={saving}
-                    onChange={(e) => void pickSessionEffort(chatModel.id, chatModel.profile, e.currentTarget.value || null)}>
-              <option value="">{!chatModel.effortOverride && shownEffort ? S.chat.defaultEffortWithValue(shownEffort) : S.chat.defaultEffort}</option>
-              {chatModel.effortOptions.map((effort) => <option key={effort} value={effort}>{effort}</option>)}
-            </select>
-          </label>
-        ) : shownEffort ? <div className="dd-config-row"><span>{S.chat.reasoningEffort}</span><strong>{shownEffort}</strong></div> : null}
+          <>
+            <label className="dd-config-row dd-effort-row">
+              <span>{S.chat.reasoningEffort}</span>
+              <select value={chatModel.effortOverride ?? ""} disabled={saving} aria-busy={saving}
+                      aria-describedby={effortHint ? effortHintId : undefined}
+                      onChange={(e) => void pickSessionEffort(chatModel.id, chatModel.profile, e.currentTarget.value || null)}>
+                <option value="">{chatModel.effortOverride ? S.chat.defaultEffort : S.chat.defaultEffortWithValue(shownEffort || S.chat.endpointDefaultEffort)}</option>
+                {chatModel.effortOptions.map((effort) => <option key={effort} value={effort}>{effort}</option>)}
+              </select>
+            </label>
+            {effortHint && <div id={effortHintId} className="dd-effort-note">{effortHint}</div>}
+          </>
+        ) : (
+          <div className="dd-config-row dd-effort-row">
+            <span>{S.chat.reasoningEffort}</span><strong>{shownEffort || S.chat.endpointDefaultEffort}</strong>
+          </div>
+        )}
       </div>
       <div className="dd-section">{S.chat.switchProfile}</div>
       {profiles.length > 0 && (

@@ -277,7 +277,9 @@ class AgentBuilderMixin:
                 and agent._session_model_selection == self.session_log_for(session_id, owner).model_selection()
             )
 
-        while True:
+        # If the selection changes during construction, give the run one
+        # rebuild. Further changes must not keep a request waiting indefinitely.
+        for _ in range(2):
             agent = self._cache.get(key)
             if agent is not None and agent.user_id == self._owner(owner):
                 if (not for_run and self.is_session_active(session_id, owner)) or current(agent):
@@ -296,6 +298,7 @@ class AgentBuilderMixin:
             # A usage poll can have started building before a model update.
             if not for_run or current(agent):
                 return agent
+        raise RuntimeError("Session model changed repeatedly while it was being prepared. Please retry.")
 
     async def _build_and_cache_agent(self, key: str, session_id: str, owner: Optional[str]) -> DeepAgent:
         self._stale_agents.discard(key)

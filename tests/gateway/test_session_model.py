@@ -323,6 +323,48 @@ def test_responses_effort_override_reaches_wire_format(svc):
     assert "reasoning_effort" not in agent.model.request_kwargs
 
 
+def test_effort_pins_an_inherited_profile_even_after_reset(svc):
+    work_dir = svc.get_session_work_dir("a")
+    set_project_profile(work_dir, "fast")
+    assert svc.session_profile_source("a") == "project"
+    asyncio.run(svc.set_session_reasoning_effort("a", "fast", "max"))
+    set_project_profile(work_dir, "proj")
+    assert svc.session_log_for("a").model_selection() == ("fast", "max")
+    asyncio.run(svc.set_session_reasoning_effort("a", "fast", None))
+    cfg = svc.session_model_config("a")
+    assert (cfg["profile"], cfg["profile_source"], cfg["reasoning_effort"]) == ("fast", "session", "high")
+    assert svc.session_log_for("a").model_selection() == ("fast", None)
+    assert svc.session_model_config("b")["profile"] == "proj"
+
+
+def test_effort_and_cached_agent_are_isolated_by_owner_for_the_same_session_id(svc, monkeypatch):
+    sid = "shared-id"
+    work_dir = svc.get_session_work_dir("a")
+    for owner in ("alice", "bob"):
+        svc.set_session_work_dir(sid, work_dir, owner=owner)
+
+    monkeypatch.setattr(svc, "_build_agent", lambda sid, owner: SimpleNamespace(
+        user_id=svc._owner(owner), set_permission_mode=lambda mode: None,
+        effort=svc.session_model_config(sid, owner)["reasoning_effort"],
+    ))
+
+    async def scenario():
+        await svc.set_session_profile(sid, "fast", owner="alice")
+        await svc.set_session_profile(sid, "fast", owner="bob")
+        alice = await svc._get_agent(sid, owner="alice")
+        bob = await svc._get_agent(sid, owner="bob")
+        await svc.set_session_reasoning_effort(sid, "fast", "max", owner="alice")
+
+        next_alice = await svc._get_agent(sid, owner="alice", for_run=True)
+        assert next_alice is not alice and next_alice.effort == "max"
+        assert await svc._get_agent(sid, owner="bob", for_run=True) is bob
+        assert bob.effort == "high"
+        assert svc.session_log_for(sid, owner="alice").model_selection() == ("fast", "max")
+        assert svc.session_log_for(sid, owner="bob").model_selection() == ("fast", None)
+
+    asyncio.run(scenario())
+
+
 def test_claude_off_uses_same_mode_as_the_cli(svc):
     from agentica.cli.runtime import get_model
 
@@ -374,6 +416,35 @@ def test_new_run_waits_for_latest_effort_if_old_agent_is_building(svc, monkeypat
             finish.set()
         assert (await svc._get_agent("a", for_run=True)).effort == "max"
         assert (await poll).effort == "high"
+
+    asyncio.run(scenario())
+
+
+def test_new_run_stops_rebuilding_when_effort_keeps_changing(svc, monkeypatch):
+    built = []
+
+    def build(sid, owner):
+        effort = svc.session_model_config(sid, owner)["reasoning_effort"]
+        built.append(effort)
+        # Make the first two builds stale, then stop changing the sidecar.
+        # The old unbounded loop returns a third agent instead of asking to retry.
+        if len(built) <= 2:
+            svc.session_log_for(sid, owner).set_profile_effort("fast", "max" if effort == "high" else "high")
+        return SimpleNamespace(user_id=svc._owner(owner), set_permission_mode=lambda mode: None, effort=effort)
+
+    monkeypatch.setattr(svc, "_build_agent", build)
+
+    async def scenario():
+        await svc.set_session_profile("a", "fast")
+        lock = svc._get_session_lock("a")
+        async with lock:
+            with pytest.raises(RuntimeError) as exc:
+                await asyncio.wait_for(svc._get_agent("a", for_run=True), timeout=5)
+            assert str(exc.value) == "Session model changed repeatedly while it was being prepared. Please retry."
+            assert built == ["high", "max"]
+        async with lock:
+            assert (await svc._get_agent("a", for_run=True)).effort == "high"
+        assert built == ["high", "max", "high"]
 
     asyncio.run(scenario())
 
