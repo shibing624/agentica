@@ -289,6 +289,8 @@ test("manual /compact replays as the user's command, then the card with notes", 
   ]);
   assert.deepEqual(view(msgs), ["user:hi", "assistant:hello", "user:/compact", "card", "user:next"]);
   assert.deepEqual(msgs[3].compact, { notes: "- goal: ship", notesPath: "/h/p/s1.notes.md" });
+  // A command, not a question: its bubble carries no copy/time footer.
+  assert.equal(msgs[2].command, true);
   assert.equal(msgs[2].ts, Date.parse("2026-11-05T05:25:42.691Z"));
 });
 
@@ -331,7 +333,9 @@ test("a window replay row (server row.text empty) leaves the original question i
     { type: "assistant", content: "改好了" },
   ]);
   assert.deepEqual(view(msgs).filter((v) => v.startsWith("user:")), ["user:改图"]);
-  assert.equal(view(msgs).filter((v) => v.startsWith("card")).length, 1);
+  // The cut came after a tool round: one step inside the same reply.
+  assert.deepEqual(view(msgs), ["user:改图", "assistant:改好了"]);
+  assert.deepEqual(msgs[1].parts.map((p) => p.kind), ["tool", "compact", "text"]);
 });
 
 test("a question asked again after it was answered is not a shadow", () => {
@@ -668,4 +672,31 @@ test("reattach right as a new turn starts keeps the previous completed answer in
   assert.equal(msgs[2].content, "q2");
   assert.equal(reconciled.aiMsg, msgs[3]);
   assert.equal(msgs[3].inFlight, true);
+});
+
+test("an auto compact between two requests of a turn is a step inside that reply", () => {
+  const call = { id: "c1", type: "function", function: { name: "execute", arguments: "{}" } };
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "check params" },
+    { type: "assistant", content: "looking", tool_calls: [call], finish_reason: "tool_calls" },
+    { type: "tool", tool_call_id: "c1", tool_name: "execute", content: "ok" },
+    { type: "compact_boundary", trigger: "auto", notes_path: "/h/p/s1.notes.md" },
+    windowRow("check params"),
+    { type: "assistant", content: "done" },
+  ]);
+  assert.deepEqual(view(msgs), ["user:check params", "assistant:lookingdone"]);
+  const kinds = msgs[1].parts.map((p) => p.kind);
+  assert.deepEqual(kinds, ["text", "tool", "compact", "text"]);
+  assert.deepEqual(msgs[1].parts[2].card, { auto: true, notes: "- goal: ship", notesPath: "/h/p/s1.notes.md" });
+});
+
+test("an auto compact after a finished reply still stands between the turns", () => {
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "q" },
+    { type: "assistant", content: "a", finish_reason: "stop" },
+    { type: "compact_boundary", trigger: "auto" },
+    windowRow("next"),
+    { type: "assistant", content: "b" },
+  ]);
+  assert.deepEqual(view(msgs), ["user:q", "assistant:a", "card:auto", "user:next", "assistant:b"]);
 });
