@@ -22,8 +22,8 @@ def create_model(
     api_key: Optional[str] = None,
     wire_api: str = "",
     max_tokens: int = 0,
-    temperature: float = 0.0,
-    top_p: float = 0.0,
+    temperature: Optional[float] = None,
+    top_p: Optional[float] = None,
     context_window: int = 0,
     reasoning: str = "",
     reasoning_effort: str = "",
@@ -50,8 +50,8 @@ def create_model(
         wire_api: ``responses`` selects OpenAI Responses API; empty or
             ``chat_completions`` uses the provider's default model class.
         max_tokens: Output token limit (0 = leave model default).
-        temperature: Sampling temperature (0 = leave default).
-        top_p: Nucleus sampling probability (0 = leave default).
+        temperature: Sampling temperature (None = leave default).
+        top_p: Nucleus sampling probability (None = leave default).
         context_window: Context limit; overrides the catalog auto-detected
             value. NOT sent to the API — set on the instance for budget /
             compression / status display only.
@@ -88,20 +88,25 @@ def create_model(
         params["api_key"] = api_key
     if max_tokens:
         params["max_tokens"] = max_tokens
-    if temperature:
+    if temperature is not None:
         params["temperature"] = temperature
-    if top_p:
+    if top_p is not None:
         params["top_p"] = top_p
     if reasoning:
         params["reasoning"] = reasoning
 
     # Thinking mode — Anthropic-family gets a dict, others go via extra_body.
     # A Claude profile with an effort uses adaptive thinking instead (the
-    # Claude class builds it, as in the CLI): a fixed budget here would
-    # override it, and newer Claude models reject ``thinking.type: enabled``.
+    # Claude class builds it, as in the CLI). Without one, "enabled" leaves
+    # thinking to the model: Claude 4.7 and later reject a fixed budget.
     claude_adaptive = model_provider in _CLAUDE_PROVIDERS and bool(reasoning_effort)
     if thinking and thinking in ("enabled", "disabled", "auto") and not claude_adaptive:
-        if model_provider in _ANTHROPIC_PROVIDERS:
+        if thinking == "disabled" and model_provider in _ANTHROPIC_PROVIDERS:
+            # A budget next to "disabled" is rejected.
+            params["thinking"] = {"type": "disabled"}
+        elif model_provider in _CLAUDE_PROVIDERS:
+            pass
+        elif model_provider in _ANTHROPIC_PROVIDERS:
             params["thinking"] = {"type": thinking, "budget_tokens": 8000}
         else:
             params["extra_body"] = {"thinking": {"type": thinking}}

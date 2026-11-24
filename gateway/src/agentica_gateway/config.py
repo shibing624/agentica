@@ -18,6 +18,12 @@ from agentica.config import AGENTICA_CACHE_DIR, AGENTICA_WORKSPACE_DIR, AGENTICA
 from agentica.config.profiles import apply_global_config, get_profile
 
 
+def _sampling_value(configured: Optional[float], env_name: str) -> Optional[float]:
+    """Profile value, else the env var, else None. 0 is a real value."""
+    raw = configured if configured is not None else (os.getenv(env_name) or None)
+    return None if raw is None else float(raw)
+
+
 @dataclass
 class Settings:
     """Gateway service configuration.
@@ -110,8 +116,8 @@ class Settings:
     model_reasoning: str = ""
     model_reasoning_effort: str = ""
     max_tokens: int = 0
-    temperature: float = 0.0
-    top_p: float = 0.0
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
     context_window: int = 0
 
     # Auxiliary model — the cheap/fast model for all background LLM work
@@ -277,10 +283,8 @@ class Settings:
             model_reasoning_effort=model_reasoning_effort,
             max_tokens=int(profile.get("max_tokens")
                 or os.getenv("AGENTICA_MAX_TOKENS", "0") or 0),
-            temperature=float(profile.get("temperature")
-                or os.getenv("AGENTICA_TEMPERATURE", "0") or 0),
-            top_p=float(profile.get("top_p")
-                or os.getenv("AGENTICA_TOP_P", "0") or 0),
+            temperature=_sampling_value(profile.get("temperature"), "AGENTICA_TEMPERATURE"),
+            top_p=_sampling_value(profile.get("top_p"), "AGENTICA_TOP_P"),
             context_window=int(profile.get("context_window")
                 or os.getenv("AGENTICA_CONTEXT_WINDOW", "0") or 0),
 

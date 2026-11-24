@@ -74,11 +74,11 @@ class AgentModelMixin:
         return settings.max_tokens
 
     @property
-    def temperature(self) -> float:
+    def temperature(self) -> Optional[float]:
         return settings.temperature
 
     @property
-    def top_p(self) -> float:
+    def top_p(self) -> Optional[float]:
         return settings.top_p
 
     @property
@@ -240,8 +240,8 @@ class AgentModelMixin:
             api_key=cfg.get(f"{prefix}_api_key") or None,
             wire_api=cfg.get(f"{prefix}_wire_api"),
             max_tokens=cfg.get("max_tokens") or 0,
-            temperature=cfg.get("temperature") or 0.0,
-            top_p=cfg.get("top_p") or 0.0,
+            temperature=cfg.get("temperature"),
+            top_p=cfg.get("top_p"),
             context_window=cfg.get("context_window") or 0,
             reasoning=cfg.get(f"{prefix}_reasoning"),
             reasoning_effort=cfg.get(f"{prefix}_reasoning_effort"),
@@ -349,8 +349,8 @@ class AgentModelMixin:
             settings.model_reasoning = profile.get("reasoning") or ""
             settings.model_reasoning_effort = profile.get("reasoning_effort") or ""
             settings.max_tokens = int(profile.get("max_tokens") or 0)
-            settings.temperature = float(profile.get("temperature") or 0)
-            settings.top_p = float(profile.get("top_p") or 0)
+            settings.temperature = profile.get("temperature")
+            settings.top_p = profile.get("top_p")
             settings.context_window = int(profile.get("context_window") or 0)
             settings.auxiliary_model_provider = aux_profile.get("model_provider") or ""
             settings.auxiliary_model_name = aux_profile.get("model_name") or ""

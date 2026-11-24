@@ -1667,10 +1667,43 @@ class TestModelFactory:
         assert kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
         assert kwargs["extra_body"]["output_config"] == {"effort": "medium"}
 
-    def test_claude_without_effort_keeps_the_fixed_budget(self):
+    def test_claude_without_effort_leaves_thinking_to_the_model(self):
         from agentica_gateway.services.model_factory import create_model
-        model = create_model("anthropic", "claude-sonnet-4-5", api_key="k", thinking="enabled")
-        assert model.request_kwargs["thinking"] == {"type": "enabled", "budget_tokens": 8000}
+        model = create_model("anthropic", "claude-sonnet-5-5", api_key="k", thinking="enabled")
+        assert "thinking" not in model.request_kwargs
+
+    def test_claude_disabled_thinking_carries_no_budget(self):
+        from agentica_gateway.services.model_factory import create_model
+        model = create_model("anthropic", "claude-opus-4-8", api_key="k", thinking="disabled")
+        assert model.request_kwargs["thinking"] == {"type": "disabled"}
+
+    def test_zero_sampling_values_reach_the_request_and_unset_ones_do_not(self):
+        from agentica_gateway.services.agent_service.types import _profile_model_config
+        from agentica_gateway.services.model_factory import create_model
+        base = {"model_provider": "openai", "model_name": "gpt-4o"}
+        for wire_api in ("chat_completions", "responses"):
+            cfg = _profile_model_config("p", {**base, "temperature": 0, "top_p": 0})
+            kwargs = create_model("openai", "gpt-4o", api_key="k", wire_api=wire_api,
+                                  temperature=cfg["temperature"], top_p=cfg["top_p"]).request_kwargs
+            assert (kwargs["temperature"], kwargs["top_p"]) == (0, 0)
+            cfg = _profile_model_config("p", base)
+            kwargs = create_model("openai", "gpt-4o", api_key="k", wire_api=wire_api,
+                                  temperature=cfg["temperature"], top_p=cfg["top_p"]).request_kwargs
+            assert "temperature" not in kwargs and "top_p" not in kwargs
+
+    def test_openai_request_kwargs_fit_the_installed_sdk_signatures(self):
+        import inspect
+        from openai.resources.chat.completions import AsyncCompletions
+        from openai.resources.responses import AsyncResponses
+        from agentica_gateway.services.model_factory import create_model
+        tuning = dict(api_key="k", max_tokens=100, temperature=0.2, top_p=0.9)
+        chat = create_model("openai", "gpt-4o", reasoning_effort="low", **tuning).request_kwargs
+        assert set(chat) <= set(inspect.signature(AsyncCompletions.create).parameters)
+        assert chat["max_tokens"] == 100 and chat["reasoning_effort"] == "low"
+        resp = create_model("openai", "gpt-4o", wire_api="responses", reasoning="low", **tuning).request_kwargs
+        assert set(resp) <= set(inspect.signature(AsyncResponses.create).parameters)
+        assert resp["max_output_tokens"] == 100 and "max_tokens" not in resp
+        assert resp["reasoning"]["effort"] == "low"
 
     def test_openai_compat_provider(self):
         """Providers in PROVIDER_FACTORIES (e.g. deepseek) should be created via the factory dispatch."""

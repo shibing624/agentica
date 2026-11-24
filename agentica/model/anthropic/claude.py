@@ -233,8 +233,8 @@ class Claude(Model):
     # Adaptive-thinking effort shortcut: "low"|"medium"|"high"|"extra-high"|"max".
     # When set (and ``thinking`` is not already given), prepare_request_kwargs
     # enables adaptive thinking via thinking={"type":"adaptive"} +
-    # output_config={"effort": ...}. Adaptive thinking requires temperature=1,
-    # which is enforced automatically. Mirrors the CLI reasoning_effort knob so
+    # output_config={"effort": ...}, and sampling params are not sent.
+    # Mirrors the CLI reasoning_effort knob so
     # one setting controls thinking depth across all providers.
     reasoning_effort: Optional[str] = None
     # Adaptive-thinking display: "summarized" (stream a thinking summary) or
@@ -408,8 +408,9 @@ class Claude(Model):
         # Sampling params only when the profile sets them, and through
         # extra_body: current SDKs dropped them from ``messages.create`` /
         # ``messages.stream`` (a keyword raises TypeError before any request),
-        # and newer Claude models reject them. Older models still read them
-        # off the wire, so an explicit value keeps working there.
+        # and newer Claude models reject non-default values. API version
+        # 2026-10-21 (sent by anthropic>=2.0) rejects any value; an explicit
+        # value only works where the endpoint and model still accept it.
         _sampling = {
             key: value
             for key, value in (("temperature", self.temperature), ("top_p", self.top_p), ("top_k", self.top_k))
@@ -423,7 +424,8 @@ class Claude(Model):
             # Adaptive thinking (opus-4-7+/sonnet-4-6+): thinking.type=adaptive
             # plus output_config.effort. output_config is not a native SDK param,
             # so it rides along in extra_body (the SDK forwards it verbatim).
-            # Adaptive thinking takes no sampling params at all.
+            # Sampling params are dropped: temperature/top_k are incompatible
+            # with thinking, top_p is accepted by some models only.
             _request_params["thinking"] = {"type": "adaptive"}
             if self.thinking_display:
                 _request_params["thinking"]["display"] = self.thinking_display

@@ -73,8 +73,8 @@ class ProfileFields:
     max_tokens: int = 0
     context_window: int = 0
     compact_token_limit: int = 0
-    temperature: float = 0.0
-    top_p: float = 0.0
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
     enable_cache_control: Optional[bool] = None
     cache_control_messages: Optional[int] = None
     cache_control_session_header: str = ""
@@ -446,7 +446,7 @@ def _profile_summary(name: str, profile: dict) -> dict:
     tuning = []
     for field_name in TUNING_FIELD_NAMES:
         value = profile.get(field_name)
-        if value:
+        if value or (value is not None and field_name in ("temperature", "top_p")):
             label = "effort" if field_name == "reasoning_effort" else field_name
             tuning.append(f"{label}={value}")
     if isinstance(profile.get("default_headers"), dict) and profile["default_headers"]:
