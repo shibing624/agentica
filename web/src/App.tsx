@@ -7,6 +7,7 @@ const AutomationsPage = lazy(() => import("./pages/AutomationsPage").then((m) =>
 const TracesPage = lazy(() => import("./pages/TracesPage").then((m) => ({ default: m.TracesPage })));
 import { AppLayout } from "./components/AppShell";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { PageFind } from "./components/PageFind";
 import { ConfirmDialog, Toast } from "./components/Feedback";
 import { applyLang } from "./i18n";
 import { primeSettings } from "./panels/SettingsModal";
@@ -63,6 +64,7 @@ export function App() {
           </Routes>
         </Suspense>
       </ErrorBoundary>
+      <PageFind />
       <Toast />
       <ConfirmDialog />
     </BrowserRouter>

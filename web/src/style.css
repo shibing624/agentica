@@ -45,6 +45,16 @@ html,body{height:100%;overflow:hidden}
 body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);background:var(--bg);display:flex;transition:background .2s,color .2s;-webkit-font-smoothing:antialiased}
 #root{display:flex;height:100%;width:100%;min-width:0}
 ::selection{background:rgba(65,118,230,.22)}
+::highlight(page-find-match){background-color:#ffe084;color:#241907}
+::highlight(page-find-active){background-color:#ffab40;color:#241907}
+.page-find{position:fixed;top:8px;right:12px;z-index:1200;width:min(420px,calc(100vw - 24px));display:flex;align-items:center;gap:4px;padding:6px 8px;border:var(--hair) solid var(--border);border-radius:12px;background:var(--bg2);box-shadow:var(--elev-pop);color:var(--fg2);-webkit-app-region:no-drag}
+.page-find-icon{display:grid;place-items:center;width:24px;flex-shrink:0}
+.page-find input{flex:1;min-width:0;padding:4px 2px;border:0;background:transparent;color:var(--fg);font:inherit;outline:none}
+.page-find-count{flex-shrink:0;font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.page-find button{display:grid;place-items:center;flex:none;width:28px;height:28px;border:0;border-radius:6px;background:transparent;color:inherit;cursor:pointer}
+.page-find button:not(:disabled):hover,.page-find button:focus-visible{background:var(--hover);color:var(--fg)}
+.page-find button:disabled{opacity:.36;cursor:default}
+.page-find-prev svg{transform:rotate(180deg)}
 /* A hairline, not a bar: a 3px thumb drawn inside a 6px track (the transparent
    border keeps a wider grab area than what is painted), faint until hovered. */
 ::-webkit-scrollbar{width:6px;height:6px}

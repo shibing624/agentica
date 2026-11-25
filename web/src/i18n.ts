@@ -26,6 +26,12 @@ export const LANGS: Array<{ id: Lang; label: string }> = [
 ];
 
 const en = {
+  pageFind: {
+    label: "Find in page",
+    prev: "Previous match",
+    next: "Next match",
+    count: (current: number, total: number) => `${current} of ${total}`,
+  },
   common: {
     cancel: "Cancel",
     save: "Save",
@@ -1097,6 +1103,12 @@ const en = {
 export type Strings = typeof en;
 
 const zh: Strings = {
+  pageFind: {
+    label: "在页面中查找",
+    prev: "上一个匹配项",
+    next: "下一个匹配项",
+    count: (current: number, total: number) => `${current} / ${total}`,
+  },
   common: {
     cancel: "取消",
     save: "保存",
