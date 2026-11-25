@@ -6,8 +6,8 @@ authors:
   orcid: "https://orcid.org/0000-0003-3402-7159"
 title: "Agentica: An Agent Harness and All-in-One AI Workspace"
 url: "https://github.com/shibing624/agentica"
-date-released: 2026-11-24
-version: 1.6.2
+date-released: 2026-11-25
+version: 1.6.3
 preferred-citation:
   type: article
   title: "When Self-Evolution Backfires: Pre-Commit Gating against Skill Contamination in LLM Agents"

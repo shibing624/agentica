@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.3] - 2026-11-25
+
 - **auto 档点击、输入桌面应用前先问一次**：原先 `auto` 档里模型用 `peekaboo click`、`set-value`、`type` 等操作桌面应用不弹任何确认。现在回合里第一次操作桌面时弹卡，允许后到这一轮结束不再问；拒绝、Ctrl+C、切换档位或开始新一轮后要重新确认。`peekaboo see`、`window list`、`app list`、权限检查和 `--help` 只读，照常放行；auto 档的自动审查也不会替你批准桌面操作。`/computer-use` skill 只保留 Peekaboo：LCU 需要的授权转发 agentica 还没有，原先「优先尝试 LCU」只会让模型多跑几次检查。
 
 - **长程会话的内存回收与超时**：子代理停在 `timeout`、`max_turns`、`tool_call_limit`、`truncated` 时不写结束时间，记录（任务原文、结果、工具摘要）永不回收，现在和正常结束一样按保留期清理。网关会话被挤出 Agent 缓存时，原先只关浏览器，会话锁和后台任务注册表一直留着，每个会话还留一条后台汇报线程；现在空闲会话一并释放，有运行中的回合、后台任务或待送达汇报的会话不动。内置子代理默认超时从 12 小时改为 1 小时：本机日志里成功的子任务中位 203 秒、p90 约 1000 秒，撞到旧 1800 秒上限的几次都是在 15 万至 25 万 token 的上下文上反复请求模型，不是在跑工具；调用方仍可显式上调。
