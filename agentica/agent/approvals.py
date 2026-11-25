@@ -686,6 +686,37 @@ def missing_call_work_dir(fc: FunctionCall, *, work_dir: Optional[str]) -> Optio
     return None if Path(resolved).is_dir() else resolved
 
 
+def patch_context_error(fc: FunctionCall, *, work_dir: Optional[str]) -> Optional[str]:
+    """Why an ``apply_patch`` update cannot apply to the file as it is now.
+
+    A card for a patch whose hunks do not match would be approved only to
+    fail. ``None`` when every update applies, or the tool decides it
+    (other actions, unreadable files, malformed patches).
+    """
+    if fc.function.name != "apply_patch":
+        return None
+    from agentica.tools.patch import PatchContextError, apply_diff, parse_patch_envelope
+
+    try:
+        operations = parse_patch_envelope((fc.arguments or {}).get("patch") or "")
+    except ValueError:
+        return None
+    paths = call_paths(fc, work_dir=work_dir)
+    for operation, path in zip(operations, paths):
+        if operation.action != "update":
+            continue
+        try:
+            apply_diff(Path(path).read_text(encoding="utf-8"), operation.diff)
+        except PatchContextError as exc:
+            return (
+                "Patch context not found; no files were changed.\n"
+                f"- {operation.path}:\n" + "\n".join(f"  {line}" for line in str(exc).splitlines())
+            )
+        except (OSError, ValueError):
+            continue
+    return None
+
+
 def call_paths(fc: FunctionCall, *, work_dir: Optional[str], edits_only: bool = False) -> List[str]:
     """Resolved filesystem paths this file-tool call would touch. Empty = unknown."""
     args = fc.arguments or {}
@@ -813,6 +844,21 @@ def make_approve(
                 "mode": mode,
                 "decision": "deny",
                 "reason": "bad_work_dir",
+                "wait_s": 0,
+                "grant": None,
+            }
+            return "deny"
+        # Same for a patch that does not match the file: the person would
+        # approve it only to watch it fail. The model gets the tool's error.
+        context_error = patch_context_error(fc, work_dir=work_dir)
+        if context_error is not None:
+            fc.denied_result = context_error
+            fc.approval_trace = {
+                "tool": fc.function.name,
+                "arguments": _clip_trace_args(fc.arguments or {}),
+                "mode": mode,
+                "decision": "deny",
+                "reason": "patch_context",
                 "wait_s": 0,
                 "grant": None,
             }

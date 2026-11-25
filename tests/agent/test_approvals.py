@@ -115,6 +115,37 @@ class TestMissingCallWorkDir:
         fc = _fc("write_file", {"file_path": "a.py", "content": "x", "work_dir": missing}, is_destructive=True)
         assert asyncio.run(self._approve("allow-all", str(tmp_path), ApprovalRegistry())(fc)) == "allow"
 
+    def test_a_patch_that_does_not_match_the_file_is_refused_before_any_card(self):
+        with tempfile.TemporaryDirectory(dir=str(Path.home())) as real:
+            Path(real, "a.md").write_text("**Title.** body text\n", encoding="utf-8")
+            patch = "*** Begin Patch\n*** Update File: a.md\n@@\n **Title.**\n+new\n*** End Patch"
+            fc = _fc("apply_patch", {"patch": patch}, is_destructive=True)
+            registry = ApprovalRegistry()
+
+            decision = asyncio.run(asyncio.wait_for(self._approve("read-only", real, registry)(fc), timeout=2))
+
+            assert decision == "deny" and registry.size == 0
+            assert fc.approval_trace["reason"] == "patch_context"
+            assert "Line 1 contains this text but is longer" in fc.denied_result
+            assert Path(real, "a.md").read_text(encoding="utf-8") == "**Title.** body text\n"
+
+    def test_a_patch_that_matches_still_parks(self):
+        with tempfile.TemporaryDirectory(dir=str(Path.home())) as real:
+            Path(real, "a.md").write_text("**Title.** body text\n", encoding="utf-8")
+            patch = "*** Begin Patch\n*** Update File: a.md\n@@\n **Title.** body text\n+new\n*** End Patch"
+            fc = _fc("apply_patch", {"patch": patch}, is_destructive=True)
+            registry = ApprovalRegistry()
+
+            async def run():
+                task = asyncio.ensure_future(self._approve("read-only", real, registry)(fc))
+                await asyncio.sleep(0.05)
+                parked = registry.size
+                registry.deny_all()
+                await task
+                return parked
+
+            assert asyncio.run(run()) == 1
+
 
 class TestApprovalRegistry(unittest.TestCase):
     def test_wait_decide_and_unknown_id(self):
