@@ -94,8 +94,8 @@ class TestSkillRegistrationLogging(unittest.TestCase):
         self.assertEqual(cmds["/browser"].name, "browser")
         expanded = registry.expand_invocation("/computer-use 查验 TextEdit 临时文档")
         self.assertIn("查验 TextEdit 临时文档", expanded)
-        self.assertIn("LCU", expanded)
         self.assertIn("Peekaboo", expanded)
+        self.assertNotIn("LCU", expanded)
         self.assertEqual(cmds["/cron"].name, "cron")
         self.assertEqual(cmds["/worktree"].name, "worktree")
 

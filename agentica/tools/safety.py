@@ -11,7 +11,7 @@ import logging
 import os
 import re
 import shlex
-from typing import List, Optional, Tuple
+from typing import Dict, FrozenSet, List, Optional, Tuple
 
 from agentica.security.redact import redact_sensitive_text
 
@@ -438,6 +438,82 @@ def is_read_only_command(command: str) -> Tuple[bool, str]:
         if not ok:
             return False, f"{reason} (in: {segment!r})"
     return True, ""
+
+
+# Desktop-driver subcommands that operate the machine, with the verbs of each
+# that only look (None: every form operates). Anything not listed observes.
+_DESKTOP_CONTROL: Dict[str, Dict[str, Optional[FrozenSet[str]]]] = {
+    "peekaboo": {
+        **dict.fromkeys((
+            "action", "click", "drag", "move", "paste", "press", "scroll",
+            "select-text", "set-value", "type", "agent", "browser", "mcp",
+        )),
+        **dict.fromkeys(
+            ("app", "window", "menu", "menubar", "dock", "dialog", "space"),
+            frozenset({"list"}),
+        ),
+        "clipboard": frozenset({"get", "status"}),
+    },
+    # `lcu apps allow` and the like answer the driver's own consent prompt.
+    "lcu": {
+        "apps": frozenset({"list"}),
+        "origins": frozenset({"list"}),
+        "cross-turn": frozenset({"status"}),
+    },
+}
+_HELP_FLAGS = frozenset({"--help", "-h"})
+_SHELL_PUNCTUATION = "();<>|&\n"
+
+
+def _shell_words(command: str) -> List[str]:
+    """Words and separators of ``command``; a newline is a separator.
+
+    Plain whitespace words when it does not tokenize (a heredoc body with an
+    apostrophe), so one bad quote does not hide the rest.
+    """
+    command = command.replace("\\\n", " ").replace("`", " ; ")
+    lex = shlex.shlex(command, posix=True, punctuation_chars=_SHELL_PUNCTUATION)
+    lex.whitespace = " \t\r"
+    lex.whitespace_split = True
+    try:
+        return list(lex)
+    except ValueError:
+        return command.split()
+
+
+def command_controls_desktop(command: str) -> bool:
+    """Does this shell command drive the desktop (click, type, close a window)?
+
+    Read off the driver's argv: ``peekaboo click`` does, ``peekaboo window
+    list`` and ``peekaboo click --help`` do not. A guardrail for the commands
+    the computer-use skill teaches, not a sandbox.
+    """
+    words = _shell_words(command)
+    for i, word in enumerate(words):
+        if "$(" in word and command_controls_desktop(word):
+            return True
+        name = os.path.basename(word)
+        if name in _SHELLS:
+            script = _shell_c_script(words[i:])
+            if script is not None and command_controls_desktop(script):
+                return True
+        driver = _DESKTOP_CONTROL.get(name)
+        if driver is None:
+            continue
+        args = words[i + 1:i + 4]
+        if not args:
+            continue
+        if args[0].startswith("$"):
+            return args[1:2] == [] or args[1] not in _HELP_FLAGS
+        if args[0] not in driver:
+            continue
+        looks = driver[args[0]]
+        if looks is None:
+            if args[1:2] == [] or args[1] not in _HELP_FLAGS:
+                return True
+        elif args[1:] and args[1] not in looks | _HELP_FLAGS and not _HELP_FLAGS & set(args[2:]):
+            return True
+    return False
 
 
 def _scan_single(command: str) -> dict:

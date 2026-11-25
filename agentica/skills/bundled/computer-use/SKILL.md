@@ -12,41 +12,19 @@ session, not for a remote gateway, IM, headless run, or scheduled job. Prefer a
 purpose-built app API, connector, or CLI when it can finish the task without
 touching the desktop. Use the `browser` skill for ordinary browser tasks.
 
-## Choose a driver
+## Check the driver
 
-1. On macOS (`uname -s`), check `/Applications/ChatGPT.app`, then Spotlight
-   (`mdfind 'kMDItemCFBundleIdentifier == "com.openai.codex"'`) for an alternate
-   install of the official desktop app. The `codex` executable alone is not the
-   desktop app. On other platforms, report that this workflow is unavailable.
-2. If the desktop app exists, prefer [LCU](https://github.com/amontlabs/lcu).
-   Check `~/.local/share/lcu/current/bin/lcu` or `command -v lcu`, then run
-   `lcu doctor` using the resolved path if readiness is unknown. Use an already
-   configured local LCU adapter only if it preserves the runtime's instructions
-   and images, forwards native user approvals, and cleans up at turn end.
-   Installation, `doctor`, or a generic MCP connection alone is not an adapter.
-   If that adapter is missing, say so and use Peekaboo if installed. Do not
-   install or change other harnesses without a request. Do not switch drivers
-   to get around a refusal, cancellation, or missing desktop permissions.
-3. If the desktop app is absent, use Peekaboo if `command -v peekaboo` finds it.
-   Check `peekaboo permissions status --no-remote`. If neither driver is ready,
-   report what is missing rather than silently switching to OS input scripts.
+The driver is [Peekaboo](https://github.com/openclaw/Peekaboo), macOS only
+(`uname -s`). Look for it with `command -v peekaboo`, then check
+`peekaboo permissions status --no-remote`. If it is missing or lacks a
+permission, say what is missing and stop. Do not switch to OS input scripts
+(`osascript`, `cliclick`) or another harness, and do not use another driver to
+get around a refusal or a cancellation.
 
-## Install only when requested
-
-Do not install dependencies just because a desktop task needs them. If the user
-asks to install a missing driver, use its upstream route, then verify readiness:
-
-- **Peekaboo:** If Homebrew is installed, run `brew install openclaw/tap/peekaboo`,
-  then `peekaboo --version` and `peekaboo permissions status --no-remote`.
-- **LCU:** Follow the [official installation guide](https://github.com/amontlabs/lcu/blob/main/docs/INSTALLATION.md).
-  On Apple Silicon with the signed desktop app, verify the release archive's
-  SHA-256 before running its `./scripts/install.sh --runtime-only`. Then run
-  `~/.local/share/lcu/current/bin/lcu doctor`. This installs only the runtime;
-  it does not configure an Agentica adapter. Do not select another harness on
-  the user's behalf.
-
-Ask the user to grant missing macOS Accessibility or Screen Recording access
-in System Settings; do not change those permissions on their behalf.
+Install it only when the user asks: with Homebrew,
+`brew install openclaw/tap/peekaboo`, then `peekaboo --version` and the
+permission check. Ask the user to grant missing Accessibility or Screen
+Recording access in System Settings; do not change those permissions for them.
 
 ## Peekaboo workflow
 
@@ -73,5 +51,11 @@ with a fresh observation before retrying a mutation with an unknown outcome.
 If background operation cannot finish, explain which app needs the foreground
 and what will happen. Ask once before using shared mouse/keyboard input or
 switching focus, including a foreground app launch. Only proceed with that
-agreed operation; stop on refusal or cancellation. This skill guides tool use;
-it does not change CLI permission modes or sandbox the shell.
+agreed operation; stop on refusal or cancellation.
+
+In the `auto` tier the first command that operates the desktop (click, type,
+set-value, close a window) shows an approval card, and that one approval covers
+desktop commands until the turn ends. Observing (`see`, `window list`) shows
+none. Run `peekaboo` directly in `execute`, not from a script file, so the card
+shows what will happen. Stay inside the window the user asked about: the card
+is consent for this task, not for other apps.

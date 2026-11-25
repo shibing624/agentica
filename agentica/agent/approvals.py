@@ -23,6 +23,7 @@ from agentica.tools.base import Function, FunctionCall
 from agentica.tools.os_sandbox import repository_paths, writable_temp_roots
 from agentica.tools.safety import (
     check_command_safety,
+    command_controls_desktop,
     command_matches_blocked,
     is_read_only_command,
     split_compound_command,
@@ -169,6 +170,8 @@ class ApprovalRegistry:
     def __init__(self) -> None:
         self._pending: Dict[str, _PendingEntry] = {}
         self.file_edit_grants: set[str] = set()
+        # Non-empty once the person let this turn operate the desktop.
+        self.desktop_grants: set[str] = set()
         # tool_call_id -> seconds waited, for waits that expired unanswered.
         self._expired: Dict[str, float] = {}
         # tool_call_ids resolved automatically when permission_mode changed mid-turn.
@@ -218,6 +221,7 @@ class ApprovalRegistry:
     def revoke_turn_grants(self) -> None:
         # Replace rather than clear so a parked decision cannot add to a new epoch.
         self.file_edit_grants = set()
+        self.desktop_grants = set()
 
     def expire(self, tool_call_id: str, waited_seconds: float) -> bool:
         """Resolve a wait nobody answered: the call does not run, but no one refused it."""
@@ -540,6 +544,8 @@ def classify(
         return "allow"
 
     if mode == "auto":
+        if _is_desktop_control(fc):
+            return "ask"
         if name not in WRITE_FILE_TOOLS:
             return "allow"
         paths = call_paths(fc, work_dir=work_dir)
@@ -584,6 +590,10 @@ def is_sandbox_escalation(fc: FunctionCall) -> bool:
     if fc.function.name not in EXECUTE_TOOLS:
         return False
     return (fc.arguments or {}).get("escalate") not in (None, False)
+
+
+def _is_desktop_control(fc: FunctionCall) -> bool:
+    return fc.function.name in EXECUTE_TOOLS and command_controls_desktop(_call_command(fc) or "")
 
 
 def _default_blocked_commands() -> List[str]:
@@ -893,14 +903,33 @@ def make_approve(
             }
             return "allow"
 
+        # Operating the desktop is asked once per turn. A shell command names
+        # its target by snapshot, app or window id, so the grant covers the
+        # turn, not one window; a sandbox escape or a hard-unsafe call riding
+        # along is still its own question.
+        desktop_registry = get_registry() if (
+            mode == "auto"
+            and _is_desktop_control(fc)
+            and not is_sandbox_escalation(fc)
+            and not _is_hard_unsafe(fc, work_dir=work_dir)
+        ) else None
+        desktop_grants = desktop_registry.desktop_grants if desktop_registry is not None else None
+        if desktop_grants:
+            fc.approval_trace = {
+                "tool": fc.function.name, "arguments": _clip_trace_args(fc.arguments or {}),
+                "mode": mode, "decision": "allow", "reason": "desktop_grant", "wait_s": 0,
+            }
+            return "allow"
+
         reviewer_trace: Optional[Dict[str, Any]] = None
         reviewer_note = ""
-        # Neither a sandbox escape nor a hard-unsafe call goes to the reviewer:
-        # its allow runs the call unasked, and these are the two decisions
-        # reserved for a person.
+        # Neither a sandbox escape, a hard-unsafe call nor desktop control goes
+        # to the reviewer: its allow runs the call unasked, and these are the
+        # decisions reserved for a person.
         if (
             mode == "auto"
             and review is not None
+            and not _is_desktop_control(fc)
             and (file_grants is None or file_edits)
             and not is_sandbox_escalation(fc)
             and not _is_hard_unsafe(fc, work_dir=work_dir)
@@ -979,7 +1008,11 @@ def make_approve(
         if reviewer_note:
             preview = f"{preview}\n\n{reviewer_note}"
         similar_label = _similar_label_for(fc)
-        if file_edits:
+        if desktop_grants is not None:
+            options = ("allow", "deny")
+            question = "Allow operating desktop apps until this turn ends?"
+            preview += "\n\nAllowing covers desktop actions until this turn ends."
+        elif file_edits:
             options = ("allow_file_edit", "allow", "deny")
             preview = "\n".join(sorted(file_paths)) + (f"\n\n{reviewer_note}" if reviewer_note else "")
         elif file_grants is not None:
@@ -1010,10 +1043,21 @@ def make_approve(
             fc.denied_result = APPROVAL_TIMED_OUT_RESULT.format(
                 seconds=round(expired_after)
             )
-        if decision not in (options if file_grants is not None else _DECISION_ORDER):
+        if decision not in (options if file_grants is not None or desktop_grants is not None else _DECISION_ORDER):
             decision = "deny"
         grant: Optional[Dict[str, Any]] = None
-        if file_grants is not None and decision in ("allow_file_edit", "allow"):
+        if desktop_grants is not None and not mode_resolved:
+            if decision == "allow" and (
+                get_mode() != "auto"
+                or registry.desktop_grants is not desktop_grants
+                or grants.denies(fc, work_dir=work_dir)
+            ):
+                # The turn ended or the tier changed while the card was open.
+                decision = "deny"
+            elif decision == "allow":
+                desktop_grants.add("desktop")
+                grant = {"scope": "turn", "persisted": False, "kind": "desktop"}
+        elif file_grants is not None and decision in ("allow_file_edit", "allow"):
             sync_grants_from_project(grants, work_dir=work_dir, user_id=user_id)
             if not file_scope_active() or mode_resolved or grants.denies(fc, work_dir=work_dir):
                 decision = "deny"

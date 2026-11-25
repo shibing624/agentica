@@ -1348,3 +1348,97 @@ class TestGrantPathAccess(unittest.TestCase):
             tool.grant_path_access("/etc/hosts", prefix=True)
             self.assertIsNone(tool._sensitive_write_guard("/etc/hosts"))
             self.assertIsNotNone(tool._sensitive_write_guard("/etc/passwd"))
+
+
+class TestDesktopControlInAuto:
+    """`auto` used to run every `peekaboo click` unasked. Now the first desktop
+    action of a turn shows a card, and one approval covers the rest of it."""
+
+    CLICK = "peekaboo click --on=e1 --snapshot=s1 --no-remote"
+
+    @staticmethod
+    def _approve(registry, mode=lambda: "auto", review=None, grants=None):
+        return make_approve(
+            get_mode=mode,
+            get_grants=lambda: grants or SessionGrants(),
+            get_registry=lambda: registry,
+            get_work_dir=lambda: "/tmp/work",
+            publish=lambda pending: None,
+            apply_path_grant=lambda path, prefix: None,
+            review=review,
+        )
+
+    @staticmethod
+    def _call(command, call_id="c1"):
+        return _fc("execute", {"command": command}, call_id=call_id)
+
+    def test_observing_runs_and_acting_is_asked(self):
+        grants = SessionGrants()
+        observe = self._call("peekaboo see --app=com.apple.TextEdit --window-id=1 --json --no-remote")
+        assert classify("auto", observe, grants, work_dir="/tmp") == "allow"
+        assert classify("auto", self._call(self.CLICK), grants, work_dir="/tmp") == "ask"
+        assert classify("auto", self._call("peekaboo click --help"), grants, work_dir="/tmp") == "allow"
+        assert classify("allow-all", self._call(self.CLICK), grants, work_dir="/tmp") == "allow"
+
+    def test_one_approval_covers_the_turn_and_ends_with_it(self):
+        registry = ApprovalRegistry()
+        reviewed = []
+
+        async def review(fc):
+            reviewed.append(fc)
+
+        approve = self._approve(registry, review=review)
+
+        async def scenario():
+            first = asyncio.ensure_future(approve(self._call(self.CLICK, "c1")))
+            await asyncio.sleep(0.01)
+            (card,) = registry.list()
+            assert card.options == ("allow", "deny")
+            assert card.question == "Allow operating desktop apps until this turn ends?"
+            registry.decide("c1", "allow")
+            assert await first == "allow"
+            second = self._call("peekaboo set-value --snapshot=s --on=e2 --value=hi", "c2")
+            assert await asyncio.wait_for(approve(second), 1) == "allow"
+            assert second.approval_trace["reason"] == "desktop_grant"
+            registry.revoke_turn_grants()
+            third = asyncio.ensure_future(approve(self._call(self.CLICK, "c3")))
+            await asyncio.sleep(0.01)
+            assert [p.tool_call_id for p in registry.list()] == ["c3"]
+            registry.deny_all()
+            return await third
+
+        assert asyncio.run(scenario()) == "deny"
+        assert reviewed == []
+
+    def test_a_denial_grants_nothing(self):
+        registry = ApprovalRegistry()
+        approve = self._approve(registry)
+
+        async def scenario():
+            first = asyncio.ensure_future(approve(self._call(self.CLICK, "c1")))
+            await asyncio.sleep(0.01)
+            registry.decide("c1", "deny")
+            assert await first == "deny"
+            second = asyncio.ensure_future(approve(self._call(self.CLICK, "c2")))
+            await asyncio.sleep(0.01)
+            parked = registry.size
+            registry.deny_all()
+            await second
+            return parked
+
+        assert asyncio.run(scenario()) == 1
+        assert not registry.desktop_grants
+
+    def test_an_approval_after_the_turn_ended_grants_nothing(self):
+        registry = ApprovalRegistry()
+        approve = self._approve(registry)
+
+        async def scenario():
+            first = asyncio.ensure_future(approve(self._call(self.CLICK, "c1")))
+            await asyncio.sleep(0.01)
+            registry.revoke_turn_grants()
+            registry.decide("c1", "allow")
+            return await first
+
+        assert asyncio.run(scenario()) == "deny"
+        assert not registry.desktop_grants
