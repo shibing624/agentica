@@ -31,6 +31,7 @@ from agentica.run.config import RunConfig
 from agentica.run.context import RunSource
 from agentica.skills import load_system_skills
 from agentica.tools.ask_user_question_tool import AskUserQuestionTimeout
+from agentica.tools.background_processes import undelivered_job_records
 from agentica.tools.browser_tool import AgentBrowserDriver, BrowserTool
 from agentica.utils.log import logger
 from agentica.workspace import Workspace
@@ -59,12 +60,12 @@ class AgentBuilderMixin:
     async def _drain_released_agents(self) -> None:
         """Release what sessions that left the cache (and were not rebuilt) hold.
 
-        Browser daemons are closed. The per-session lookups that are rebuilt
-        from disk on the next request (work dir, log dir, approval tier) are
-        dropped, and so is an idle background registry: its report thread exits
-        once the registry is no longer the session's, and a later build adopts
-        any finished report from the durable records. A session with a run, a
-        running job or a delivery in flight keeps everything.
+        Browser daemons are closed. The session lock and an idle background registry are dropped: the
+        registry's report thread exits once it is no longer the session's. A
+        session with a run, a running job, or a report not yet handed over
+        keeps them. Work dir, log dir and approval tier stay: a few strings per
+        session, and the binding of a session with no transcript yet, or a tier
+        whose sidecar write failed, exists nowhere else.
         """
         keys = self._released_agent_keys[:]
         self._released_agent_keys.clear()
@@ -79,12 +80,12 @@ class AgentBuilderMixin:
             if (
                 (lock is not None and lock.locked())
                 or key in self._bg_delivery_inflight
-                or (background is not None and background.running_count() > 0)
+                or (background is not None and (
+                    background.running_count() > 0
+                    or undelivered_job_records(background.records_dir)
+                ))
             ):
                 continue
-            self._session_work_dirs.pop(key, None)
-            self._session_log_dirs.pop(key, None)
-            self._session_approval_modes.pop(key, None)
             self._session_locks.pop(key, None)
             self._stale_agents.discard(key)
             self._session_background.pop(key, None)
@@ -462,7 +463,8 @@ class AgentBuilderMixin:
         normalized = (mode or self._DEFAULT_APPROVAL_MODE).strip().lower()
         validate_permission_mode(normalized)
         key = self._sk(session_id, owner)
-        if self._saved_approval_mode(session_id, owner) != normalized:
+        changed = self._saved_approval_mode(session_id, owner) != normalized
+        if changed:
             # One field for every client: the CLI's ``cli.permissions`` sidecar
             # key. ``--resume`` in the terminal and a fork read the same tier
             # the web set, and the session list reads it back after a restart.
@@ -485,6 +487,8 @@ class AgentBuilderMixin:
 
         owner_id = self._owner(owner)
         turn = _pkg().live_turn.active(session_id, owner_id)
+        if turn is not None and changed:
+            turn.approvals.revoke_turn_grants()
         if turn is not None and turn.approvals.size:
             grants = self._grants_for(session_id, owner)
             work_dir = self.get_session_work_dir(session_id, owner)

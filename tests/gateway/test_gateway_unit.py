@@ -2061,31 +2061,58 @@ class TestGatewayUpdateRoutes:
             assert "network unreachable" in resp.json()["detail"]
 
 
-def test_an_evicted_idle_session_drops_its_lookups_and_report_thread(tmp_path):
+def test_an_evicted_idle_session_drops_its_report_thread_and_keeps_its_bindings(tmp_path):
     """Leaving the LRU cache used to release only the browser daemon: the
-    per-session lookups and the background registry (one daemon thread each)
-    stayed for the life of the process."""
+    session lock and the background registry (one daemon thread each) stayed
+    for the life of the process. The work dir and tier stay on purpose: a
+    session with no transcript yet has its binding nowhere else."""
+    import json
+    import time
     from agentica.tools.background_processes import BackgroundProcessRegistry
     from agentica_gateway.services.agent_service import AgentService
 
     svc = AgentService(workspace_path=str(tmp_path))
-    for key in ("idle", "busy", "job"):
+    owed = tmp_path / "owed"
+    owed.mkdir()
+    (owed / "term_1.json").write_text(json.dumps({
+        "id": "term_1", "session_id": "owed", "status": "exited", "returncode": 0,
+        "finished_at": time.time(), "delivered_at": None, "command": "true",
+    }), encoding="utf-8")
+    for key in ("idle", "busy", "job", "owed"):
         svc._session_work_dirs[key] = "/w"
-        svc._session_log_dirs[key] = "/l"
-        svc._session_approval_modes[key] = "auto"
+        svc._session_approval_modes[key] = "read-only"
         svc._session_locks[key] = asyncio.Lock()
-        svc._session_background[key] = BackgroundProcessRegistry()
+        svc._session_background[key] = BackgroundProcessRegistry(
+            session_id=key, records_dir=owed if key == "owed" else tmp_path / key,
+        )
     svc._session_background["job"].running_count = lambda **_: 1
 
     async def scenario():
         await svc._session_locks["busy"].acquire()
-        svc._released_agent_keys.extend(["idle", "busy", "job"])
+        svc._released_agent_keys.extend(["idle", "busy", "job", "owed"])
         await svc._drain_released_agents()
 
     asyncio.run(scenario())
-    assert "idle" not in svc._session_work_dirs and "idle" not in svc._session_log_dirs
-    assert "idle" not in svc._session_approval_modes and "idle" not in svc._session_locks
-    assert "idle" not in svc._session_background
+    assert "idle" not in svc._session_locks and "idle" not in svc._session_background
     assert svc._background_registry_is_current("idle", None, BackgroundProcessRegistry()) is False
-    for kept in ("busy", "job"):
-        assert kept in svc._session_work_dirs and kept in svc._session_background
+    assert (svc._session_work_dirs["idle"], svc._session_approval_modes["idle"]) == ("/w", "read-only")
+    for kept in ("busy", "job", "owed"):
+        assert kept in svc._session_background, kept
+
+
+def test_switching_tier_mid_turn_ends_the_desktop_grant(tmp_path):
+    from agentica_gateway.services import live_turn
+    from agentica_gateway.services.agent_service import AgentService
+
+    svc = AgentService(workspace_path=str(tmp_path))
+    svc.set_session_approval_mode("s-tier", "auto")
+    turn = live_turn.start("s-tier", svc._owner(None))
+    try:
+        turn.approvals.desktop_grants.add("desktop")
+        svc.set_session_approval_mode("s-tier", "auto")  # every send repeats the tier
+        assert turn.approvals.desktop_grants
+        svc.set_session_approval_mode("s-tier", "read-only")
+        svc.set_session_approval_mode("s-tier", "auto")
+        assert not turn.approvals.desktop_grants
+    finally:
+        live_turn.drop("s-tier", svc._owner(None))
