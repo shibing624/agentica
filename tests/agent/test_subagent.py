@@ -652,8 +652,9 @@ def test_default_timeout_is_generous():
     cfg = SubagentConfig(
         type="x", name="x", description="x", system_prompt="s",
     )
-    # 12h. Long-horizon subagents can legitimately run much longer than 30m.
-    assert cfg.timeout >= 12 * 60 * 60
+    # An hour: p90 of successful runs is ~1000s; a run past it is spending the
+    # budget on model requests, not converging.
+    assert cfg.timeout == 60 * 60
 
 
 def test_builtin_task_tool_surfaces_partial_on_timeout():
@@ -1600,7 +1601,7 @@ def test_task_system_prompt_exposes_model_tier_per_type():
     # into ``model_tier:`` frontmatter, where anything else is silently rejected.
     assert "| auxiliary |" in explore_row
     # The agent can only raise a timeout it knows about.
-    assert "| 43200s |" in explore_row
+    assert "| 3600s |" in explore_row
     assert "| `review`" not in prompt
 
 
@@ -1821,3 +1822,23 @@ def test_spilled_full_copy_reads_only_a_complete_spill():
     assert spilled_full_copy(_build_persisted_message("/p/part.txt", "x", incomplete=True)) is None
     assert spilled_full_copy(_build_truncated_message("x" * 10)) is None
     assert spilled_full_copy("plain text mentioning Full output saved to:\n/etc/passwd") is None
+
+
+@pytest.mark.parametrize("status", ["timeout", "max_turns", "tool_call_limit", "truncated", "error"])
+def test_every_terminal_status_is_stamped_and_reclaimed(status):
+    """A run that stopped on its budget is over too: its record (task text,
+    result, tool summary) must age out like a completed one."""
+    from agentica.subagents import SubagentRegistry
+
+    registry = SubagentRegistry()
+    run = _run_record(f"run-{status}", "u1", ended_at=None)
+    run.status = "running"
+    registry._runs[run.run_id] = run
+    try:
+        registry.update_status(run.run_id, status)
+        assert run.ended_at is not None
+        run.ended_at = datetime.now() - timedelta(hours=2)
+        assert registry.cleanup_completed(max_age_seconds=3600) == 1
+        assert run.run_id not in registry._runs
+    finally:
+        registry._runs.pop(run.run_id, None)

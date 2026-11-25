@@ -8,7 +8,7 @@ denied_tools: [write_file, apply_patch, task]
 execute_policy: read_only
 model_tier: auxiliary
 max_turns: 200
-timeout: 43200
+timeout: 3600
 can_spawn_subagents: false
 inherit_context: false
 inherit_workspace: false

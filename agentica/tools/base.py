@@ -771,6 +771,10 @@ def coerce_tool_args(args: Dict[str, Any], function: Function) -> Dict[str, Any]
     return args
 
 
+# How much of an undecodable argument string goes back to the model.
+_ARGUMENT_ECHO_CHARS = 2000
+
+
 def get_function_call(
         name: str,
         arguments: Optional[str] = None,
@@ -806,8 +810,12 @@ def get_function_call(
             try:
                 _arguments = ast.literal_eval(arguments)
             except (ValueError, SyntaxError) as e:
-                logger.error(f"Unable to decode function arguments:\n{arguments}\nError: {e}")
-                function_call.error = f"Error while decoding function arguments:\n{arguments}\nError: {e}\n\n " \
+                # The head is enough to see what went wrong; echoing all of it
+                # put a 50K-character runaway write back into the context.
+                head = arguments[:_ARGUMENT_ECHO_CHARS]
+                more = f"\n... ({len(arguments)} characters in total)" if len(arguments) > len(head) else ""
+                logger.error(f"Unable to decode function arguments ({len(arguments)} chars): {e}")
+                function_call.error = f"Error while decoding function arguments:\n{head}{more}\nError: {e}\n\n " \
                                       f"Please make sure we can json.loads() the arguments and retry."
                 return function_call
 

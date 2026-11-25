@@ -2059,3 +2059,33 @@ class TestGatewayUpdateRoutes:
             resp = client.post("/api/update/apply")
             assert resp.status_code == 500
             assert "network unreachable" in resp.json()["detail"]
+
+
+def test_an_evicted_idle_session_drops_its_lookups_and_report_thread(tmp_path):
+    """Leaving the LRU cache used to release only the browser daemon: the
+    per-session lookups and the background registry (one daemon thread each)
+    stayed for the life of the process."""
+    from agentica.tools.background_processes import BackgroundProcessRegistry
+    from agentica_gateway.services.agent_service import AgentService
+
+    svc = AgentService(workspace_path=str(tmp_path))
+    for key in ("idle", "busy", "job"):
+        svc._session_work_dirs[key] = "/w"
+        svc._session_log_dirs[key] = "/l"
+        svc._session_approval_modes[key] = "auto"
+        svc._session_locks[key] = asyncio.Lock()
+        svc._session_background[key] = BackgroundProcessRegistry()
+    svc._session_background["job"].running_count = lambda **_: 1
+
+    async def scenario():
+        await svc._session_locks["busy"].acquire()
+        svc._released_agent_keys.extend(["idle", "busy", "job"])
+        await svc._drain_released_agents()
+
+    asyncio.run(scenario())
+    assert "idle" not in svc._session_work_dirs and "idle" not in svc._session_log_dirs
+    assert "idle" not in svc._session_approval_modes and "idle" not in svc._session_locks
+    assert "idle" not in svc._session_background
+    assert svc._background_registry_is_current("idle", None, BackgroundProcessRegistry()) is False
+    for kept in ("busy", "job"):
+        assert kept in svc._session_work_dirs and kept in svc._session_background

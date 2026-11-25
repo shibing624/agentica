@@ -57,14 +57,37 @@ class AgentBuilderMixin:
                 logger.warning("Browser daemon cleanup failed: %s", result)
 
     async def _drain_released_agents(self) -> None:
-        """Close daemons of sessions that left the cache and were not rebuilt."""
+        """Release what sessions that left the cache (and were not rebuilt) hold.
+
+        Browser daemons are closed. The per-session lookups that are rebuilt
+        from disk on the next request (work dir, log dir, approval tier) are
+        dropped, and so is an idle background registry: its report thread exits
+        once the registry is no longer the session's, and a later build adopts
+        any finished report from the durable records. A session with a run, a
+        running job or a delivery in flight keeps everything.
+        """
         keys = self._released_agent_keys[:]
         self._released_agent_keys.clear()
-        orphaned = [
-            self._browser_tools.pop(key)
-            for key in dict.fromkeys(keys)
-            if not self._cache.contains(key) and key in self._browser_tools
-        ]
+        orphaned = []
+        for key in dict.fromkeys(keys):
+            if self._cache.contains(key):
+                continue
+            if key in self._browser_tools:
+                orphaned.append(self._browser_tools.pop(key))
+            lock = self._session_locks.get(key)
+            background = self._session_background.get(key)
+            if (
+                (lock is not None and lock.locked())
+                or key in self._bg_delivery_inflight
+                or (background is not None and background.running_count() > 0)
+            ):
+                continue
+            self._session_work_dirs.pop(key, None)
+            self._session_log_dirs.pop(key, None)
+            self._session_approval_modes.pop(key, None)
+            self._session_locks.pop(key, None)
+            self._stale_agents.discard(key)
+            self._session_background.pop(key, None)
         await self._close_browser_tools(orphaned)
 
     async def close_browser_sessions(self) -> None:

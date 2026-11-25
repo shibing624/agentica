@@ -196,6 +196,33 @@ class LoopMixin:
         return False
 
     @staticmethod
+    def _note_cut_off_tool_call(assistant_msg: Message, messages: List[Message]) -> None:
+        """Tell the model a tool call was cut off by the output cap, and why.
+
+        A reply that stops at ``length`` mid tool call leaves arguments that do
+        not parse; the refusal alone reads as a JSON mistake, and the usual
+        retry is the same oversized call. Seen: a 128K-token ``write_file``
+        that took 951s and ended in a run of ``}``.
+        """
+        if assistant_msg.finish_reason != "length":
+            return
+        ids = {tc.get("id") for tc in assistant_msg.tool_calls or []}
+        for m in reversed(messages):
+            if m is assistant_msg:
+                return
+            if m.role == "tool" and m.tool_call_error and m.tool_call_id in ids:
+                m.content = (
+                    f"{m.content}\n\nThis call was cut off: the reply reached the output "
+                    "token limit before its arguments were complete, so nothing ran. Do not "
+                    "resend it whole. Split the content: write_file a first part, then add "
+                    "the rest with apply_patch in several calls, each well under the limit."
+                )
+                logger.warning(
+                    f"Tool call {m.tool_name} cut off at the output limit "
+                    f"({len(str(assistant_msg.tool_calls))} chars of arguments)"
+                )
+
+    @staticmethod
     def _get_last_assistant_message(messages: List[Message]) -> Optional[Message]:
         """Get the last assistant message from the message list."""
         for m in reversed(messages):
@@ -486,6 +513,7 @@ class LoopMixin:
 
         # Parse tool calls (provider-specific)
         function_calls, provider_metadata = model.parse_tool_calls(assistant_msg, messages, tool_role="tool")
+        self._note_cut_off_tool_call(assistant_msg, messages)
         if not function_calls:
             # All tool calls had errors (already appended to messages by parse_tool_calls)
             return ToolHandlingResult(True, [])
@@ -538,6 +566,7 @@ class LoopMixin:
             return
 
         function_calls, provider_metadata = model.parse_tool_calls(assistant_msg, messages, tool_role="tool")
+        self._note_cut_off_tool_call(assistant_msg, messages)
         if not function_calls:
             return
 

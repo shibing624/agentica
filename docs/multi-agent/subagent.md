@@ -192,7 +192,7 @@ if result["status"] == "completed":
 
 落盘是尽力而为：磁盘写失败只记 warning，不影响子任务本身是否成功；产物与内存中的 run 记录按同一保留期一起清理。`run_id` 属于发起它的租户，`get_task_result(run_id)` 与 `resume_from_run_id` 都按租户校验，多用户网关下读不到其他用户的任务文本与路径。
 
-内置 `explore` / `code` / `research` 子代理的默认 wall-clock 超时为 12 小时（43200 秒），适配长程调查；`task(timeout=...)` 只能在该默认值之上继续调高。遇到 `timeout`、`max_turns`、`tool_call_limit` 或截断时，返回值会明确标记 `success: false`、`partial: true`，统一带 `execution_time`，并保留已有结果、`run_id` 和建议的下一步；部分结果同样带 `child_session_id` / `transcript_path` 定位符。主 Agent 可以使用 `resume_from_run_id` 延续该次调查，不必从头开始；续跑提示会把上一轮的 `output_path` 一并带给子代理，优先读取已有输出，只重跑仍缺的证据。需要在后续轮次重新查看某个子任务时，调用 `get_task_result(run_id)` 读取结构化记录。
+内置 `explore` / `code` / `research` 子代理的默认 wall-clock 超时为 1 小时（3600 秒）；`task(timeout=...)` 只能在该默认值之上继续调高。遇到 `timeout`、`max_turns`、`tool_call_limit` 或截断时，返回值会明确标记 `success: false`、`partial: true`，统一带 `execution_time`，并保留已有结果、`run_id` 和建议的下一步；部分结果同样带 `child_session_id` / `transcript_path` 定位符。主 Agent 可以使用 `resume_from_run_id` 延续该次调查，不必从头开始；续跑提示会把上一轮的 `output_path` 一并带给子代理，优先读取已有输出，只重跑仍缺的证据。需要在后续轮次重新查看某个子任务时，调用 `get_task_result(run_id)` 读取结构化记录。
 
 配置错误的项目级或用户级文件会记录 warning 并跳过；安装包内置定义错误会直接抛出异常，因为这表示安装内容损坏。
 

@@ -59,6 +59,11 @@ if TYPE_CHECKING:
 # findings: up to 30 minutes of work the parent cannot use.
 _WRAP_UP_LEAD_SECONDS = 300
 _WRAP_UP_LEAD_FRACTION = 0.2
+
+# Statuses after which a run is over and its record only serves lookups.
+_TERMINAL_STATUSES = frozenset({
+    "completed", "error", "cancelled", "timeout", "max_turns", "tool_call_limit", "truncated",
+})
 _WRAP_UP_MESSAGE = (
     "[Time budget almost spent] This subagent run will be stopped soon. "
     "Do not call any more tools. Write your final answer now from the evidence "
@@ -126,12 +131,13 @@ class SubagentConfig:
     inherit_workspace: bool = False
     # Whether the parent agent's current context summary is prepended to the task
     inherit_context: bool = False
-    # Timeout for subagent execution in seconds (0 = no timeout).
-    # Real-world code / research subagents routinely need 5–15 min. The
-    # Long-horizon investigations can run for hours. Callers may still pass a
-    # larger per-call timeout; lowering the configured default is ignored by
-    # the task tool.
-    timeout: int = 12 * 60 * 60
+    # Wall-clock timeout in seconds (0 = none). Callers may pass a larger
+    # per-call timeout; a lower one is ignored by the task tool. Measured on
+    # local logs, a successful run takes 203s median and 1000s at p90, while
+    # the runs that hit the old 1800s wall were spending it all on model
+    # requests over a 150K-250K context, not on tools: an hour bounds a lost
+    # investigation without cutting a real one.
+    timeout: int = 60 * 60
 
     # Definition provenance. Runtime registrations use ``runtime``.
     source: str = "runtime"
@@ -285,7 +291,7 @@ class SubagentRegistry:
             return
         
         run.status = status
-        if status in ("completed", "error", "cancelled"):
+        if status in _TERMINAL_STATUSES:
             run.ended_at = datetime.now()
         if result is not None:
             run.result = result
@@ -302,7 +308,7 @@ class SubagentRegistry:
     ARTIFACT_RETENTION_SECONDS = 24 * 3600
 
     def cleanup_completed(self, max_age_seconds: int = 3600, *, purge_files: bool = False) -> int:
-        """Remove completed/cancelled runs older than max_age_seconds.
+        """Remove finished runs (any terminal status) older than max_age_seconds.
 
         With ``purge_files`` also removes that run's transcript and its
         per-tool output directory. Both are keyed by ``.subagent.`` in their
@@ -314,7 +320,7 @@ class SubagentRegistry:
         to_remove = []
 
         for run_id, run in self._runs.items():
-            if run.status in ("completed", "error", "cancelled") and run.ended_at:
+            if run.status in _TERMINAL_STATUSES and run.ended_at:
                 age = (now - run.ended_at).total_seconds()
                 if age > max_age_seconds:
                     to_remove.append(run_id)
@@ -1429,7 +1435,7 @@ def register_custom_subagent(
     max_turns: int = 100,
     model_tier: Literal["auxiliary", "main"] = "auxiliary",
     execute_policy: Literal["inherit", "read_only"] = "inherit",
-    timeout: int = 12 * 60 * 60,
+    timeout: int = 60 * 60,
     can_spawn_subagents: bool = False,
     inherit_workspace: bool = False,
     inherit_context: bool = False,

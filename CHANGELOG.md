@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **长程会话的内存回收与超时**：子代理停在 `timeout`、`max_turns`、`tool_call_limit`、`truncated` 时不写结束时间，记录（任务原文、结果、工具摘要）永不回收，现在和正常结束一样按保留期清理。网关会话被挤出 Agent 缓存时，原先只关浏览器，工作目录、日志目录、审批档位、会话锁和后台任务注册表一直留着，每个会话还留一条后台汇报线程；现在空闲会话一并释放，下次请求从磁盘重建，有运行中的回合、后台任务或待送达汇报的会话不动。内置子代理默认超时从 12 小时改为 1 小时：本机日志里成功的子任务中位 203 秒、p90 约 1000 秒，撞到旧 1800 秒上限的几次都是在 15 万至 25 万 token 的上下文上反复请求模型，不是在跑工具；调用方仍可显式上调。
+
+- **工具调用被输出上限截断时，告诉模型拆开写**：一次回复写到输出上限还没写完参数，参数解析失败，模型通常会原样重发同样大的调用。实测一次 `write_file` 输出 12.8 万 token、耗时 951 秒，结尾是一串 `}`，错误信息又把 5 万字符原样塞回上下文。现在按 `finish_reason` 识别截断，在错误里说明原因，让模型分成 `write_file` 加多次 `apply_patch`，并记一条警告；无法解析的参数只回显前 2000 字符。
+
 - **思考强度没单独设置时，菜单显示 default**：中文原先是「端点默认」，英文是「Endpoint default」。现在两种语言都显示 `default`。
 
 - **入门文档不再夹 Python SDK 示例**：安装、首页、「是什么」、记忆、技能和长任务这几篇只讲桌面端、网页、CLI 和微信。`uv add`、`Agent()`、记忆开关、`run_goal` 和 `SkillTool` 改到「开发」里的 [5 分钟上手](docs/getting-started/quickstart.md)、[Agent](docs/concepts/agent.md)、[模型](docs/concepts/model.md) 和 [工具](docs/concepts/tools.md)。副模型和备用模型在安装页改为指向 `config.yaml`。
