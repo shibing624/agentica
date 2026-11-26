@@ -8,6 +8,7 @@ import asyncio
 import json
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from agentica.agent.goals import is_goal_generated_prompt
@@ -819,16 +820,29 @@ class PromptsMixin:
         )
 
     def _get_date_block(self) -> Optional[str]:
-        """The local date for a session's first turn, if enabled.
-
-        In the first user message, which is stored and replayed as sent, and
-        not in the system prompt: a date there changes at midnight and the
-        whole cached conversation behind it would be re-billed.
-        """
+        """A fresh clock reading on this turn only; earlier readings never change."""
         if not self.prompt_config.add_datetime_to_instructions:
             return None
-        today = datetime.now().astimezone().date()
-        return f"<session_date>{today.isoformat()} ({today.strftime('%A')}), local time</session_date>"
+        pc = self.prompt_config
+        now = datetime.now(ZoneInfo(pc.time_zone)) if pc.time_zone else datetime.now().astimezone()
+        last = self._last_clock_at
+        if last is not None:
+            elapsed = now.timestamp() - last.timestamp()
+            if now.date() == last.date() and 0 <= elapsed < pc.clock_refresh_seconds:
+                return None
+        self._last_clock_at = now
+        zone = pc.time_zone or f"process timezone {now.tzname()}"
+        return f"<session_date>{now.date().isoformat()} ({now.strftime('%A')}), {now.strftime('%H:%M:%S %z')} [{zone}]</session_date>"
+
+    def _take_clock_reminder(self, prior: Sequence[Message]) -> Optional[str]:
+        block = self._get_date_block()
+        if block is None:
+            return None
+        previous = next((m for m in reversed(prior) if m.role != "system"), None)
+        if previous is not None:
+            elapsed = max(0, int(self._last_clock_at.timestamp() - previous.created_at))
+            block = block.removesuffix("</session_date>") + f"; elapsed since preceding message: {elapsed}s</session_date>"
+        return block
 
     def _get_git_snapshot_block(self) -> Optional[str]:
         """``<git_snapshot>`` of ``work_dir`` for a session's first turn, if enabled."""
@@ -1054,9 +1068,8 @@ class PromptsMixin:
                 self._get_prompt_hook_block(recall_query),
             )
             git_block = self._get_git_snapshot_block() if first_turn else None
-            date_block = self._get_date_block() if first_turn else None
             original = user_messages[-1].content
-            stored = _join_prefix([date_block, git_block], original)
+            stored = _join_prefix([git_block], original)
             if stored != original:
                 # A ``messages=`` item may be the caller's own Message object,
                 # kept in its history and passed again next turn; rewrite a
@@ -1064,6 +1077,15 @@ class PromptsMixin:
                 last = user_messages[-1]
                 user_messages[-1] = last.model_copy(update={"content": stored})
             request_only = [block for block in (session_block, memory_block, hook_block) if block]
+
+        # Clock context is runtime-authored, even for automated inputs and
+        # subagents. Save its wire bytes, but keep the human transcript clean.
+        if user_messages and user_messages[-1].role == "user" and isinstance(user_messages[-1].content, str):
+            clock = self._take_clock_reminder(messages_for_model + user_messages[:-1])
+            if clock:
+                last = user_messages[-1]
+                user_messages[-1] = last.model_copy(update={"content": f"{clock}\n\n{last.content}"})
+                user_messages[-1]._request_only_blocks = [*last._request_only_blocks, clock]
 
         # Files the model read in earlier turns may have been edited between
         # turns (the user's editor, git). The note is for this request only.
@@ -1107,7 +1129,7 @@ class PromptsMixin:
         if request_only:
             durable = user_messages[-1]
             sent = durable.model_copy(update={"content": _insert_request_only(durable.content, request_only)})
-            sent._request_only_blocks = list(request_only)
+            sent._request_only_blocks = [*durable._request_only_blocks, *request_only]
             user_messages[-1] = sent
         messages_for_model.extend(user_messages)
         self.run_response.messages = messages_for_model

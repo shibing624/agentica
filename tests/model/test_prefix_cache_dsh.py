@@ -375,7 +375,8 @@ def test_system_prompt_stays_byte_pinned_across_date_and_channel_changes(tmp_pat
     assert "2026-11" not in m1[0]["content"]
     assert m2[: len(m1)] == m1
     assert m1[1]["content"].startswith("<session_date>2026-11-14")
-    assert "2026-11-15" not in str(m2) and "2026-11-15" not in str(m3)
+    assert "<session_date>2026-11-15" in m2[-1]["content"]
+    assert m3[-1]["content"] == "Turn 3 question"
     # Turn 2 user message carries the channel switch as an in-history reminder
     assert "<system-reminder>" in m2[-1]["content"]
     assert "feishu" in m2[-1]["content"]

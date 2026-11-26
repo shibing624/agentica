@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **长会话的时间读数不再停在首日**：开启 `PromptConfig.add_datetime_to_instructions` 时，跨日、距上次读数超过 30 分钟或恢复后的首轮，会在新的用户消息中追加当前日期、时间、时区和距前一条消息的秒数。旧消息与 system prompt 不变；时钟旁注保留在 wire 回放中，不混进用户原文。SDK 默认仍关闭，`DeepAgent` 的各产品入口默认开启；可用 `time_zone` 指定 IANA 时区、`clock_refresh_seconds` 调整刷新间隔。这版只在回合准备时刷新，不在工具循环的每一步追加。
+
 - **跨模型切到 Gemini 不再因历史重复 `tool_call_id` 报 400**：400 剥离 thinking 重试或上下文折叠后，成功与失败收尾曾读取全量存活历史回写日志，把前几轮工具调用再追加一遍，导致同一批 `tool_call_id` 在会话里出现两次（部分上游模型拒绝重复 ID）。现在仅持久化本轮新增轮次，并在发送 OpenAI 协议请求时为已污染历史中重复出现的 `tool_call_id` 分配唯一配对 ID。
 - **Web 聊天 Assistant 复制按钮补回错误详情**：此前一次并行提交误回退了错误复制改动。现在无正文仅报错时复制完整错误详情与时间，有部分回复时把正文与报错一起复制。
 

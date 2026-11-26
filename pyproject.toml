@@ -41,6 +41,7 @@ dependencies = [
     "ruamel.yaml>=0.17",
     "python-dotenv>=1.0",
     "typing_extensions>=4.0",
+    "tzdata>=2024.1; sys_platform == 'win32'", # Windows has no system IANA zone database
     # ── 默认产品化能力（agentica 差异化卖点，必装）──
     "python-frontmatter>=1.0",    # workspace: AGENTS.md / MEMORY.md / skills 解析
     "prompt-toolkit>=3.0",        # cli: 交互式终端

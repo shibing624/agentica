@@ -10,6 +10,8 @@ Provides layered configuration:
 """
 
 from dataclasses import dataclass, field
+from math import isfinite
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from typing import (
     TYPE_CHECKING,
@@ -53,10 +55,12 @@ class PromptConfig:
 
     # Prompt behavior switches
     add_name_to_instructions: bool = False
-    # The current date in the user turn (never in the system prompt, where it
-    # would change at midnight and void the cached prefix). Off by default:
-    # a coding agent reads the clock with a tool when it needs it.
+    # Append clock readings to new user turns, never rewrite the cached prefix.
+    # SDK opt-in; DeepAgent enables it for all product surfaces.
     add_datetime_to_instructions: bool = False
+    clock_refresh_seconds: float = 1800
+    # IANA display zone; None uses the process zone and labels it explicitly.
+    time_zone: Optional[str] = None
     # Prefix the first user message of a session with a <git_snapshot> of
     # work_dir (branch, `git status --short`, last 3 commits). Not the system
     # prompt, so the cached prefix is untouched. DeepAgent turns it on.
@@ -78,6 +82,15 @@ class PromptConfig:
     # called write_todos for this many assistant turns. 0 = disabled.
     # Mirrors CC's TODO_REMINDER_CONFIG.TURNS_SINCE_WRITE (default 10).
     todo_reminder_interval: int = 10
+
+    def __post_init__(self) -> None:
+        if not isfinite(self.clock_refresh_seconds) or self.clock_refresh_seconds < 0:
+            raise ValueError("clock_refresh_seconds must be finite and non-negative")
+        if self.time_zone is not None:
+            try:
+                ZoneInfo(self.time_zone)
+            except (ZoneInfoNotFoundError, ValueError) as exc:
+                raise ValueError(f"Invalid time_zone: {self.time_zone!r}") from exc
 
 
 @dataclass

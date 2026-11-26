@@ -701,6 +701,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         # window: the copy in the pinned prompt, or the last in-history
         # reminder. A different live digest means the next turn carries one.
         self._agents_md_known_digest: Optional[str] = None
+        self._last_clock_at = None
 
         # Mid-run steering: guidance pushed (possibly from another thread) while
         # the agent is inside its tool loop. Drained between tool batches and
@@ -1077,6 +1078,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self._pinned_tool_policies = []
         self._pinned_logged_tools = []
         self._agents_md_known_digest = None
+        self._last_clock_at = None
 
     def _logged_tool_policies(self, logged_keys: List[str]) -> List[str]:
         """The guides the recovered ``system_prompt`` already contains.
