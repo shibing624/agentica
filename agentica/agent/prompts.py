@@ -832,17 +832,7 @@ class PromptsMixin:
                 return None
         self._last_clock_at = now
         zone = pc.time_zone or f"process timezone {now.tzname()}"
-        return f"<session_date>{now.date().isoformat()} ({now.strftime('%A')}), {now.strftime('%H:%M:%S %z')} [{zone}]</session_date>"
-
-    def _take_clock_reminder(self, prior: Sequence[Message]) -> Optional[str]:
-        block = self._get_date_block()
-        if block is None:
-            return None
-        previous = next((m for m in reversed(prior) if m.role != "system"), None)
-        if previous is not None:
-            elapsed = max(0, int(self._last_clock_at.timestamp() - previous.created_at))
-            block = block.removesuffix("</session_date>") + f"; elapsed since preceding message: {elapsed}s</session_date>"
-        return block
+        return f"<session_date>{now.isoformat(timespec='seconds')}[{zone}] ({now.strftime('%A')})</session_date>"
 
     def _get_git_snapshot_block(self) -> Optional[str]:
         """``<git_snapshot>`` of ``work_dir`` for a session's first turn, if enabled."""
@@ -1081,7 +1071,7 @@ class PromptsMixin:
         # Clock context is runtime-authored, even for automated inputs and
         # subagents. Save its wire bytes, but keep the human transcript clean.
         if user_messages and user_messages[-1].role == "user" and isinstance(user_messages[-1].content, str):
-            clock = self._take_clock_reminder(messages_for_model + user_messages[:-1])
+            clock = self._get_date_block()
             if clock:
                 last = user_messages[-1]
                 user_messages[-1] = last.model_copy(update={"content": f"{clock}\n\n{last.content}"})

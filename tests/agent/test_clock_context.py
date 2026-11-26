@@ -37,15 +37,15 @@ def test_clock_crosses_midnight_without_rewriting_prior_messages():
     with patch("agentica.agent.prompts.datetime", Clock):
         Clock.current = datetime(2026, 11, 26, 15, 55, tzinfo=timezone.utc)
         system, first, _ = asyncio.run(a.get_messages_for_run(messages=[question]))
-        assert first[-1].content == "<session_date>2026-11-26 (Thursday), 23:55:00 +0800 [Asia/Shanghai]</session_date>\n\n用户原文"
+        assert first[-1].content == "<session_date>2026-11-26T23:55:00+08:00[Asia/Shanghai] (Thursday)</session_date>\n\n用户原文"
         assert first[-1].durable_content() == question.content == "用户原文"
-        reply = Message(role="assistant", content="答复", created_at=int(Clock.current.timestamp()))
+        reply = Message(role="assistant", content="答复")
         prior = [*first, reply]
         Clock.current += timedelta(minutes=10)
         _, second, sent = asyncio.run(a.get_messages_for_run(messages=[*prior, Message(role="user", content="现在呢")]))
         assert sent[0].content == system.content
         assert sent[1:-1] == prior
-        assert second[-1].content == "<session_date>2026-11-27 (Friday), 00:05:00 +0800 [Asia/Shanghai]; elapsed since preceding message: 600s</session_date>\n\n现在呢"
+        assert second[-1].content == "<session_date>2026-11-27T00:05:00+08:00[Asia/Shanghai] (Friday)</session_date>\n\n现在呢"
         assert second[-1].durable_content() == "现在呢"
         _, third, _ = asyncio.run(a.get_messages_for_run(messages=[*second, Message(role="user", content="继续")]))
         assert third[-1].content == "继续"
@@ -68,33 +68,31 @@ def test_clock_refresh_threshold_and_window_reset():
         assert "<session_date>" in users[-1].content
 
 
-def test_process_zone_is_labeled_and_elapsed_uses_the_last_tool_message():
+def test_process_zone_is_labeled():
     a = agent()
     with patch("agentica.agent.prompts.datetime", Clock):
         Clock.current = datetime(2026, 11, 26, 12, tzinfo=timezone.utc)
-        previous = Message(role="tool", content="done", created_at=int(Clock.current.timestamp()) - 2400)
-        _, users, _ = asyncio.run(a.get_messages_for_run(messages=[previous, Message(role="user", content="next")]))
+        _, users, _ = asyncio.run(a.get_messages_for_run(message="next"))
     local = Clock.current.astimezone()
-    assert f"{local.strftime('%H:%M:%S %z')} [process timezone {local.tzname()}]" in users[-1].content
-    assert "elapsed since preceding message: 2400s" in users[-1].content
+    assert f"{local.isoformat(timespec='seconds')}[process timezone {local.tzname()}]" in users[-1].content
 
 
-def test_zero_interval_refreshes_and_a_backward_clock_does_not_make_negative_elapsed():
+def test_zero_interval_and_backward_clock_refresh():
     a = agent(time_zone="UTC", clock_refresh_seconds=0)
     with patch("agentica.agent.prompts.datetime", Clock):
         Clock.current = datetime(2026, 11, 26, 12, tzinfo=timezone.utc)
         _, first, _ = asyncio.run(a.get_messages_for_run(message="start"))
-        previous = Message(role="assistant", content="done", created_at=int(Clock.current.timestamp()))
+        previous = Message(role="assistant", content="done")
         Clock.current -= timedelta(seconds=1)
         _, users, _ = asyncio.run(a.get_messages_for_run(messages=[*first, previous, Message(role="user", content="next")]))
     assert "11:59:59" in users[-1].content
-    assert "elapsed since preceding message: 0s" in users[-1].content
+    assert users[-1].durable_content() == "next"
 
 
-def test_resumed_clock_keeps_wire_bytes_and_uses_logged_message_time(tmp_path):
+def test_resumed_clock_keeps_wire_bytes_and_refreshes_once(tmp_path):
     log = SessionLog("clock-resume", base_dir=str(tmp_path))
     log.append("user", "original", wire_content="<session_date>old reading</session_date>\n\noriginal", request_only_blocks=["<session_date>old reading</session_date>"])
-    log.append("assistant", "done", timestamp="2026-11-22T12:00:00Z")
+    log.append("assistant", "done")
     history = log.load()
     a = agent(time_zone="UTC")
     a.working_memory.hydrate_runs_from_history(history)
@@ -102,7 +100,8 @@ def test_resumed_clock_keeps_wire_bytes_and_uses_logged_message_time(tmp_path):
         Clock.current = datetime(2026, 11, 26, 12, tzinfo=timezone.utc)
         _, users, sent = asyncio.run(a.get_messages_for_run(message="resumed"))
     assert sent[1].content == history[0]["content"]
-    assert users[-1].content.endswith("elapsed since preceding message: 345600s</session_date>\n\nresumed")
+    assert users[-1].content == "<session_date>2026-11-26T12:00:00+00:00[UTC] (Thursday)</session_date>\n\nresumed"
+    assert users[-1].durable_content() == "resumed"
 
 
 @pytest.mark.parametrize("config", [{"clock_refresh_seconds": -1}, {"clock_refresh_seconds": float("inf")}, {"time_zone": "Invalid/Zone"}])
@@ -148,7 +147,7 @@ def test_clock_wire_prefix_and_original_text_survive_run_and_resume(tmp_path):
     # Resume repeats every earlier wire message, including runtime-authored blocks.
     expected = a.working_memory.get_messages_from_last_n_runs(skip_role="system")
     assert [msg.to_model_dict() for msg in sent[1:-1]] == [msg.to_model_dict() for msg in expected]
-    assert "12:31:00 +0000 [UTC]" in users[-1].content
+    assert "12:31:00+00:00[UTC]" in users[-1].content
     assert users[-1].durable_content() == "resume question"
 
 

@@ -1436,9 +1436,6 @@ class SessionLog:
                 for key in replay_fields:
                     if key in entry and entry[key] is not None:
                         msg[key] = entry[key]
-                timestamp = _parse_iso_timestamp(entry.get("timestamp"))
-                if timestamp is not None:
-                    msg["created_at"] = int(timestamp)
                 if entry_type == "tool":
                     msg["tool_call_error"] = tool_error_of(entry)
                 messages.append(msg)
