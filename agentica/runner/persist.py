@@ -850,7 +850,11 @@ class PersistMixin:
             # exact interleaved order so /resume rebuilds a valid
             # assistant(tool_calls)->tool sequence instead of orphaned tools
             # (skipping the rounds an in-turn flush already persisted).
-            self._persist_assistant_tool_calls(agent)
+            # Pass ``turn_msgs`` rather than letting it read
+            # ``agent.run_response.messages``: after ``context_collapsed``
+            # (compact, thinking-strip retry), ``run_response.messages`` holds
+            # the entire surviving conversation so far, not just this turn.
+            self._persist_assistant_tool_calls(agent, messages=turn_msgs)
             _assistant_meta = PersistMixin._provider_replay_meta(last_asst) if last_asst is not None else {}
             _assistant_meta["finish_reason"] = finish_reason
             # ``content`` must keep the marker (the model reads it to know the

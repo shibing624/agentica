@@ -42,7 +42,7 @@ import {
   forgetClientSteer, reconcileLiveTurnMsgs, rememberSteersFromMsgs, removeUndeliveredSteers,
 } from "../lib/hydrateMessages";
 import {
-  allAssistantTextOf, appendSteerPart, appendText, appendThink, appendTool, applyCompactStep, ensureTrailingFinalAnswer,
+  appendSteerPart, appendText, appendThink, appendTool, applyCompactStep, assistantCopyText, ensureTrailingFinalAnswer,
   finalAnswerOf, finishTool, groupParts, isFoldedReply, isProcessSegment, partsOf, removeSteerPart, settleWork,
   unfinishedToolCallId, workSummary,
 } from "../lib/msgParts";
@@ -1284,10 +1284,12 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
         : S.chat.turnProcessWorked;
   const finalAnswer = m.role === "assistant" ? finalAnswerOf(m) : "";
   const filesCardText = m.role === "assistant" ? finalAnswer : (m.content || "");
+  const errorText = m.error ? `${S.chat.error(m.error)} - ${formatErrorStamp(m.errorTs ?? m.ts)}` : "";
   // Copy what is on screen: with replies folded away that is the answer alone,
-  // otherwise the whole turn (copying must never silently drop a visible line).
+  // otherwise the whole turn (copying must never silently drop a visible line),
+  // plus any visible run error.
   const copyText = m.role === "assistant"
-    ? ((!effectiveProcessOpen && foldedReplies === "final" && finalAnswer) ? finalAnswer : allAssistantTextOf(m))
+    ? assistantCopyText(m, { errorText, foldedReplies, effectiveProcessOpen, finalAnswer })
     : m.content;
   return (
     <div id={"msg-" + idx} data-turn={turn} data-role={m.role}
@@ -1372,12 +1374,7 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
           role={m.role}
         />
         {m.aborted && <div className="msg-note">{S.chat.aborted}</div>}
-        {m.error && (
-          <div className="msg-error">
-            {S.chat.error(m.error)}
-            {` - ${formatErrorStamp(m.errorTs ?? m.ts)}`}
-          </div>
-        )}
+        {errorText && <div className="msg-error">{errorText}</div>}
         <MessageFooter m={m} live={!!live} sessionId={sessionId} idx={idx} copyText={copyText} />
       </div>
     </div>
@@ -1406,7 +1403,7 @@ function MessageFooter({ m, live, sessionId, idx, copyText }: {
   const copy = () => {
     // Always the original message for user turns (a rendered skill chip is a view,
     // not the text the user sent). For assistant turns, copy the visible final
-    // answer when collapsed, or clean paragraph-joined text when expanded.
+    // answer when collapsed, or paragraph-joined text when expanded, plus any error.
     const text = copyText ?? m.content;
     if (!text) return;
     void navigator.clipboard.writeText(text).then(() => showToast(S.common.copied));

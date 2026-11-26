@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **跨模型切到 Gemini 不再因历史重复 `tool_call_id` 报 400**：400 剥离 thinking 重试或上下文折叠后，成功与失败收尾曾读取全量存活历史回写日志，把前几轮工具调用再追加一遍，导致同一批 `tool_call_id` 在会话里出现两次（部分上游模型拒绝重复 ID）。现在仅持久化本轮新增轮次，并在发送 OpenAI 协议请求时为已污染历史中重复出现的 `tool_call_id` 分配唯一配对 ID。
+- **Web 聊天 Assistant 复制按钮补回错误详情**：此前一次并行提交误回退了错误复制改动。现在无正文仅报错时复制完整错误详情与时间，有部分回复时把正文与报错一起复制。
+
 ## [1.6.3] - 2026-11-25
 
 - **auto 档点击、输入桌面应用前先问一次**：原先 `auto` 档里模型用 `peekaboo click`、`set-value`、`type` 等操作桌面应用不弹任何确认。现在回合里第一次操作桌面时弹卡，允许后到这一轮结束不再问；拒绝、Ctrl+C、切换档位或开始新一轮后要重新确认。`peekaboo see`、`window list`、`app list`、权限检查和 `--help` 只读，照常放行；auto 档的自动审查也不会替你批准桌面操作。`/computer-use` skill 只保留 Peekaboo：LCU 需要的授权转发 agentica 还没有，原先「优先尝试 LCU」只会让模型多跑几次检查。

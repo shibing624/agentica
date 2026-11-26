@@ -464,3 +464,40 @@ test("a live compact step: pending, then settled with its numbers, and an open o
   settleWork(stopped);
   assert.deepEqual(stopped.parts, []);
 });
+
+test("assistantCopyText copies error alone, reply + error, or normal reply", async () => {
+  const { assistantCopyText } = await vite.ssrLoadModule("/src/lib/msgParts.ts");
+
+  const errOnly = { role: "assistant", content: "", error: "400 failed", parts: [] };
+  assert.equal(
+    assistantCopyText(errOnly, {
+      errorText: "错误：400 failed - 11/24 17:52",
+      foldedReplies: "all",
+      effectiveProcessOpen: false,
+      finalAnswer: "",
+    }),
+    "错误：400 failed - 11/24 17:52",
+  );
+
+  const partialAndErr = { role: "assistant", content: "先检查文件。", parts: [{ kind: "text", text: "先检查文件。" }] };
+  assert.equal(
+    assistantCopyText(partialAndErr, {
+      errorText: "错误：boom - 11/24 17:53",
+      foldedReplies: "all",
+      effectiveProcessOpen: false,
+      finalAnswer: "先检查文件。",
+    }),
+    "先检查文件。\n\n错误：boom - 11/24 17:53",
+  );
+
+  const okMsg = { role: "assistant", content: "已完成。", parts: [{ kind: "text", text: "已完成。" }] };
+  assert.equal(
+    assistantCopyText(okMsg, {
+      errorText: "",
+      foldedReplies: "final",
+      effectiveProcessOpen: false,
+      finalAnswer: "已完成。",
+    }),
+    "已完成。",
+  );
+});

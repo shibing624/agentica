@@ -110,6 +110,26 @@ export function allAssistantTextOf(m: ChatMsg): string {
   return blocks.length ? blocks.join("\n\n") : (m.content || "");
 }
 
+/** Text placed on the clipboard for an assistant turn (visible reply + any error banner). */
+export function assistantCopyText(
+  m: ChatMsg,
+  opts: {
+    errorText?: string;
+    foldedReplies: string;
+    effectiveProcessOpen: boolean;
+    finalAnswer: string;
+  },
+): string {
+  const replyText =
+    !opts.effectiveProcessOpen && opts.foldedReplies === "final" && opts.finalAnswer
+      ? opts.finalAnswer
+      : allAssistantTextOf(m);
+  if (opts.errorText) {
+    return [replyText, opts.errorText].filter(Boolean).join("\n\n");
+  }
+  return replyText;
+}
+
 /** Append `finalContent` at turn end when intermediate commentary left no trailing answer after tools. */
 export function ensureTrailingFinalAnswer(m: ChatMsg, finalContent: string) {
   const clean = (finalContent || "").trim();

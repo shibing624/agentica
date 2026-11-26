@@ -1474,6 +1474,138 @@ class TestMidStreamTransientRetry(unittest.TestCase):
             self.assertEqual(attempts["n"], 2, "a decode error must re-issue the call")
             self.assertEqual(agent.run_response.content, "recovered full answer")
 
+    def test_collapsed_incomplete_turn_does_not_relog_prior_tool_rounds(self):
+        """When context_collapsed=True on a failed turn (e.g. after 400
+        thinking-strip retry), _persist_incomplete_turn rebuilds
+        run_response.messages with the entire surviving history for working
+        memory, but must log only this turn's new tool rounds to SessionLog."""
+        import tempfile
+        from agentica.session.log import SessionLog
+
+        agent = _make_agent()
+        with tempfile.TemporaryDirectory() as tmp:
+            slog = SessionLog("s-collapsed-err", base_dir=tmp)
+            agent._session_log = slog
+
+            # Turn 1 already persisted on disk.
+            prev_user = Message(role="user", content="turn 1")
+            prev_asst = Message(
+                role="assistant",
+                content="",
+                tool_calls=[{"id": "call_prev_1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}],
+            )
+            prev_tool = Message(role="tool", tool_call_id="call_prev_1", tool_name="read_file", content="ok")
+            slog.append("user", "turn 1")
+            slog.append("assistant", "", tool_calls=prev_asst.tool_calls)
+            slog.append("tool", "ok", tool_call_id="call_prev_1", tool_name="read_file")
+            slog.append("assistant", "done 1")
+
+            # Turn 2 begins, triggers context_collapsed=True (e.g. portable rewrite), then fails.
+            slog.begin_turn()
+            cur_user = Message(role="user", content="turn 2")
+            cur_asst = Message(
+                role="assistant",
+                content="",
+                tool_calls=[{"id": "call_cur_2", "type": "function", "function": {"name": "execute", "arguments": "{}"}}],
+            )
+            cur_tool = Message(role="tool", tool_call_id="call_cur_2", tool_name="execute", content="ran")
+            messages_for_model = [prev_user, prev_asst, prev_tool, cur_user, cur_asst, cur_tool]
+            state = LoopState()
+            state.context_collapsed = True
+            input_ids = {id(prev_user), id(prev_asst), id(prev_tool), id(cur_user)}
+
+            agent._runner._persist_incomplete_turn(
+                agent,
+                message="turn 2",
+                messages=None,
+                user_messages=[cur_user],
+                system_message=None,
+                messages_for_model=messages_for_model,
+                num_input_messages=4,
+                model_response=ModelResponse(content=""),
+                loop_state=state,
+                input_message_ids=input_ids,
+                marker="[Run failed: 400]",
+                finish_reason="error",
+                error="400",
+            )
+
+            asst_tool_ids = [
+                tc["id"]
+                for e in slog.iter_raw_entries()
+                if e.get("type") == "assistant"
+                for tc in (e.get("tool_calls") or [])
+            ]
+            tool_row_ids = [
+                e.get("tool_call_id")
+                for e in slog.iter_raw_entries()
+                if e.get("type") == "tool"
+            ]
+            self.assertEqual(asst_tool_ids, ["call_prev_1", "call_cur_2"])
+            self.assertEqual(tool_row_ids, ["call_prev_1", "call_cur_2"])
+            # Working memory still carries the full surviving conversation.
+            wm_tool_ids = [m.tool_call_id for m in agent.run_response.messages if m.role == "tool"]
+            self.assertEqual(wm_tool_ids, ["call_prev_1", "call_cur_2"])
+
+
+    def test_collapsed_complete_turn_does_not_relog_prior_tool_rounds(self):
+        """Same guard on the success path: if a turn triggers context_collapsed
+        without a compact_boundary (e.g. 400 thinking-strip retry that succeeds),
+        run_response.messages carries prior turns for working memory, so the
+        session log backfill must only walk this turn's new messages."""
+        import tempfile
+        from agentica.agent import Agent
+        from agentica.model.openai import OpenAIChat
+        from agentica.session.log import SessionLog
+        from agentica.tools.base import Function
+
+        class StripTriggerError(Exception):
+            status_code = 400
+
+        model = OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key")
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = Agent(name="t", model=model, max_api_retry=1, session_id="s-ok-collapsed", session_base_dir=tmp, add_history_to_context=True)
+            slog = agent._session_log
+            # Seed Turn 1 on disk and in working_memory.
+            prev_u = Message(role="user", content="turn 1")
+            prev_a = Message(
+                role="assistant",
+                content="",
+                tool_calls=[{"id": "call_prev_1", "type": "function", "function": {"name": "ping", "arguments": "{}"}}],
+            )
+            prev_t = Message(role="tool", tool_call_id="call_prev_1", tool_name="ping", content="pong")
+            prev_final = Message(role="assistant", content="done 1")
+            slog.append("user", "turn 1")
+            slog.append("assistant", "", tool_calls=prev_a.tool_calls)
+            slog.append("tool", "pong", tool_call_id="call_prev_1", tool_name="ping")
+            slog.append("assistant", "done 1")
+            # Simulate a previous Claude turn holding a signed thinking block.
+            prev_a.content = [{"type": "thinking", "thinking": "x", "signature": "sig1"}, {"type": "tool_use", "id": "call_prev_1", "name": "ping", "input": {}}]
+            agent.working_memory.add_messages([prev_u, prev_a, prev_t, prev_final])
+            from agentica.memory.working import AgentRun
+            agent.working_memory.add_run(AgentRun(message=prev_u, response=RunResponse(messages=[prev_u, prev_a, prev_t, prev_final])))
+
+            calls = {"n": 0}
+            async def fake_response(messages, **kwargs):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise StripTriggerError("rejected signature")
+                # Succeed after portable rewrite.
+                asst = Message(role="assistant", content="done 2")
+                messages.append(asst)
+                return ModelResponse(content="done 2")
+
+            model.response = fake_response
+            agent.stream = False
+            asyncio.run(agent.run("turn 2"))
+
+            asst_tool_ids = [
+                tc["id"]
+                for e in slog.iter_raw_entries()
+                if e.get("type") == "assistant"
+                for tc in (e.get("tool_calls") or [])
+            ]
+            self.assertEqual(asst_tool_ids, ["call_prev_1"])
 
 if __name__ == "__main__":
     unittest.main()

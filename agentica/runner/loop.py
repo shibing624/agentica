@@ -1843,7 +1843,11 @@ class LoopMixin:
                     #    assistant(tool_calls)->tool sequence instead of orphaned
                     #    (or mis-ordered) tool messages. Rounds already flushed
                     #    mid-turn are skipped.
-                    self._persist_assistant_tool_calls(agent)
+                    #    Pass ``turn_messages``: when ``context_collapsed`` is
+                    #    True, ``run_response.messages`` carries the full
+                    #    surviving conversation, so reading it directly would
+                    #    re-append earlier turns' tool calls with duplicate ids.
+                    self._persist_assistant_tool_calls(agent, messages=turn_messages)
 
                     # 3. Log assistant output (with model info + usage, mirrors CC).
                     # The last assistant without tool_calls is this turn's

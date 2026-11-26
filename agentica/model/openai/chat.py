@@ -78,6 +78,19 @@ class OpenAIImageType(Enum, metaclass=OpenAIImageTypeMeta):
 # this exact value for replaying a trace whose signatures are not available.
 _FOREIGN_CALL_SIGNATURE = {"google": {"thought_signature": "skip_thought_signature_validator"}}
 
+
+def _next_unique_tool_call_id(original: str, seen: set[str]) -> str:
+    """Return a <=40-char unique replacement id for a duplicated tool_call_id."""
+    tail = original[-28:]
+    n = 2
+    while True:
+        candidate = f"d{n}_{tail}"
+        if len(candidate) > 40:
+            candidate = candidate[:40]
+        if candidate not in seen:
+            return candidate
+        n += 1
+
 # Request parameter names shared between request_kwargs and to_dict
 _OPENAI_REQUEST_PARAMS = [
     "store",
@@ -928,6 +941,8 @@ class OpenAIChat(Model):
         from agentica.agent.history_filter import claude_blocks_to_shared_shape
 
         formatted = []
+        seen_tc_ids: set[str] = set()
+        active_tc_remap: Dict[str, str] = {}
         for message in claude_blocks_to_shared_shape(messages):
             wire = self.format_message(message)
             if (
@@ -938,10 +953,25 @@ class OpenAIChat(Model):
             ):
                 continue
             if wire.get("tool_calls"):
-                wire["tool_calls"] = [
-                    call if "extra_content" in call else {**call, "extra_content": _FOREIGN_CALL_SIGNATURE}
-                    for call in wire["tool_calls"]
-                ]
+                active_tc_remap.clear()
+                rewritten_calls = []
+                for call in wire["tool_calls"]:
+                    updated = call if "extra_content" in call else {**call, "extra_content": _FOREIGN_CALL_SIGNATURE}
+                    tc_id = updated.get("id")
+                    if isinstance(tc_id, str) and tc_id:
+                        if tc_id in seen_tc_ids:
+                            new_id = _next_unique_tool_call_id(tc_id, seen_tc_ids)
+                            seen_tc_ids.add(new_id)
+                            active_tc_remap[tc_id] = new_id
+                            updated = {**updated, "id": new_id}
+                        else:
+                            seen_tc_ids.add(tc_id)
+                    rewritten_calls.append(updated)
+                wire["tool_calls"] = rewritten_calls
+            elif wire.get("role") == "tool":
+                tc_id = wire.get("tool_call_id")
+                if isinstance(tc_id, str) and tc_id in active_tc_remap:
+                    wire["tool_call_id"] = active_tc_remap[tc_id]
             formatted.append(wire)
         return formatted
 

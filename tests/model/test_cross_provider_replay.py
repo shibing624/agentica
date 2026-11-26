@@ -395,6 +395,42 @@ class TestModelSwitchPortableHistory(unittest.TestCase):
             self.assertTrue(any(m.tool_calls for m in messages), "the tool round was lost")
         self.assertFalse(any(m.role == "system" for m in memory.runs[0].response.messages))
 
+    def test_duplicate_tool_call_ids_across_turns_are_uniquified_on_wire(self):
+        """Legacy corrupted logs can carry identical tool_call_ids from an
+        earlier turn. Gemini rejects duplicate ids within one request (400), so
+        OpenAIChat.format_messages rewrites subsequent collisions on the wire
+        copy while preserving assistant->tool pairing and keeping <= 40 chars."""
+        long_id = "toolu_bdrk_01RYYH7mIgEt0QBTA9FjwVME"
+        messages = [
+            Message(role="user", content="first"),
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=[{"id": long_id, "type": "function", "function": {"name": "read_file", "arguments": "{}"}}],
+            ),
+            Message(role="tool", tool_call_id=long_id, content="a"),
+            Message(role="user", content="second"),
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=[{"id": long_id, "type": "function", "function": {"name": "read_file", "arguments": "{}"}}],
+            ),
+            Message(role="tool", tool_call_id=long_id, content="b"),
+            Message(role="user", content="third"),
+        ]
+        model = OpenAIChat(api_key="fake_openai_key")
+        wire = model.format_messages(messages)
+        id1 = wire[1]["tool_calls"][0]["id"]
+        id2 = wire[4]["tool_calls"][0]["id"]
+        self.assertEqual(id1, long_id)
+        self.assertNotEqual(id2, id1)
+        self.assertLessEqual(len(id2), 40)
+        self.assertEqual(wire[2]["tool_call_id"], id1)
+        self.assertEqual(wire[5]["tool_call_id"], id2)
+        # Disk / memory original messages remain untouched.
+        self.assertEqual(messages[4].tool_calls[0]["id"], long_id)
+        self.assertEqual(messages[5].tool_call_id, long_id)
+
 
 if __name__ == "__main__":
     unittest.main()
