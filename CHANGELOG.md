@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **桌面端回合结束发系统通知**：此前 Agentica 从没调用过系统通知接口，macOS「设置 → 通知」里根本没有这个 app，后台跑完一轮只能自己切回去看。现在窗口不在前台时，活动会话从「运行中」变成「已结束」会发一条系统横幅（标题是会话名，点击回到窗口）；首次会弹系统授权，授权后 app 出现在通知设置里。触发不靠轮询：页面本来就在标题前加 `● ` 前缀表示运行中，主进程监听标题变化再读一次 `<html data-session-running>` 即可；帮助菜单加了「Send Test Notification」用于验证，`AGENTICA_DESKTOP_NOTIFY_TEST=1` 也能在启动时发一条。
+
 - **macOS 桌面端支持 Homebrew Cask 一键安装**：在 [`shibing624/homebrew-tap`](https://github.com/shibing624/homebrew-tap) 新增 `Casks/agentica.rb`（覆盖 Apple Silicon 与 Intel 双架构）及 Release 自动同步工作流。原先未签名的 macOS 安装包每次下载或升级都要手动拖进「应用程序」再跑 `sudo xattr -rd com.apple.quarantine`；现在可运行 `brew install --cask shibing624/tap/agentica` 自动清理隔离属性，并用 `brew upgrade --cask shibing624/tap/agentica` 升级。下载页 `docs/desktop/index.html` 与 `docs/advanced/gateway.md` 已同步补充该方式。
 
 - **长会话的时间读数不再停在首日**：开启 `PromptConfig.add_datetime_to_instructions` 时，跨日、距上次读数超过 30 分钟或恢复后的首轮，会在新的用户消息中追加当前日期、时间与时区。旧消息与 system prompt 不变；时钟旁注保留在 wire 回放中，不混进用户原文。SDK 默认仍关闭，`DeepAgent` 的各产品入口默认开启；可用 `time_zone` 指定 IANA 时区、`clock_refresh_seconds` 调整刷新间隔。这版只在回合准备时刷新，不在工具循环中途追加，也不改 steer 消息。

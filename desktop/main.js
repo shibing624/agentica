@@ -29,7 +29,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, screen, session, shell } = require("electron");
+const { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, Notification, screen, session, shell } = require("electron");
 const { GatewayProcess } = require("./gateway");
 const { bootstrapBlockedPage, resolveExistingCommand } = require("./runtime");
 const { installCommand } = require("./cli-shim");
@@ -153,10 +153,16 @@ function createWindow() {
   win.on("enter-full-screen", markFullScreen);
   win.on("leave-full-screen", markFullScreen);
   win.webContents.on("did-finish-load", () => {
+    // A reload starts a fresh page: whatever it was running is gone.
+    lastTurnRunning = false;
+    lastTurnSession = "";
     markFullScreen();
     void refreshDockMenu(true);
   });
-  win.webContents.on("page-title-updated", () => void refreshDockMenu(true));
+  win.webContents.on("page-title-updated", () => {
+    void onTitleChanged();
+    void refreshDockMenu(true);
+  });
   win.on("focus", () => void refreshDockMenu(true));
   win.on("blur", () => void refreshDockMenu(false));
   win.on("close", () => {
@@ -343,6 +349,11 @@ async function boot() {
   }
   if (splash && !splash.isDestroyed()) splash.close();
   startUpdates(app, log);
+  // Lets the packaging and notification checks drive one banner without a
+  // session: `AGENTICA_DESKTOP_NOTIFY_TEST=1` shows it once the window is up.
+  if (process.env.AGENTICA_DESKTOP_NOTIFY_TEST === "1") {
+    notifyUser("Agentica", "Notifications are on");
+  }
 }
 
 /**
@@ -383,6 +394,11 @@ function installMenu() {
     {
       role: "help",
       submenu: [
+        {
+          label: "Send Test Notification",
+          click: () => notifyUser("Agentica", /^zh/i.test(lastRendererLang) ? "通知已开启" : "Notifications are on"),
+        },
+        { type: "separator" },
         {
           label: "Install 'agentica' Command in Terminal…",
           click: () => registerTerminalCommand(),
@@ -431,6 +447,39 @@ function installDockIcon() {
 let cachedRecentSessions = [];
 let lastDockFetchAt = 0;
 let lastRendererLang = "";
+
+/** Was the last observed turn running, and on which session?
+ *  The page mirrors the active session into `<html data-session-running>`, and
+ *  the title carries a "● " prefix while a turn runs — so a title update is
+ *  exactly the moment that flag flips. That is the whole trigger: no polling,
+ *  no preload and no IPC. */
+let lastTurnRunning = false;
+let lastTurnSession = "";
+
+/** A system banner, the way every other desktop app announces a finished job.
+ *  macOS asks for permission the first time one is shown; before that the app
+ *  does not even appear under System Settings → Notifications. */
+function notifyUser(title, body) {
+  if (!Notification.isSupported()) return;
+  const notification = new Notification({ title, body });
+  notification.on("click", () => {
+    const { win: target } = focusOrCreateWindow();
+    if (target && !target.isDestroyed()) target.focus();
+  });
+  notification.show();
+}
+
+async function onTitleChanged() {
+  if (!win || win.isDestroyed() || quitting) return;
+  const state = await readRendererSession();
+  if (!state) return;
+  const finished = lastTurnRunning && !state.running && state.id === lastTurnSession;
+  lastTurnRunning = state.running === true;
+  lastTurnSession = state.id;
+  if (!finished || win.isFocused()) return;
+  const zh = /^zh/i.test(state.lang || lastRendererLang || "");
+  notifyUser(state.title || "Agentica", zh ? "任务已完成" : "Task finished");
+}
 
 function focusOrCreateWindow(targetUrl = null) {
   if (win && !win.isDestroyed()) {
