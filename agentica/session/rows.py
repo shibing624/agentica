@@ -26,6 +26,7 @@ Two kinds of marker are read here, and nowhere else:
   written is a change to what is read, in one place.
 """
 import re
+import json
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
@@ -85,6 +86,7 @@ class RowView:
     steer: bool
     text: str
     window: Optional[WindowPreamble] = None
+    tool_result: bool = False
 
     @property
     def is_pure_window(self) -> bool:
@@ -94,12 +96,12 @@ class RowView:
     @property
     def starts_turn(self) -> bool:
         """Did a person begin a turn here? Not a steer, not a report, not chrome."""
-        return not self.automated and not self.steer and not self.is_pure_window
+        return not self.automated and not self.steer and not self.is_pure_window and not self.tool_result
 
     @property
     def opens_round(self) -> bool:
         """Does a model round follow this row? A report opens one; a steer joins the running one."""
-        return not self.steer and not self.is_pure_window
+        return not self.steer and not self.is_pure_window and not self.tool_result
 
 
 def _peel_layer(text: str) -> str:
@@ -264,6 +266,36 @@ def _call_ids(entry: Mapping[str, Any]) -> List[str]:
     return []
 
 
+def legacy_tool_result_blocks(entry: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """Anthropic ``tool_result`` blocks mistakenly serialized onto a ``user`` row.
+
+    Older ``append_post_compact_messages`` wrote an Anthropic ``role="user"``
+    tool-answer container via ``json.dumps`` instead of unpacking each block
+    into a ``tool`` row. Detect only the strict structural JSON list of
+    ``tool_result`` dicts carrying ``tool_use_id``.
+    """
+    if entry.get("type") != "user":
+        return []
+    content = entry.get("content")
+    if not isinstance(content, str) or not content.lstrip().startswith("["):
+        return []
+    try:
+        parsed = json.loads(content)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(parsed, list) or not parsed:
+        return []
+    if not all(
+        isinstance(block, dict)
+        and block.get("type") == "tool_result"
+        and isinstance(block.get("tool_use_id"), str)
+        and bool(block["tool_use_id"])
+        for block in parsed
+    ):
+        return []
+    return parsed
+
+
 def mark_window_replays(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """``entries`` with the replayed tail of each new window marked.
 
@@ -289,6 +321,14 @@ def mark_window_replays(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             if kind == "compact_boundary":
                 break
             if kind == "user":
+                legacy_blocks = legacy_tool_result_blocks(row)
+                if legacy_blocks:
+                    ids = [str(block["tool_use_id"]) for block in legacy_blocks]
+                    if all(i in seen for i in ids):
+                        out[k] = {**row, "window_replay": True}
+                        replayed = True
+                        continue
+                    break
                 if tail_user is not None:
                     break
                 tail_user = k
@@ -306,6 +346,8 @@ def mark_window_replays(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def classify_user(entry: Mapping[str, Any]) -> RowView:
     """Read a ``type == "user"`` row. The order is fixed here, once."""
+    if legacy_tool_result_blocks(entry):
+        return RowView(False, False, "", tool_result=True)
     content = entry.get("content")
     content = content if isinstance(content, str) else ("" if content is None else str(content))
     if is_window_replay(entry):

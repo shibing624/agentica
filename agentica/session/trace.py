@@ -690,8 +690,13 @@ def chat_turn_page(
             if isinstance(e, dict) and e.get("type") in _CHAT_ENTRY_TYPES
         ])
         # A replayed assistant/tool row is a copy of one above the boundary;
-        # the replayed user row stays: it carries the new window's preamble.
-        if e.get("type") == "user" or not is_window_replay(e)
+        # the replayed user row stays: it carries the new window's preamble,
+        # unless it is a legacy serialized tool_result container.
+        if (
+            not classify_user(e).tool_result
+            if e.get("type") == "user"
+            else not is_window_replay(e)
+        )
     ]
     total = len(chat_entries)
     end = min(total, max(0, before)) if before is not None else total
@@ -1043,6 +1048,8 @@ def _entry_row(
 
     if entry_type == "user":
         view = classify_user(entry)
+        if view.tool_result:
+            return None
         content = view.text
         if view.automated:
             # A background command's / subagent's report or a peer message:

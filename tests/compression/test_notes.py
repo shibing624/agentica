@@ -621,3 +621,93 @@ class TestCompactionAfterAnalyzeImage(unittest.TestCase):
             questions = [e["row"]["text"] for e in page if e["type"] == "user" and e["row"]["text"]]
             self.assertEqual(questions, ["earlier question", "改图：图1文字太多"])
             self.assertEqual([e["tool_call_id"] for e in page if e["type"] == "tool"], ["img-1"])
+
+
+class TestAnthropicPostCompactLog(unittest.TestCase):
+    """Auto-compact mid-turn on Claude must unpack Anthropic tool_result blocks."""
+
+    def _run_anthropic_compact(self, tmp: str):
+        import asyncio
+
+        slog = SessionLog("claude-compact", base_dir=tmp)
+        slog.append("user", "earlier question")
+        slog.append("assistant", "earlier answer")
+        slog.begin_turn()
+        question = Message(role="user", content="check repo stats")
+        slog._turn_user_uuid = slog.append("user", question.content)
+        calls = [
+            {"id": "toolu_01", "type": "function", "function": {"name": "fetch_url", "arguments": '{"url":"https://a"}'}},
+            {"id": "toolu_02", "type": "function", "function": {"name": "execute", "arguments": '{"command":"ls"}'}},
+        ]
+        asst_blocks = [
+            {"type": "thinking", "thinking": "checking", "signature": "sig_1"},
+            {"type": "tool_use", "id": "toolu_01", "name": "fetch_url", "input": {"url": "https://a"}},
+            {"type": "tool_use", "id": "toolu_02", "name": "execute", "input": {"command": "ls"}},
+        ]
+        asst = Message(
+            role="assistant",
+            content=asst_blocks,
+            tool_calls=calls,
+            provider_data={"anthropic_model": "claude-sonnet", "anthropic_blocks": asst_blocks},
+        )
+        slog.append("assistant", "", tool_calls=calls, provider_data=asst.provider_data)
+        slog._turn_written_tool_call_rounds.add(("toolu_01", "toolu_02"))
+        slog.append("tool", "repo ok", tool_call_id="toolu_01", tool_name="fetch_url")
+        slog.append("tool", "ls fail", tool_call_id="toolu_02", tool_name="execute", is_error=True)
+        slog._turn_written_tool_call_ids.update(["toolu_01", "toolu_02"])
+
+        tool_result_msg = Message(
+            role="user",
+            content=[
+                {"type": "tool_result", "tool_use_id": "toolu_01", "content": "repo ok"},
+                {"type": "tool_result", "tool_use_id": "toolu_02", "content": "ls fail", "is_error": True},
+            ],
+        )
+        msgs = [
+            Message(role="system", content="sys"),
+            Message(role="user", content="earlier question"),
+            Message(role="assistant", content="earlier answer"),
+            question,
+            asst,
+            tool_result_msg,
+        ]
+        cm = CompressionManager()
+        agent = type("A", (), {"_session_log": slog})()
+        win = type("M", (), {"id": "claude-sonnet", "context_window": 200_000})()
+        win._agent_ref = lambda: agent
+        asyncio.run(cm.auto_compact(msgs, model=win, force=True))
+        return slog
+
+    def test_post_compact_writes_tool_rows_not_user_json_string(self):
+        import json
+
+        from agentica.session.trace import chat_turn_page
+
+        with tempfile.TemporaryDirectory() as tmp:
+            slog = self._run_anthropic_compact(tmp)
+            logged = [json.loads(l) for l in Path(slog.path).read_text(encoding="utf-8").splitlines()]
+            boundary_idx = next(i for i, r in enumerate(logged) if r.get("type") == "compact_boundary")
+            post = logged[boundary_idx + 1:]
+            self.assertEqual([r["type"] for r in post], ["user", "assistant", "tool", "tool"])
+            self.assertEqual([r.get("window_replay") for r in post], [True, True, True, True])
+            self.assertEqual(post[1]["content"], "")
+            self.assertIn("anthropic_blocks", post[1].get("provider_data", {}))
+            self.assertEqual([r["tool_call_id"] for r in post[2:]], ["toolu_01", "toolu_02"])
+            self.assertEqual([r["tool_name"] for r in post[2:]], ["fetch_url", "execute"])
+            self.assertTrue(post[3].get("is_error"))
+
+            page = chat_turn_page(logged, turns=10)["events"]
+            questions = [e["row"]["text"] for e in page if e["type"] == "user" and e["row"]["text"]]
+            self.assertEqual(questions, ["earlier question", "check repo stats"])
+            self.assertEqual([e["tool_call_id"] for e in page if e["type"] == "tool"], ["toolu_01", "toolu_02"])
+
+    def test_resume_replays_valid_anthropic_tool_sequence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._run_anthropic_compact(tmp)
+            replay = SessionLog("claude-compact", base_dir=tmp).load()
+            self.assertEqual([m["role"] for m in replay], ["user", "assistant", "tool", "tool"])
+            self.assertTrue(replay[0]["content"].endswith("check repo stats"))
+            self.assertEqual(replay[1]["content"], "")
+            self.assertIn("anthropic_blocks", replay[1]["provider_data"])
+            self.assertEqual([m["tool_call_id"] for m in replay[2:]], ["toolu_01", "toolu_02"])
+            self.assertEqual([m["tool_call_error"] for m in replay[2:]], [False, True])

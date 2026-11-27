@@ -236,3 +236,52 @@ class TestEveryReaderAgrees:
             assert log.search_entries("New context window") == []
             page = chat_turn_page(log.iter_raw_entries(), turns=1)
             assert page["older_turns"] == 1
+
+    def test_legacy_serialized_anthropic_tool_result_user_row_is_ignored_and_unpacked_on_load(self):
+        import json
+
+        from agentica.session.rows import mark_window_replays
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log = SessionLog("legacy-bad", base_dir=tmp)
+            log.append("user", "查下数据")
+            calls = [{"id": "toolu_bad_1", "type": "function", "function": {"name": "fetch_url", "arguments": "{}"}}]
+            log.append("assistant", "", tool_calls=calls)
+            log.append("tool", "ok-result", tool_call_id="toolu_bad_1", tool_name="fetch_url")
+            log.append_compact_boundary("", trigger="auto")
+            log.append("user", f"{_window(1)}\n\n{CONT}\n\n查下数据", window_replay=True)
+            legacy_asst = json.dumps([
+                {"type": "thinking", "thinking": "t", "signature": "sig"},
+                {"type": "tool_use", "id": "toolu_bad_1", "name": "fetch_url", "input": {}},
+            ])
+            log.append("assistant", legacy_asst, tool_calls=calls, window_replay=True)
+            # Historical bug: tool_result container written as a plain user JSON row.
+            legacy_user_tr = json.dumps([
+                {"type": "tool_result", "tool_use_id": "toolu_bad_1", "content": "ok-result", "is_error": True},
+            ])
+            log.append("user", legacy_user_tr)
+            log.append("assistant", "完成")
+
+            raw = list(log.iter_raw_entries())
+            marked = mark_window_replays(raw)
+            assert marked[-2]["window_replay"] is True
+            view = classify_user(marked[-2])
+            assert view.tool_result is True
+            assert not view.starts_turn and not view.opens_round
+            assert log.trajectory_stats()["turns"] == 1
+            assert [m["content"] for m in log.list_user_messages()] == ["查下数据"]
+            assert log.search_entries("toolu_bad_1") == []
+
+            page = chat_turn_page(raw, turns=10)["events"]
+            user_texts = [e["row"]["text"] for e in page if e["type"] == "user" and e["row"]["text"]]
+            assert user_texts == ["查下数据"]
+            assert [e["tool_call_id"] for e in page if e["type"] == "tool"] == ["toolu_bad_1"]
+
+            replayed = log.load()
+            assert [m["role"] for m in replayed] == ["user", "assistant", "tool", "assistant"]
+            assert replayed[1]["content"] == ""
+            assert len(replayed[1]["provider_data"]["anthropic_blocks"]) == 2
+            assert replayed[2]["tool_call_id"] == "toolu_bad_1"
+            assert replayed[2]["tool_name"] == "fetch_url"
+            assert replayed[2]["tool_call_error"] is True
+            assert replayed[2]["content"] == "ok-result"

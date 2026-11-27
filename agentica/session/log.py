@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, NamedTuple, Optional, Protocol, Union, runtime_checkable
 from uuid import uuid4
 
+from agentica.agent.history_filter import _text_from_content_blocks
 from agentica.compression.token_budget import (
     CONTEXT_WINDOW_OPEN,
     WINDOW_CONTINUATION_MARK,
@@ -41,6 +42,7 @@ from agentica.session.rows import (
     STEER_GUIDANCE_PREFIX,
     classify_user,
     is_window_replay,
+    legacy_tool_result_blocks,
     mark_window_replays,
     strip_image_markers,
     tool_error_of,
@@ -254,6 +256,38 @@ def _anthropic_tool_result_ids(message: Any) -> tuple:
         and block.get("type") == "tool_result"
         and block.get("tool_use_id")
     )
+
+
+def _anthropic_tool_result_blocks(message: Any) -> List[Dict[str, Any]]:
+    """Return the ``tool_result`` blocks of an Anthropic-shaped tool answer."""
+    content = _msg_field(message, "content")
+    if _msg_field(message, "role") != "user" or not isinstance(content, list):
+        return []
+    return [
+        block
+        for block in content
+        if isinstance(block, dict)
+        and block.get("type") == "tool_result"
+        and block.get("tool_use_id")
+    ]
+
+
+def _legacy_anthropic_assistant_blocks(content: Any) -> List[Dict[str, Any]]:
+    """Anthropic assistant blocks mistakenly serialized onto ``assistant.content``."""
+    if not isinstance(content, str) or not content.lstrip().startswith("["):
+        return []
+    try:
+        parsed = json.loads(content)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(parsed, list) or not parsed:
+        return []
+    allowed = {"thinking", "redacted_thinking", "tool_use", "text"}
+    if not all(isinstance(block, dict) and block.get("type") in allowed for block in parsed):
+        return []
+    if not any(block.get("type") in {"thinking", "redacted_thinking", "tool_use"} for block in parsed):
+        return []
+    return parsed
 
 
 def trajectory_skeleton(messages: List[Any]) -> List[tuple]:
@@ -669,10 +703,39 @@ class SessionLog:
         """
         written = 0
         question_logged = self._turn_user_uuid is not None
+        tool_name_by_id: Dict[str, str] = {}
+        for m in messages:
+            if m.role == "assistant" and m.tool_calls:
+                for tc in m.tool_calls:
+                    if isinstance(tc, dict) and tc.get("id"):
+                        fn = tc.get("function")
+                        name = fn.get("name") if isinstance(fn, dict) else None
+                        if name:
+                            tool_name_by_id[str(tc["id"])] = str(name)
         for msg in messages:
             if msg.role not in ("user", "assistant", "tool"):
                 continue
             if msg._runtime_notice:
+                continue
+            tool_blocks = _anthropic_tool_result_blocks(msg)
+            if tool_blocks:
+                # Anthropic packs tool results into a role="user" list of
+                # tool_result blocks; persist them as separate "tool" rows
+                # matching _persist_assistant_tool_calls rather than dumping
+                # JSON onto a "user" row.
+                for block in tool_blocks:
+                    tc_id = str(block["tool_use_id"])
+                    tool_meta: Dict[str, Any] = {"tool_call_id": tc_id}
+                    if tc_id in self._turn_written_tool_call_ids:
+                        tool_meta["window_replay"] = True
+                    else:
+                        self._turn_written_tool_call_ids.add(tc_id)
+                    if tc_id in tool_name_by_id:
+                        tool_meta["tool_name"] = tool_name_by_id[tc_id]
+                    if block.get("is_error"):
+                        tool_meta["is_error"] = True
+                    self.append("tool", _text_from_content_blocks(block.get("content")), **tool_meta)
+                    written += 1
                 continue
             meta: Dict[str, Any] = {}
             if self._already_logged_this_turn(msg, question_logged):
@@ -682,6 +745,10 @@ class SessionLog:
                 meta["window_replay"] = True
             if msg.role == "user" and not msg._injected:
                 question_logged = False  # only the turn's own question was logged
+            if msg.role == "user" and msg.automated:
+                meta["automated"] = True
+            if msg.role == "user" and msg._injected and msg._steered_items:
+                meta["steer"] = True
             if msg.tool_call_id:
                 meta["tool_call_id"] = msg.tool_call_id
             if msg.tool_name:
@@ -692,7 +759,30 @@ class SessionLog:
                 meta["tool_calls"] = msg.tool_calls
             if msg.reasoning_content:
                 meta["reasoning_content"] = msg.reasoning_content
+            if msg.finish_reason is not None:
+                meta["finish_reason"] = msg.finish_reason
+            if msg.provider_checkpoint is not None:
+                meta["provider_checkpoint"] = msg.provider_checkpoint
+            if msg.metrics:
+                meta["metrics"] = msg.metrics
+            if msg.role == "tool":
+                if msg.tool_call_error:
+                    meta["is_error"] = True
+                if msg.tool_call_id:
+                    self._turn_written_tool_call_ids.add(msg.tool_call_id)
             content = msg.durable_content()
+            if msg.role == "assistant":
+                if isinstance(content, list):
+                    provider_data = dict(msg.provider_data) if isinstance(msg.provider_data, dict) else {}
+                    provider_data.setdefault("anthropic_blocks", msg.content)
+                    meta["provider_data"] = provider_data
+                    content = _text_from_content_blocks(content)
+                elif msg.provider_data is not None:
+                    meta["provider_data"] = msg.provider_data
+                if msg.tool_calls:
+                    ids = tuple(str(tc.get("id") or "") for tc in msg.tool_calls if isinstance(tc, dict))
+                    if ids and all(ids):
+                        self._turn_written_tool_call_rounds.add(ids)
             if msg._request_only_blocks and isinstance(msg.content, str):
                 # Replay sends what the provider already cached; the
                 # transcript shows what the person typed.
@@ -713,6 +803,9 @@ class SessionLog:
         question once ``_turn_user_uuid`` is set, a tool round by its call ids,
         a tool result by its call id.
         """
+        result_ids = _anthropic_tool_result_ids(msg)
+        if result_ids:
+            return all(tc_id in self._turn_written_tool_call_ids for tc_id in result_ids)
         if msg.role == "user":
             return question_logged and not msg._injected
         if msg.role == "assistant":
@@ -1092,8 +1185,10 @@ class SessionLog:
                 continue
             if is_window_replay(entry) and entry.get("type") != "user":
                 continue
-            if entry.get("type") == "user" and classify_user(entry).is_pure_window:
-                continue
+            if entry.get("type") == "user":
+                view = classify_user(entry)
+                if view.is_pure_window or view.tool_result:
+                    continue
             rows.append(entry)
         return rows
 
@@ -1403,8 +1498,24 @@ class SessionLog:
             "automated",
         )
         start_from = last_boundary_idx + 1 if last_boundary_idx >= 0 else 0
+        tool_name_by_id: Dict[str, str] = {}
         for entry in entries[start_from:]:
             entry_type = entry.get("type", "")
+            if entry_type == "user":
+                legacy_blocks = legacy_tool_result_blocks(entry)
+                if legacy_blocks:
+                    for block in legacy_blocks:
+                        tc_id = str(block["tool_use_id"])
+                        tool_msg: Dict[str, Any] = {
+                            "role": "tool",
+                            "content": _text_from_content_blocks(block.get("content")),
+                            "tool_call_id": tc_id,
+                            "tool_call_error": bool(block.get("is_error", False)),
+                        }
+                        if tc_id in tool_name_by_id:
+                            tool_msg["tool_name"] = tool_name_by_id[tc_id]
+                        messages.append(tool_msg)
+                    continue
             if entry_type == "user" and entry.get("steer") is True:
                 raw_text = str(entry.get("content", "") or "").strip()
                 if not raw_text:
@@ -1438,6 +1549,20 @@ class SessionLog:
                         msg[key] = entry[key]
                 if entry_type == "tool":
                     msg["tool_call_error"] = tool_error_of(entry)
+                elif entry_type == "assistant":
+                    for tc in entry.get("tool_calls") or []:
+                        if isinstance(tc, dict) and tc.get("id"):
+                            fn = tc.get("function")
+                            name = fn.get("name") if isinstance(fn, dict) else None
+                            if name:
+                                tool_name_by_id[str(tc["id"])] = str(name)
+                    if entry.get("tool_calls"):
+                        legacy_assistant = _legacy_anthropic_assistant_blocks(msg.get("content"))
+                        if legacy_assistant:
+                            msg["content"] = _text_from_content_blocks(legacy_assistant)
+                            pdata = dict(msg.get("provider_data")) if isinstance(msg.get("provider_data"), dict) else {}
+                            pdata.setdefault("anthropic_blocks", legacy_assistant)
+                            msg["provider_data"] = pdata
                 messages.append(msg)
             elif entry_type == "provider_checkpoint" and messages:
                 checkpoint = entry.get("checkpoint")
