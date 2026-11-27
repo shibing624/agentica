@@ -28,13 +28,22 @@
  */
 
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
-const { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, Notification, screen, session, shell } = require("electron");
-const { GatewayProcess } = require("./gateway");
-const { bootstrapBlockedPage, resolveExistingCommand } = require("./runtime");
-const { installCommand } = require("./cli-shim");
+const { execFile } = require("node:child_process");
+const { promisify } = require("node:util");
+const { app, BrowserWindow, clipboard, dialog, Menu, nativeImage, nativeTheme, Notification, screen, session, shell } = require("electron");
+const { GatewayProcess, health } = require("./gateway");
+const { bootstrapBlockedPage, resolveExistingCommand, supportRoot } = require("./runtime");
+const { inspectCommand, installCommand, uninstallCommand } = require("./cli-shim");
 const { buildDockMenuTemplate } = require("./dock-menu");
-const { startUpdates } = require("./updater");
+const {
+  URLS,
+  buildAppMenuTemplate,
+  formatDiagnosticsReport,
+  formatResourceUsageReport,
+} = require("./menu");
+const { canSelfUpdate, checkForUpdatesInteractive, startUpdates } = require("./updater");
 const { keepVisiblePosition, readWindowState, writeWindowState } = require("./window-state");
 const { desktopStatePaths, waitForChat } = require("./smoke");
 const {
@@ -372,71 +381,242 @@ async function boot() {
  * language) or a dialog that fires when the gateway never came up — i.e. when
  * there is no renderer to read a preference from.
  */
-function installMenu() {
-  const isMac = process.platform === "darwin";
-  Menu.setApplicationMenu(Menu.buildFromTemplate([
-    ...(isMac ? [{ role: "appMenu" }] : []),
-    { role: "fileMenu" },
-    { role: "editMenu" },
-    {
-      label: "View",
-      submenu: [
-        { role: "reload" },
-        { role: "forceReload" },
-        { role: "toggleDevTools" },
-        { type: "separator" },
-        { role: "resetZoom" },
-        { role: "zoomIn" },
-        { role: "zoomOut" },
-        { type: "separator" },
-        { role: "togglefullscreen" },
-      ],
-    },
-    { role: "windowMenu" },
-    {
-      role: "help",
-      submenu: [
-        {
-          label: "Send Test Notification",
-          click: () => {
-            const { title, body } = formatTurnNotification({
-              lang: lastRendererLang || app.getLocale() || "zh",
-              isTest: true,
-            });
-            notifyUser(title, body);
-          },
-        },
-        { type: "separator" },
-        {
-          label: "Install 'agentica' Command in Terminal…",
-          click: () => registerTerminalCommand(),
-        },
-      ],
-    },
-  ]));
+const execFileAsync = promisify(execFile);
+
+function currentLang() {
+  return lastRendererLang || app.getLocale() || "zh";
 }
 
-/** Menu action: put an `agentica` command on the terminal PATH. */
-function registerTerminalCommand() {
+function isZhLang() {
+  return /^zh/i.test(currentLang());
+}
+
+function agenticaHomeDir() {
+  return process.env.AGENTICA_HOME || path.join(os.homedir(), ".agentica");
+}
+
+function logsDirPath() {
+  return path.join(agenticaHomeDir(), "logs");
+}
+
+function showAboutDialog() {
+  const zh = isZhLang();
+  void dialog.showMessageBox({
+    type: "info",
+    title: zh ? "关于 Agentica" : "About Agentica",
+    message: `Agentica v${app.getVersion()}`,
+    detail: `Electron ${process.versions.electron}\nNode ${process.versions.node}\nChrome ${process.versions.chrome}\n\n${URLS.docs}`,
+  });
+}
+
+function installMenu() {
+  const lang = currentLang();
+  lastMenuLang = lang;
+  Menu.setApplicationMenu(Menu.buildFromTemplate(buildAppMenuTemplate({
+    platform: process.platform,
+    lang,
+    handlers: {
+      onAbout: showAboutDialog,
+      onCheckUpdates: () => void checkForUpdatesInteractive({ app, dialog, shell, lang: currentLang() }),
+      onManageCli: () => void manageTerminalCommand(),
+      onNewChat: () => openFromDock({ action: "new-chat" }),
+      onOpenDocs: () => void shell.openExternal(URLS.docs),
+      onDiagnostics: () => void showDiagnostics(),
+      onResourceUsage: () => void showResourceUsage(),
+      onOpenLogs: () => void openLogsFolder(),
+      onFeedback: () => void shell.openExternal(URLS.issues),
+      onTestNotification: () => {
+        const { title, body } = formatTurnNotification({ lang: currentLang(), isTest: true });
+        notifyUser(title, body);
+      },
+    },
+  })));
+}
+
+/** Menu action: inspect, install, or remove the desktop-managed `agentica` CLI shim. */
+async function manageTerminalCommand() {
+  const zh = isZhLang();
+  const status = inspectCommand();
+  if (status.exists && status.managedByApp) {
+    const { response } = await dialog.showMessageBox({
+      type: "info",
+      message: zh ? "已安装终端命令 `agentica`" : "The 'agentica' command is installed",
+      detail: zh
+        ? `路径：${status.target}\n${status.onPath ? "当前 PATH 已包含该目录，可直接在终端运行 `agentica`。" : `请将 ${path.dirname(status.target)} 加入 PATH。`}`
+        : `Path: ${status.target}\n${status.onPath ? "Ready to use in any terminal." : `Add ${path.dirname(status.target)} to your PATH.`}`,
+      buttons: [
+        zh ? "关闭" : "Close",
+        zh ? "重新安装" : "Reinstall",
+        zh ? "移除命令" : "Remove",
+      ],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    if (response === 2) {
+      try {
+        uninstallCommand();
+        await dialog.showMessageBox({
+          type: "info",
+          message: zh ? "已移除终端命令" : "Removed 'agentica' command",
+          detail: status.target,
+        });
+      } catch (err) {
+        await dialog.showMessageBox({
+          type: "warning",
+          message: zh ? "移除终端命令失败" : "Could not remove the 'agentica' command",
+          detail: err.message,
+        });
+      }
+      return;
+    }
+    if (response !== 1) return;
+  }
   try {
     const { target, onPath, restart } = installCommand();
     const hint = restart
-      ? "Open a new terminal window to use it."
+      ? (zh ? "请新开一个终端窗口使用。" : "Open a new terminal window to use it.")
       : onPath
-        ? "It is ready to use in any terminal."
-        : `Add ${path.dirname(target)} to your PATH to use it.`;
-    void dialog.showMessageBox({
+        ? (zh ? "现在可以直接在任意终端使用 `agentica`。" : "It is ready to use in any terminal.")
+        : (zh ? `请将 ${path.dirname(target)} 加入你的 PATH。` : `Add ${path.dirname(target)} to your PATH to use it.`);
+    await dialog.showMessageBox({
       type: "info",
-      message: "The 'agentica' command is installed.",
+      message: zh ? "已安装 `agentica` 终端命令" : "The 'agentica' command is installed.",
       detail: `${target}\n\n${hint}`,
     });
   } catch (err) {
-    void dialog.showMessageBox({
+    await dialog.showMessageBox({
       type: "warning",
-      message: "Could not install the 'agentica' command.",
+      message: zh ? "无法安装 `agentica` 命令" : "Could not install the 'agentica' command.",
       detail: err.message,
     });
   }
+}
+
+async function openLogsFolder() {
+  const zh = isZhLang();
+  const dir = logsDirPath();
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const err = await shell.openPath(dir);
+    if (err) throw new Error(err);
+  } catch (e) {
+    await dialog.showMessageBox({
+      type: "warning",
+      message: zh ? "无法打开日志文件夹" : "Could not open logs folder",
+      detail: `${dir}\n\n${e instanceof Error ? e.message : String(e)}`,
+    });
+  }
+}
+
+async function showDiagnostics() {
+  const zh = isZhLang();
+  const record = gateway && gateway.record ? gateway.record : null;
+  let healthOk = false;
+  let healthMs = 0;
+  let healthError = "";
+  if (record && record.port) {
+    const t0 = Date.now();
+    try {
+      healthOk = await health(record, 1500);
+      healthMs = Date.now() - t0;
+      if (!healthOk) healthError = "Unhealthy";
+    } catch (e) {
+      healthError = e instanceof Error ? e.message : String(e);
+    }
+  } else {
+    healthError = zh ? "Gateway 未就绪" : "Gateway not ready";
+  }
+  let cmdSource = "-";
+  try {
+    const cmd = resolveExistingCommand();
+    cmdSource = cmd ? `${cmd.source} (${cmd.command})` : "bootstrap needed";
+  } catch (e) {
+    cmdSource = e instanceof Error ? e.message : String(e);
+  }
+  const cli = inspectCommand();
+  const report = formatDiagnosticsReport({
+    appVersion: app.getVersion(),
+    packaged: app.isPackaged,
+    electron: process.versions.electron,
+    node: process.versions.node,
+    chrome: process.versions.chrome,
+    platform: process.platform,
+    arch: process.arch,
+    osRelease: os.release(),
+    signed: canSelfUpdate(),
+    gatewayRunning: Boolean(gateway && gateway.running),
+    gatewayPort: record ? record.port : null,
+    gatewayPid: record ? record.pid : null,
+    gatewaySpawned: gateway ? gateway.spawned : undefined,
+    healthOk,
+    healthMs,
+    healthError,
+    commandSource: cmdSource,
+    cliTarget: cli.target,
+    cliInstalled: cli.exists,
+    agenticaHome: agenticaHomeDir(),
+    logsDir: logsDirPath(),
+    userDataDir: app.getPath("userData"),
+  }, currentLang());
+
+  const { response } = await dialog.showMessageBox({
+    type: "info",
+    title: zh ? "诊断工具" : "Diagnostics",
+    message: zh ? "Agentica 运行诊断" : "Agentica Diagnostics",
+    detail: report,
+    buttons: [
+      zh ? "关闭" : "Close",
+      zh ? "复制诊断信息" : "Copy Diagnostics",
+      zh ? "打开日志文件夹" : "Open Logs Folder",
+    ],
+    defaultId: 0,
+    cancelId: 0,
+  });
+  if (response === 1) clipboard.writeText(report);
+  else if (response === 2) await openLogsFolder();
+}
+
+async function readExtraProcessStats(pid) {
+  if (!pid || process.platform === "win32") return [];
+  try {
+    const { stdout } = await execFileAsync("ps", ["-o", "pid=,rss=,%cpu=", "-p", String(pid)], { timeout: 2000 });
+    const line = stdout.trim().split(/\r?\n/)[0] || "";
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 3) return [];
+    return [{
+      pid: Number(parts[0]),
+      rssKb: Number(parts[1]),
+      cpuPercent: Number(parts[2]),
+      label: "Gateway (Python)",
+    }];
+  } catch {
+    return [];
+  }
+}
+
+async function showResourceUsage() {
+  const zh = isZhLang();
+  const gwPid = gateway && gateway.record && gateway.record.pid ? gateway.record.pid : null;
+  const [metrics, extra] = await Promise.all([
+    Promise.resolve(app.getAppMetrics()),
+    readExtraProcessStats(gwPid),
+  ]);
+  const report = formatResourceUsageReport(metrics, extra, currentLang());
+  const { response } = await dialog.showMessageBox({
+    type: "info",
+    title: zh ? "资源占用" : "Resource Usage",
+    message: zh ? "Agentica 进程资源占用" : "Agentica Resource Usage",
+    detail: report,
+    buttons: [
+      zh ? "关闭" : "Close",
+      zh ? "刷新" : "Refresh",
+      zh ? "复制" : "Copy",
+    ],
+    defaultId: 0,
+    cancelId: 0,
+  });
+  if (response === 1) await showResourceUsage();
+  else if (response === 2) clipboard.writeText(report);
 }
 
 /**
@@ -455,6 +635,7 @@ function installDockIcon() {
 let cachedRecentSessions = [];
 let lastDockFetchAt = 0;
 let lastRendererLang = "";
+let lastMenuLang = "";
 
 /** Was the last observed turn running, and on which session?
  *  The page mirrors the active session into `<html data-session-running>`, and
@@ -552,7 +733,10 @@ async function readRendererSession() {
         running: document.documentElement.dataset.sessionRunning === "1"
       })`,
     );
-    if (state && state.lang) lastRendererLang = state.lang;
+    if (state && state.lang && state.lang !== lastRendererLang) {
+      lastRendererLang = state.lang;
+      if (lastRendererLang !== lastMenuLang) installMenu();
+    }
     return state;
   } catch {
     return null;
@@ -640,6 +824,14 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
+    app.setAboutPanelOptions({
+      applicationName: "Agentica",
+      applicationVersion: app.getVersion(),
+      version: app.getVersion(),
+      copyright: "Copyright © 2026 XuMing",
+      website: URLS.docs,
+      ...(!app.isPackaged && fs.existsSync(iconPath()) ? { iconPath: iconPath() } : {}),
+    });
     session.fromPartition(BROWSER_PARTITION).setPermissionRequestHandler((_contents, _permission, done) => done(false));
     installMenu();
     installDockIcon();

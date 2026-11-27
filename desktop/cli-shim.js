@@ -95,4 +95,44 @@ function installCommand() {
   return { target, onPath: pathHas(dir), restart: false };
 }
 
-module.exports = { MARKER, shimText, shimTarget, withPathEntry, installCommand };
+/** Inspect whether the desktop-managed `agentica` shim is currently installed. */
+function inspectCommand(platform = process.platform, targetPath = null) {
+  const target = targetPath || shimTarget(platform);
+  const exists = fs.existsSync(target);
+  let managedByApp = false;
+  if (exists) {
+    try {
+      managedByApp = fs.readFileSync(target, "utf8").includes(MARKER);
+    } catch {
+      managedByApp = false;
+    }
+  }
+  return {
+    target,
+    exists,
+    managedByApp,
+    onPath: platform === "win32" ? exists : pathHas(path.dirname(target)),
+    hasBundledPython: Boolean(bundledPython()),
+  };
+}
+
+/** Remove the desktop-managed `agentica` shim without touching user-owned binaries. */
+function uninstallCommand(platform = process.platform, targetPath = null) {
+  const target = targetPath || shimTarget(platform);
+  if (!fs.existsSync(target)) return { target, removed: false };
+  if (!fs.readFileSync(target, "utf8").includes(MARKER)) {
+    throw new Error(`${target} was not created by Agentica Desktop.`);
+  }
+  fs.unlinkSync(target);
+  return { target, removed: true };
+}
+
+module.exports = {
+  MARKER,
+  shimText,
+  shimTarget,
+  withPathEntry,
+  installCommand,
+  inspectCommand,
+  uninstallCommand,
+};

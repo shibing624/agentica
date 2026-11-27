@@ -358,3 +358,100 @@ test("turn-finished notification puts status in title and clips the session titl
   assert.equal(Array.from(clipped.body).length, 80);
   assert.ok(clipped.body.endsWith("…"));
 });
+
+test("app menu and help menu match expected Agentica layout in Chinese and English", () => {
+  const { buildAppMenuTemplate, compareSemver, formatDiagnosticsReport, formatResourceUsageReport } = require("./menu");
+  const zhTpl = buildAppMenuTemplate({ platform: "darwin", lang: "zh-CN" });
+  assert.equal(zhTpl[0].label, "Agentica");
+  assert.deepEqual(
+    zhTpl[0].submenu.map((i) => i.label || "---"),
+    [
+      "关于 Agentica",
+      "---",
+      "检查更新…",
+      "管理 agentica 命令…",
+      "---",
+      "开发者工具",
+      "---",
+      "隐藏 Agentica",
+      "隐藏其他",
+      "显示全部",
+      "---",
+      "退出 Agentica",
+    ],
+  );
+  const helpMenu = zhTpl.find((m) => m.role === "help");
+  assert.equal(helpMenu.label, "帮助");
+  assert.deepEqual(
+    helpMenu.submenu.map((i) => i.label || "---"),
+    [
+      "使用文档",
+      "诊断工具",
+      "资源占用",
+      "打开日志文件夹",
+      "意见反馈",
+      "---",
+      "发送测试通知",
+    ],
+  );
+
+  const enTpl = buildAppMenuTemplate({ platform: "darwin", lang: "en-US" });
+  assert.equal(enTpl[0].submenu[0].label, "About Agentica");
+  assert.equal(enTpl.find((m) => m.role === "help").label, "Help");
+
+  assert.equal(compareSemver("1.6.3", "v1.6.4"), -1);
+  assert.equal(compareSemver("v1.6.3", "1.6.3"), 0);
+  assert.equal(compareSemver("1.7.0", "1.6.9"), 1);
+
+  const diag = formatDiagnosticsReport({
+    appVersion: "1.6.3",
+    packaged: true,
+    electron: "43.4.1",
+    node: "22.0.0",
+    chrome: "136.0",
+    platform: "darwin",
+    arch: "arm64",
+    signed: true,
+    gatewayRunning: true,
+    gatewayPort: 8789,
+    gatewayPid: 1234,
+    gatewaySpawned: true,
+    healthOk: true,
+    healthMs: 12,
+    commandSource: "bundled",
+    cliTarget: "/usr/local/bin/agentica",
+    cliInstalled: true,
+    agenticaHome: "/Users/me/.agentica",
+    logsDir: "/Users/me/.agentica/logs",
+    userDataDir: "/Users/me/Library/Application Support/agentica-desktop",
+  }, "zh");
+  assert.match(diag, /1\.6\.3.*打包版/);
+  assert.match(diag, /port=8789.*pid=1234/);
+  assert.match(diag, /OK \(12ms\)/);
+
+  const res = formatResourceUsageReport(
+    [{ pid: 100, type: "Browser", memory: { workingSetSize: 102400 }, cpu: { percentCPUUsage: 1.5 } }],
+    [{ pid: 200, label: "Gateway (Python)", rssKb: 204800, cpuPercent: 2.5 }],
+    "zh",
+  );
+  assert.match(res, /总内存占用: 300 MB.*总 CPU: 4\.0%.*进程数: 2/);
+  assert.match(res, /PID 100\s+Browser — 100 MB/);
+  assert.match(res, /PID 200\s+Gateway \(Python\) — 200 MB/);
+});
+
+test("cli-shim inspectCommand and uninstallCommand manage only Agentica Desktop shims", () => {
+  const { MARKER, inspectCommand, uninstallCommand } = require("./cli-shim");
+  const owned = path.join(tmp, "agentica-owned");
+  fs.writeFileSync(owned, `#!/bin/sh\n# ${MARKER}\nexec python\n`);
+  const inspected = inspectCommand("darwin", owned);
+  assert.equal(inspected.exists, true);
+  assert.equal(inspected.managedByApp, true);
+  assert.deepEqual(uninstallCommand("darwin", owned), { target: owned, removed: true });
+  assert.equal(fs.existsSync(owned), false);
+
+  const foreign = path.join(tmp, "agentica-foreign");
+  fs.writeFileSync(foreign, "#!/bin/sh\necho pip\n");
+  assert.equal(inspectCommand("darwin", foreign).managedByApp, false);
+  assert.throws(() => uninstallCommand("darwin", foreign), /Agentica Desktop/);
+  assert.equal(fs.existsSync(foreign), true);
+});

@@ -41,6 +41,7 @@
       "window-state.js",
       "cli-shim.js",
       "dock-menu.js",
+      "menu.js",
       "updater.js",
       "smoke.js",
       "package.json",
