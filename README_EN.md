@@ -35,11 +35,17 @@ Every surface shares the same local memory, skills, and session history on your 
 
 | Product | Best for | Get started |
 |---|---|---|
-| **🖥️ Desktop App** | Standalone native window, zero environment setup | [Download the Desktop App](https://shibing624.github.io/agentica/desktop/) |
+| **🖥️ Desktop App** | Standalone native window, zero environment setup | [Download the Desktop App](https://shibing624.github.io/agentica/desktop/) (Homebrew recommended on macOS) |
 | **⌨️ CLI Terminal** | Coding, debugging, and running parallel sessions in the terminal | [CLI installation & terminal guide](https://shibing624.github.io/agentica/getting-started/terminal) |
 | **🌐 Local Web** | Browser workspaces and multiple accounts | [Web & Desktop](https://shibing624.github.io/agentica/advanced/gateway) |
 | **📱 WeChat / IM** | Control this machine from WeChat, Feishu, WeCom, or Telegram | [WeChat & IM](https://shibing624.github.io/agentica/advanced/im) |
 | **🐍 Python SDK & 📦 npm SDK** | Embedding agents in Python services or calling the gateway from Node / TypeScript | [Python Quickstart](https://shibing624.github.io/agentica/getting-started/quickstart) · [TypeScript SDK (`@agentica-ai/sdk`)](https://shibing624.github.io/agentica/advanced/gateway) |
+
+macOS Homebrew one-line install (recommended — automatically clears quarantine, no manual `xattr` needed):
+
+```bash
+brew install --cask shibing624/tap/agentica
+```
 
 For model API keys, free starter models, and Docker self-hosting, see the **[Installation & Configuration Guide](https://shibing624.github.io/agentica/getting-started/installation)**.
 

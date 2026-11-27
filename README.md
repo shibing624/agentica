@@ -35,11 +35,17 @@ https://github.com/user-attachments/assets/39fb961e-3979-4629-a87d-81dce9196597
 
 | 产品 | 适合谁 | 立即开始 |
 |---|---|---|
-| **🖥️ Desktop App（桌面端）** | 想要独立窗口应用，零环境配置、打开即用 | [下载桌面版](https://shibing624.github.io/agentica/desktop/) |
+| **🖥️ Desktop App（桌面端）** | 想要独立窗口应用，零环境配置、打开即用 | [下载桌面版](https://shibing624.github.io/agentica/desktop/)（macOS 优先 Homebrew） |
 | **⌨️ CLI 终端** | 在终端里写代码、查 Bug、开多个窗口并行干活 | [CLI 安装与终端指南](https://shibing624.github.io/agentica/getting-started/terminal) |
 | **🌐 本地 Web** | 浏览器里管多工作区、多账号 | [Web 与桌面端](https://shibing624.github.io/agentica/advanced/gateway) |
 | **📱 手机微信 / IM** | 用微信、飞书、企微、Telegram 远程指挥本机 | [微信与 IM](https://shibing624.github.io/agentica/advanced/im) |
 | **🐍 Python SDK & 📦 npm SDK** | 把 Agent 嵌入你自己的 Python 服务或 Node / TypeScript 应用 | [Python 5 分钟上手](https://shibing624.github.io/agentica/getting-started/quickstart) · [TypeScript SDK (`@agentica-ai/sdk`)](https://shibing624.github.io/agentica/advanced/gateway) |
+
+macOS Homebrew 一键安装（推荐，自动清理隔离属性、免手动 `xattr`）：
+
+```bash
+brew install --cask shibing624/tap/agentica
+```
 
 模型 API Key 配置、免费模型起步与 Docker 部署，请看 **[安装与配置文档](https://shibing624.github.io/agentica/getting-started/installation)**。
 

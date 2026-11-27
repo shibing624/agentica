@@ -37,7 +37,16 @@
     .kicker { margin: 0; color: #9eb0c8; font-size: 13px; letter-spacing: 0.08em; }
     h1 { margin: 14px 0 0; font-size: clamp(40px, 6vw, 64px); line-height: 1.12; font-weight: 650; letter-spacing: -0.03em; }
     .lede { margin: 18px auto 0; max-width: 36rem; color: #c5ceda; }
-    .dl { position: relative; display: inline-flex; margin-top: 28px; border-radius: 999px; background: #fff; color: #111; }
+    .hero-actions {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 18px;
+      margin-top: 28px;
+    }
+    .dl { position: relative; display: inline-flex; order: 2; border-radius: 999px; background: #fff; color: #111; }
+    .hero-actions.non-mac .dl { order: 1; }
+    .hero-actions.non-mac .brew { order: 2; }
     .go, .more {
       border: 0;
       background: transparent;
@@ -51,6 +60,7 @@
     .dl:hover { background: #f2f4f8; }
     .menu {
       position: absolute;
+      z-index: 10;
       top: calc(100% + 8px);
       left: 50%;
       transform: translateX(-50%);
@@ -74,15 +84,16 @@
     .menu small { display: block; color: #9aa6b8; font-size: 12px; font-weight: 400; }
     .ver { margin: 14px 0 0; color: #8b97a8; font-size: 13px; }
     .brew {
-      max-width: 540px;
-      margin: 24px auto 0;
-      padding: 12px 14px;
+      order: 1;
+      width: min(560px, 100%);
+      padding: 14px 16px;
       text-align: left;
       background: rgba(255, 255, 255, 0.04);
       border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 14px;
     }
-    .brew p { margin: 0; color: #9eb0c8; font-size: 13px; }
+    .brew.you { border-color: rgba(150, 190, 255, 0.7); }
+    .brew p { margin: 0; color: #c5ceda; font-size: 14px; }
     .brew .cmdrow { margin-top: 8px; }
     .shot {
       display: block;
@@ -145,22 +156,24 @@
       <p class="kicker" id="ver">桌面版</p>
       <h1>Agentica<br>现在，开箱即用</h1>
       <p class="lede">写代码、查资料、处理手头的事，从桌面应用开始。安装包自带运行环境，打开就能用。</p>
-      <div class="dl">
-        <a class="go" id="go" href="https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-arm64.dmg">下载 macOS 版</a>
-        <button class="more" id="more" type="button" aria-label="选择系统" aria-expanded="false" aria-controls="menu">▾</button>
-        <div class="menu" id="menu" hidden role="menu">
-          <a role="menuitem" id="link-mac-arm" data-key="mac-arm" href="https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-arm64.dmg">macOS（Apple 芯片）<small>macOS 11 或更高版本</small></a>
-          <a role="menuitem" id="link-mac-intel" data-key="mac-intel" href="https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-x64.dmg">macOS（Intel）<small>macOS 11 或更高版本</small></a>
-          <a role="menuitem" id="link-win" data-key="win" href="https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-win32-x64.exe">Windows（64 位）<small>Windows 10 或更高版本</small></a>
-          <a role="menuitem" id="link-appimage" data-key="appimage" href="https://github.com/shibing624/agentica/releases/latest/download/Agentica-x86_64.AppImage">Linux AppImage<small>x64</small></a>
-          <a role="menuitem" id="link-deb" data-key="deb" href="https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-linux-amd64.deb">Linux deb<small>x64</small></a>
+      <div class="hero-actions" id="hero-actions">
+        <div class="brew you" data-os="mac">
+          <p>macOS Homebrew 一键安装（推荐，自动清理隔离属性、免手动 <code>xattr</code>）：</p>
+          <div class="cmdrow">
+            <code class="cmd">brew install --cask shibing624/tap/agentica</code>
+            <button class="copy" type="button" data-copy="brew install --cask shibing624/tap/agentica">复制</button>
+          </div>
         </div>
-      </div>
-      <div class="brew">
-        <p>macOS Homebrew 一键安装（推荐，自动清理隔离属性、免手动 <code>xattr</code>）</p>
-        <div class="cmdrow">
-          <code class="cmd">brew install --cask shibing624/tap/agentica</code>
-          <button class="copy" type="button" data-copy="brew install --cask shibing624/tap/agentica">复制</button>
+        <div class="dl">
+          <a class="go" id="go" href="https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-arm64.dmg">下载 macOS 版</a>
+          <button class="more" id="more" type="button" aria-label="选择系统" aria-expanded="false" aria-controls="menu">▾</button>
+          <div class="menu" id="menu" hidden role="menu">
+            <a role="menuitem" id="link-mac-arm" data-key="mac-arm" href="https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-arm64.dmg">macOS（Apple 芯片）<small>macOS 11 或更高版本</small></a>
+            <a role="menuitem" id="link-mac-intel" data-key="mac-intel" href="https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-x64.dmg">macOS（Intel）<small>macOS 11 或更高版本</small></a>
+            <a role="menuitem" id="link-win" data-key="win" href="https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-win32-x64.exe">Windows（64 位）<small>Windows 10 或更高版本</small></a>
+            <a role="menuitem" id="link-appimage" data-key="appimage" href="https://github.com/shibing624/agentica/releases/latest/download/Agentica-x86_64.AppImage">Linux AppImage<small>x64</small></a>
+            <a role="menuitem" id="link-deb" data-key="deb" href="https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-linux-amd64.deb">Linux deb<small>x64</small></a>
+          </div>
         </div>
       </div>
     </section>
@@ -221,6 +234,7 @@
   var go = document.getElementById("go");
   var more = document.getElementById("more");
   var menu = document.getElementById("menu");
+  var actions = document.getElementById("hero-actions");
   var primary = "mac-arm";
 
   function os() {
@@ -233,15 +247,17 @@
   }
 
   function apply() {
+    var isMac = primary.indexOf("mac") === 0;
+    var name = isMac ? "mac" : (primary === "win" ? "win" : "linux");
     go.href = urls[primary];
     go.textContent = LABELS[primary];
+    actions.classList.toggle("non-mac", !isMac);
     document.querySelectorAll(".menu a").forEach(function (el) {
       var key = el.getAttribute("data-key");
       el.href = urls[key];
       el.classList.toggle("you", key === primary);
     });
     document.querySelectorAll("[data-os]").forEach(function (el) {
-      var name = primary.indexOf("mac") === 0 ? "mac" : (primary === "win" ? "win" : "linux");
       el.classList.toggle("you", el.getAttribute("data-os") === name);
     });
   }
