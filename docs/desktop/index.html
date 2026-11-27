@@ -73,6 +73,17 @@
     .menu a:hover, .menu a.you { background: rgba(255, 255, 255, 0.08); }
     .menu small { display: block; color: #9aa6b8; font-size: 12px; font-weight: 400; }
     .ver { margin: 14px 0 0; color: #8b97a8; font-size: 13px; }
+    .brew {
+      max-width: 540px;
+      margin: 24px auto 0;
+      padding: 12px 14px;
+      text-align: left;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+    }
+    .brew p { margin: 0; color: #9eb0c8; font-size: 13px; }
+    .brew .cmdrow { margin-top: 8px; }
     .shot {
       display: block;
       width: min(920px, calc(100% - 32px));
@@ -145,6 +156,13 @@
           <a role="menuitem" id="link-deb" data-key="deb" href="https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-linux-amd64.deb">Linux deb<small>x64</small></a>
         </div>
       </div>
+      <div class="brew">
+        <p>macOS Homebrew 一键安装（推荐，自动清理隔离属性、免手动 <code>xattr</code>）</p>
+        <div class="cmdrow">
+          <code class="cmd">brew install --cask shibing624/tap/agentica</code>
+          <button class="copy" type="button" data-copy="brew install --cask shibing624/tap/agentica">复制</button>
+        </div>
+      </div>
     </section>
 
     <img class="shot" src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/agentica-web.png" alt="Agentica 桌面应用界面">
@@ -154,7 +172,7 @@
       <p>安装包目前没有签名。系统拦一次，按你的系统做完下面这一步就可以了。</p>
       <article class="card" id="card-mac" data-os="mac">
         <h3>macOS 说「已损坏，无法打开」</h3>
-        <p>把 Agentica.app 拖进「应用程序」，然后在终端执行一次：</p>
+        <p>通过上方 Homebrew 安装会自动清除隔离属性。如果是手动下载 DMG，把 Agentica.app 拖进「应用程序」后在终端执行一次：</p>
         <div class="cmdrow">
           <code class="cmd">sudo xattr -rd com.apple.quarantine /Applications/Agentica.app</code>
           <button class="copy" type="button" data-copy="sudo xattr -rd com.apple.quarantine /Applications/Agentica.app">复制</button>

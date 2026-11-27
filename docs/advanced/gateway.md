@@ -36,7 +36,15 @@ agentica-gateway --port 8890         # 指定监听端口
 
 ## 桌面应用
 
-下载、按系统选择安装包，以及未签名时的一次放行，都在 **[下载桌面版](https://shibing624.github.io/agentica/desktop/)**。那一页打开时读取最新 Release，并按当前系统给出下载按钮。
+macOS 推荐通过 Homebrew 一键安装（自动清除隔离属性，免手动 `xattr`，升级也走同一条命令）：
+
+```bash
+brew install --cask shibing624/tap/agentica
+# 后续升级
+brew upgrade --cask shibing624/tap/agentica
+```
+
+手动安装包下载（macOS / Windows / Linux）与未签名时的一次放行，见 **[下载桌面版](https://shibing624.github.io/agentica/desktop/)**。那一页打开时读取最新 Release，并按当前系统给出下载按钮。
 
 桌面版与 CLI、Web 共用同一个 `~/.agentica`。安装包自带 Python 3.12 和同版本的 `agentica` + `agentica-gateway[feishu]`，不依赖本机 Python、Node、uv，首次打开也不需要联网。
 
@@ -44,7 +52,7 @@ agentica-gateway --port 8890         # 指定监听端口
 
 - **优先级**：`AGENTICA_GATEWAY_BIN` → 安装包内置运行环境 → 本机 `agentica-gateway`（仅 `npm start` 或不带运行环境的构建）。
 - **终端命令**：菜单 `Help › Install 'agentica' Command in Terminal…` 生成调用内置 Python 的 `agentica` 命令（macOS 优先 `/usr/local/bin`，否则 `~/.local/bin`；Windows 写用户 PATH），不会覆盖不是它创建的同名文件。
-- **自动更新**：基于 `electron-updater` 读取 GitHub Release。macOS 只接受已签名应用的更新，未签名构建会跳过检查，升级请重新下载安装包；`AGENTICA_DESKTOP_NO_UPDATE=1` 可全局关闭。
+- **自动更新**：基于 `electron-updater` 读取 GitHub Release。macOS 只接受已签名应用的更新，未签名构建会跳过检查，升级请运行 `brew upgrade --cask shibing624/tap/agentica` 或重新下载安装包；`AGENTICA_DESKTOP_NO_UPDATE=1` 可全局关闭。
 - **签名**：在仓库 secrets 配置 `CSC_LINK`、`CSC_KEY_PASSWORD`、`APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`（macOS 签名 + 公证）和 `WIN_CSC_LINK`、`WIN_CSC_KEY_PASSWORD`（Windows）即可，不配则产出未签名安装包。
 - **源码运行**：`cd desktop && npm install && npm start`（Node 22+），详见 [`desktop/README.md`](https://github.com/shibing624/agentica/blob/main/desktop/README.md)。
 
