@@ -38,7 +38,7 @@ const { startUpdates } = require("./updater");
 const { keepVisiblePosition, readWindowState, writeWindowState } = require("./window-state");
 const { desktopStatePaths, waitForChat } = require("./smoke");
 const {
-  BROWSER_PARTITION, HEALTHY_AFTER_MS, MAX_GATEWAY_RESTARTS, hardenWebview, iconPath, isAppUrl, isBrowsableUrl, restartDelayMs,
+  BROWSER_PARTITION, HEALTHY_AFTER_MS, MAX_GATEWAY_RESTARTS, formatTurnNotification, hardenWebview, iconPath, isAppUrl, isBrowsableUrl, restartDelayMs,
 } = require("./util");
 
 const log = (msg) => console.log(`[desktop] ${msg}`);
@@ -156,6 +156,7 @@ function createWindow() {
     // A reload starts a fresh page: whatever it was running is gone.
     lastTurnRunning = false;
     lastTurnSession = "";
+    lastTurnTitle = "";
     markFullScreen();
     void refreshDockMenu(true);
   });
@@ -352,7 +353,8 @@ async function boot() {
   // Lets the packaging and notification checks drive one banner without a
   // session: `AGENTICA_DESKTOP_NOTIFY_TEST=1` shows it once the window is up.
   if (process.env.AGENTICA_DESKTOP_NOTIFY_TEST === "1") {
-    notifyUser("Agentica", "Notifications are on");
+    const { title, body } = formatTurnNotification({ lang: app.getLocale() || "en", isTest: true });
+    notifyUser(title, body);
   }
 }
 
@@ -396,7 +398,13 @@ function installMenu() {
       submenu: [
         {
           label: "Send Test Notification",
-          click: () => notifyUser("Agentica", /^zh/i.test(lastRendererLang) ? "通知已开启" : "Notifications are on"),
+          click: () => {
+            const { title, body } = formatTurnNotification({
+              lang: lastRendererLang || app.getLocale() || "zh",
+              isTest: true,
+            });
+            notifyUser(title, body);
+          },
         },
         { type: "separator" },
         {
@@ -455,14 +463,20 @@ let lastRendererLang = "";
  *  no preload and no IPC. */
 let lastTurnRunning = false;
 let lastTurnSession = "";
+let lastTurnTitle = "";
+let titleCheckSeq = 0;
 
 /** A system banner, the way every other desktop app announces a finished job.
  *  macOS asks for permission the first time one is shown; before that the app
  *  does not even appear under System Settings → Notifications. */
-function notifyUser(title, body) {
+function notifyUser(title, body, sessionId = "") {
   if (!Notification.isSupported()) return;
   const notification = new Notification({ title, body });
   notification.on("click", () => {
+    if (sessionId) {
+      openFromDock({ action: "session", sessionId });
+      return;
+    }
     const { win: target } = focusOrCreateWindow();
     if (target && !target.isDestroyed()) target.focus();
   });
@@ -471,14 +485,28 @@ function notifyUser(title, body) {
 
 async function onTitleChanged() {
   if (!win || win.isDestroyed() || quitting) return;
+  const seq = ++titleCheckSeq;
   const state = await readRendererSession();
-  if (!state) return;
+  if (!state || seq !== titleCheckSeq || !win || win.isDestroyed() || quitting) return;
   const finished = lastTurnRunning && !state.running && state.id === lastTurnSession;
+  const prevTitle = state.id === lastTurnSession ? lastTurnTitle : "";
   lastTurnRunning = state.running === true;
   lastTurnSession = state.id;
+  lastTurnTitle = state.title || prevTitle || "";
   if (!finished || win.isFocused()) return;
-  const zh = /^zh/i.test(state.lang || lastRendererLang || "");
-  notifyUser(state.title || "Agentica", zh ? "任务已完成" : "Task finished");
+  let sessionTitle = state.title || prevTitle || "";
+  if (!sessionTitle || sessionTitle === "Chat" || sessionTitle === "New Chat") {
+    const findName = (rows) => {
+      const hit = Array.isArray(rows) ? rows.find((r) => r && r.session_id === state.id) : null;
+      return hit && hit.name ? String(hit.name) : "";
+    };
+    sessionTitle = findName(cachedRecentSessions) || findName(await fetchRecentSessions(true)) || sessionTitle;
+  }
+  const { title, body } = formatTurnNotification({
+    sessionTitle,
+    lang: state.lang || lastRendererLang || app.getLocale() || "zh",
+  });
+  notifyUser(title, body, state.id);
 }
 
 function focusOrCreateWindow(targetUrl = null) {

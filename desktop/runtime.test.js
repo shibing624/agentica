@@ -333,3 +333,28 @@ test("a browser-tab webview is stripped to a plain sandboxed web page, and only 
   }
   assert.equal(isBrowsableUrl("http://localhost:3000/a?b=1"), true);
 });
+
+test("turn-finished notification puts status in title and clips the session title in body", () => {
+  const { formatTurnNotification } = require("./util");
+  assert.deepEqual(
+    formatTurnNotification({ sessionTitle: "  修复\n桌面通知标题  ", lang: "zh-CN" }),
+    { title: "任务已完成", body: "修复 桌面通知标题" },
+  );
+  assert.deepEqual(
+    formatTurnNotification({ sessionTitle: "Fix page find", lang: "en-US" }),
+    { title: "Task finished", body: "Fix page find" },
+  );
+  assert.deepEqual(
+    formatTurnNotification({ sessionTitle: "New Chat", lang: "zh" }),
+    { title: "任务已完成", body: "新对话" },
+  );
+  assert.deepEqual(
+    formatTurnNotification({ lang: "zh", isTest: true }),
+    { title: "任务已完成", body: "桌面通知测试 · Agentica" },
+  );
+  const longTitle = "😀".repeat(90);
+  const clipped = formatTurnNotification({ sessionTitle: longTitle, lang: "en" });
+  assert.equal(clipped.title, "Task finished");
+  assert.equal(Array.from(clipped.body).length, 80);
+  assert.ok(clipped.body.endsWith("…"));
+});

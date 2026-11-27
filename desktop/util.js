@@ -85,6 +85,24 @@ function isBrowsableUrl(url) {
 }
 
 /**
+ * Format a turn-finished desktop banner like Codex / Cursor:
+ * line 1 (`title`) is the completion status, line 2 (`body`) is the session title.
+ */
+function formatTurnNotification({ sessionTitle = "", lang = "zh", isTest = false } = {}) {
+  const zh = /^zh/i.test(String(lang || ""));
+  const title = zh ? "任务已完成" : "Task finished";
+  const raw = String(sessionTitle || "").replace(/\s+/g, " ").trim();
+  const generic = raw === "" || raw === "Chat" || raw === "New Chat";
+  const fallback = isTest
+    ? (zh ? "桌面通知测试 · Agentica" : "Desktop notification test · Agentica")
+    : (zh ? "新对话" : "New Chat");
+  const chosen = generic ? fallback : raw;
+  const chars = Array.from(chosen);
+  const body = chars.length <= 80 ? chosen : chars.slice(0, 79).join("") + "…";
+  return { title, body };
+}
+
+/**
  * Decide whether a `<webview>` the page asked for may attach, and strip it of
  * everything that is not a plain web page: no preload, no Node, sandboxed.
  * Returns false to refuse the attach. The storage partition is the page's own
@@ -107,6 +125,7 @@ function hardenWebview(webPreferences, params) {
 
 module.exports = {
   BROWSER_PARTITION,
+  formatTurnNotification,
   hardenWebview,
   isBrowsableUrl,
   MAX_GATEWAY_RESTARTS,
