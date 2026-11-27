@@ -238,15 +238,22 @@ class TestEveryReaderAgrees:
             assert page["older_turns"] == 1
 
     def test_legacy_serialized_anthropic_tool_result_user_row_is_ignored_and_unpacked_on_load(self):
+        import asyncio
         import json
 
+        from agentica.model.anthropic.claude import Claude
+        from agentica.model.message import Message
         from agentica.session.rows import mark_window_replays
 
         with tempfile.TemporaryDirectory() as tmp:
             log = SessionLog("legacy-bad", base_dir=tmp)
             log.append("user", "查下数据")
             calls = [{"id": "toolu_bad_1", "type": "function", "function": {"name": "fetch_url", "arguments": "{}"}}]
-            log.append("assistant", "", tool_calls=calls)
+            log.append(
+                "assistant", "",
+                tool_calls=calls,
+                provider_data={"anthropic_model": "claude-sonnet-4-5"},
+            )
             log.append("tool", "ok-result", tool_call_id="toolu_bad_1", tool_name="fetch_url")
             log.append_compact_boundary("", trigger="auto")
             log.append("user", f"{_window(1)}\n\n{CONT}\n\n查下数据", window_replay=True)
@@ -264,10 +271,9 @@ class TestEveryReaderAgrees:
 
             raw = list(log.iter_raw_entries())
             marked = mark_window_replays(raw)
+            assert marked[-2]["type"] == "tool"
+            assert marked[-2]["tool_call_id"] == "toolu_bad_1"
             assert marked[-2]["window_replay"] is True
-            view = classify_user(marked[-2])
-            assert view.tool_result is True
-            assert not view.starts_turn and not view.opens_round
             assert log.trajectory_stats()["turns"] == 1
             assert [m["content"] for m in log.list_user_messages()] == ["查下数据"]
             assert log.search_entries("toolu_bad_1") == []
@@ -280,8 +286,114 @@ class TestEveryReaderAgrees:
             replayed = log.load()
             assert [m["role"] for m in replayed] == ["user", "assistant", "tool", "assistant"]
             assert replayed[1]["content"] == ""
+            assert replayed[1]["provider_data"]["anthropic_model"] == "claude-sonnet-4-5"
             assert len(replayed[1]["provider_data"]["anthropic_blocks"]) == 2
             assert replayed[2]["tool_call_id"] == "toolu_bad_1"
             assert replayed[2]["tool_name"] == "fetch_url"
             assert replayed[2]["tool_call_error"] is True
             assert replayed[2]["content"] == "ok-result"
+
+            # Origin check prevents replaying one model's thinking signature to another model.
+            same_fmt, _ = asyncio.run(
+                Claude(id="claude-sonnet-4-5", api_key="k").format_messages([Message(**m) for m in replayed])
+            )
+            diff_fmt, _ = asyncio.run(
+                Claude(id="claude-opus-4-5", api_key="k").format_messages([Message(**m) for m in replayed])
+            )
+            assert [b["type"] for b in same_fmt[1]["content"]] == ["thinking", "tool_use"]
+            assert [b["type"] for b in diff_fmt[1]["content"]] == ["tool_use"]
+
+    def test_legacy_unknown_origin_assistant_drops_thinking_signature(self):
+        import json
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log = SessionLog("legacy-unknown-model", base_dir=tmp)
+            log.append("user", "q")
+            calls = [{"id": "toolu_u1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}]
+            log.append("assistant", "", tool_calls=calls)
+            log.append("tool", "ok", tool_call_id="toolu_u1", tool_name="read_file")
+            log.append_compact_boundary("", trigger="auto")
+            log.append("user", f"{_window(1)}\n\n{CONT}\n\nq", window_replay=True)
+            legacy_asst = json.dumps([
+                {"type": "thinking", "thinking": "t", "signature": "sig_unknown"},
+                {"type": "text", "text": "checking"},
+                {"type": "tool_use", "id": "toolu_u1", "name": "read_file", "input": {}},
+            ])
+            log.append("assistant", legacy_asst, tool_calls=calls, window_replay=True)
+            log.append("user", json.dumps([
+                {"type": "tool_result", "tool_use_id": "toolu_u1", "content": "ok"},
+            ]))
+
+            replayed = log.load()
+            assert replayed[1]["content"] == "checking"
+            assert "provider_data" not in replayed[1]
+            assert replayed[1]["tool_calls"][0]["id"] == "toolu_u1"
+
+    def test_real_user_message_with_tool_result_json_is_kept(self):
+        import json
+
+        pasted_json = json.dumps([
+            {"type": "tool_result", "tool_use_id": "toolu_pasted_1", "content": "example"}
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            # Case 1: no compact_boundary at all.
+            plain = SessionLog("plain-json-user", base_dir=tmp)
+            plain.append("user", pasted_json)
+            plain.append("assistant", "got it")
+            assert [m["content"] for m in plain.list_user_messages()] == [pasted_json]
+            assert plain.trajectory_stats()["turns"] == 1
+            assert [m["role"] for m in plain.load()] == ["user", "assistant"]
+            page_plain = chat_turn_page(plain.iter_raw_entries(), turns=10)["events"]
+            assert [e["row"]["text"] for e in page_plain if e["type"] == "user"] == [pasted_json]
+
+            # Case 2: after compact_boundary, user pastes it in a new turn (no pending tool_calls).
+            compacted = SessionLog("compacted-json-user", base_dir=tmp)
+            compacted.append("user", "first")
+            compacted.append("assistant", "ans1")
+            compacted.append_compact_boundary("", trigger="auto")
+            compacted.append("user", f"{_window(1)}\n\n{CONT}")
+            compacted.append("user", pasted_json)
+            compacted.append("assistant", "ans2")
+            replayed_compacted = compacted.load()
+            assert [m["role"] for m in replayed_compacted] == ["user", "assistant"]
+            assert replayed_compacted[0]["content"] == pasted_json
+            assert [m["content"] for m in compacted.list_user_messages()] == [pasted_json, "first"]
+            page_compacted = chat_turn_page(compacted.iter_raw_entries(), turns=10)["events"]
+            assert [e["row"]["text"] for e in page_compacted if e["type"] == "user" and e["row"]["text"]] == [
+                "first", pasted_json,
+            ]
+
+    def test_legacy_unique_tool_result_after_double_compact_stays_visible_in_chat(self):
+        import json
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log = SessionLog("double-compact-legacy", base_dir=tmp)
+            log.append("user", "查下")
+            call1 = [{"id": "toolu_c1", "type": "function", "function": {"name": "fetch_url", "arguments": "{}"}}]
+            log.append("assistant", "", tool_calls=call1)
+            # Boundary 1 happened before toolu_c1 was flushed as a "tool" row;
+            # old append_post_compact_messages left the only copy as a legacy user row.
+            log.append_compact_boundary("", trigger="auto")
+            log.append("user", f"{_window(1)}\n\n{CONT}\n\n查下", window_replay=True)
+            log.append("assistant", "", tool_calls=call1, window_replay=True)
+            log.append("user", json.dumps([
+                {"type": "tool_result", "tool_use_id": "toolu_c1", "content": "only-copy"},
+            ]))
+            # Boundary 2 in the same turn replays both again.
+            log.append_compact_boundary("", trigger="auto")
+            log.append("user", f"{_window(2)}\n\n{CONT}\n\n查下", window_replay=True)
+            log.append("assistant", "", tool_calls=call1, window_replay=True)
+            log.append("user", json.dumps([
+                {"type": "tool_result", "tool_use_id": "toolu_c1", "content": "only-copy"},
+            ]))
+            log.append("assistant", "done")
+
+            page = chat_turn_page(log.iter_raw_entries(), turns=10)["events"]
+            tool_events = [e for e in page if e["type"] == "tool"]
+            assert len(tool_events) == 1
+            assert tool_events[0]["tool_call_id"] == "toolu_c1"
+            assert tool_events[0]["row"]["text"] == "only-copy"
+            assert [e["row"]["text"] for e in page if e["type"] == "user" and e["row"]["text"]] == ["查下"]
+            replayed = log.load()
+            assert [m["role"] for m in replayed] == ["user", "assistant", "tool", "assistant"]
+            assert replayed[2]["content"] == "only-copy"

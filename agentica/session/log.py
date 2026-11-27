@@ -1185,10 +1185,8 @@ class SessionLog:
                 continue
             if is_window_replay(entry) and entry.get("type") != "user":
                 continue
-            if entry.get("type") == "user":
-                view = classify_user(entry)
-                if view.is_pure_window or view.tool_result:
-                    continue
+            if entry.get("type") == "user" and classify_user(entry).is_pure_window:
+                continue
             rows.append(entry)
         return rows
 
@@ -1458,13 +1456,18 @@ class SessionLog:
         if entries:
             self._last_uuid = entries[-1].get("uuid")
 
-        return self._build_messages(entries, -1, last_boundary_summary)
+        return self._build_messages(
+            entries, -1, last_boundary_summary,
+            has_boundary=last_boundary_offset >= 0,
+        )
 
     def _build_messages(
         self,
         entries: List[Dict],
         last_boundary_idx: int,
         last_boundary_summary: Optional[str],
+        *,
+        has_boundary: Optional[bool] = None,
     ) -> List[Dict[str, Any]]:
         """Build message list from parsed entries."""
         messages: List[Dict[str, Any]] = []
@@ -1498,14 +1501,44 @@ class SessionLog:
             "automated",
         )
         start_from = last_boundary_idx + 1 if last_boundary_idx >= 0 else 0
+        in_post_compact = (last_boundary_idx >= 0) if has_boundary is None else has_boundary
+        saw_post_user = False
+        pending_calls: set[str] = set()
         tool_name_by_id: Dict[str, str] = {}
+        pre_boundary_model_by_round: Dict[tuple, str] = {}
+        if last_boundary_idx > 0:
+            for pre in entries[:last_boundary_idx]:
+                if pre.get("type") != "assistant" or not pre.get("tool_calls"):
+                    continue
+                round_ids = tuple(
+                    str(tc.get("id") or "")
+                    for tc in pre.get("tool_calls") or []
+                    if isinstance(tc, dict)
+                )
+                if not round_ids or not all(round_ids):
+                    continue
+                pre_pdata = pre.get("provider_data")
+                origin = (
+                    pre_pdata.get("anthropic_model")
+                    if isinstance(pre_pdata, dict)
+                    and isinstance(pre_pdata.get("anthropic_model"), str)
+                    and pre_pdata.get("anthropic_model")
+                    else pre.get("model")
+                )
+                if isinstance(origin, str) and origin:
+                    pre_boundary_model_by_round[round_ids] = origin
         for entry in entries[start_from:]:
             entry_type = entry.get("type", "")
             if entry_type == "user":
-                legacy_blocks = legacy_tool_result_blocks(entry)
-                if legacy_blocks:
+                legacy_blocks = (
+                    legacy_tool_result_blocks(entry)
+                    if in_post_compact and pending_calls
+                    else []
+                )
+                if legacy_blocks and all(str(b["tool_use_id"]) in pending_calls for b in legacy_blocks):
                     for block in legacy_blocks:
                         tc_id = str(block["tool_use_id"])
+                        pending_calls.discard(tc_id)
                         tool_msg: Dict[str, Any] = {
                             "role": "tool",
                             "content": _text_from_content_blocks(block.get("content")),
@@ -1516,6 +1549,12 @@ class SessionLog:
                             tool_msg["tool_name"] = tool_name_by_id[tc_id]
                         messages.append(tool_msg)
                     continue
+                pending_calls.clear()
+                if in_post_compact:
+                    if saw_post_user and classify_user(entry).starts_turn:
+                        in_post_compact = False
+                    elif not (entry.get("steer") is True or entry.get("automated") is True):
+                        saw_post_user = True
             if entry_type == "user" and entry.get("steer") is True:
                 raw_text = str(entry.get("content", "") or "").strip()
                 if not raw_text:
@@ -1549,20 +1588,44 @@ class SessionLog:
                         msg[key] = entry[key]
                 if entry_type == "tool":
                     msg["tool_call_error"] = tool_error_of(entry)
+                    if entry.get("tool_call_id"):
+                        pending_calls.discard(str(entry["tool_call_id"]))
                 elif entry_type == "assistant":
-                    for tc in entry.get("tool_calls") or []:
+                    tcs = entry.get("tool_calls") or []
+                    if not tcs:
+                        pending_calls.clear()
+                    for tc in tcs:
                         if isinstance(tc, dict) and tc.get("id"):
+                            tc_id = str(tc["id"])
+                            pending_calls.add(tc_id)
                             fn = tc.get("function")
                             name = fn.get("name") if isinstance(fn, dict) else None
                             if name:
-                                tool_name_by_id[str(tc["id"])] = str(name)
-                    if entry.get("tool_calls"):
+                                tool_name_by_id[tc_id] = str(name)
+                    if tcs:
                         legacy_assistant = _legacy_anthropic_assistant_blocks(msg.get("content"))
                         if legacy_assistant:
                             msg["content"] = _text_from_content_blocks(legacy_assistant)
                             pdata = dict(msg.get("provider_data")) if isinstance(msg.get("provider_data"), dict) else {}
-                            pdata.setdefault("anthropic_blocks", legacy_assistant)
-                            msg["provider_data"] = pdata
+                            round_ids = tuple(
+                                str(tc.get("id") or "")
+                                for tc in tcs
+                                if isinstance(tc, dict)
+                            )
+                            origin_model = (
+                                pdata.get("anthropic_model")
+                                if isinstance(pdata.get("anthropic_model"), str)
+                                and pdata.get("anthropic_model")
+                                else (
+                                    entry.get("model")
+                                    if isinstance(entry.get("model"), str) and entry.get("model")
+                                    else pre_boundary_model_by_round.get(round_ids)
+                                )
+                            )
+                            if origin_model:
+                                pdata["anthropic_model"] = origin_model
+                                pdata.setdefault("anthropic_blocks", legacy_assistant)
+                                msg["provider_data"] = pdata
                 messages.append(msg)
             elif entry_type == "provider_checkpoint" and messages:
                 checkpoint = entry.get("checkpoint")
@@ -1779,9 +1842,10 @@ class SessionLog:
             "cache_cliffs": 0,
         }
         tools_by_name: Dict[str, int] = {}
-        for entry in self._iter_entries():
+        raw_entries = list(self._iter_entries())
+        stats["entries"] = len(raw_entries)
+        for entry in mark_window_replays(raw_entries):
             entry_type = entry.get("type", "")
-            stats["entries"] += 1
             if entry_type == "event" and entry.get("name") == "token_usage":
                 req = entry.get("request")
                 if isinstance(req, dict) and req.get("cache_cliff") is True:

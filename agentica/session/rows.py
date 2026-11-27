@@ -86,7 +86,6 @@ class RowView:
     steer: bool
     text: str
     window: Optional[WindowPreamble] = None
-    tool_result: bool = False
 
     @property
     def is_pure_window(self) -> bool:
@@ -96,12 +95,12 @@ class RowView:
     @property
     def starts_turn(self) -> bool:
         """Did a person begin a turn here? Not a steer, not a report, not chrome."""
-        return not self.automated and not self.steer and not self.is_pure_window and not self.tool_result
+        return not self.automated and not self.steer and not self.is_pure_window
 
     @property
     def opens_round(self) -> bool:
         """Does a model round follow this row? A report opens one; a steer joins the running one."""
-        return not self.steer and not self.is_pure_window and not self.tool_result
+        return not self.steer and not self.is_pure_window
 
 
 def _peel_layer(text: str) -> str:
@@ -296,6 +295,95 @@ def legacy_tool_result_blocks(entry: Mapping[str, Any]) -> List[Dict[str, Any]]:
     return parsed
 
 
+def _extract_block_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts: List[str] = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text":
+            txt = block.get("text")
+            if isinstance(txt, str) and txt.strip():
+                parts.append(txt)
+    return "\n".join(parts)
+
+
+def _unpack_legacy_post_compact_tool_results(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convert historical ``user`` rows holding serialized ``tool_result`` blocks.
+
+    Older ``append_post_compact_messages`` wrote Anthropic tool answers via
+    ``json.dumps`` onto ``type="user"`` rows right after a ``compact_boundary``.
+    A genuine user message can also contain literal JSON, so conversion is
+    restricted strictly to rows inside a post-``compact_boundary`` segment whose
+    ``tool_use_id``s match pending unanswered ``assistant.tool_calls``.
+    """
+    expanded: List[Dict[str, Any]] = []
+    in_post_compact = False
+    saw_post_user = False
+    pending_calls: Dict[str, str] = {}
+    for row in entries:
+        kind = row.get("type")
+        if kind == "compact_boundary":
+            in_post_compact = True
+            saw_post_user = False
+            pending_calls.clear()
+            expanded.append(row)
+            continue
+        if in_post_compact and kind == "assistant":
+            tcs = row.get("tool_calls") or []
+            if tcs:
+                for tc in tcs:
+                    if isinstance(tc, dict) and tc.get("id"):
+                        fn = tc.get("function")
+                        name = fn.get("name") if isinstance(fn, dict) else None
+                        pending_calls[str(tc["id"])] = str(name) if name else ""
+            else:
+                pending_calls.clear()
+            expanded.append(row)
+            continue
+        if kind in ("tool", "tool_audit"):
+            tc_id = str(row.get("tool_call_id") or "")
+            if tc_id:
+                pending_calls.pop(tc_id, None)
+            expanded.append(row)
+            continue
+        if kind == "user":
+            legacy_blocks = (
+                legacy_tool_result_blocks(row)
+                if in_post_compact and pending_calls
+                else []
+            )
+            if legacy_blocks and all(str(b["tool_use_id"]) in pending_calls for b in legacy_blocks):
+                for block in legacy_blocks:
+                    tc_id = str(block["tool_use_id"])
+                    tool_name = pending_calls.pop(tc_id, "")
+                    tool_row: Dict[str, Any] = {
+                        "type": "tool",
+                        "uuid": row.get("uuid"),
+                        "parent_uuid": row.get("parent_uuid"),
+                        "session_id": row.get("session_id"),
+                        "timestamp": row.get("timestamp"),
+                        "tool_call_id": tc_id,
+                        "content": _extract_block_text(block.get("content")),
+                        "is_error": bool(block.get("is_error", False)),
+                    }
+                    if tool_name:
+                        tool_row["tool_name"] = tool_name
+                    if is_window_replay(row):
+                        tool_row["window_replay"] = True
+                    expanded.append(tool_row)
+                continue
+            pending_calls.clear()
+            if in_post_compact:
+                if saw_post_user and classify_user(row).starts_turn:
+                    in_post_compact = False
+                elif not (row.get("steer") is True or row.get("automated") is True):
+                    saw_post_user = True
+        expanded.append(row)
+    return expanded
+
+
 def mark_window_replays(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """``entries`` with the replayed tail of each new window marked.
 
@@ -306,48 +394,55 @@ def mark_window_replays(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     question, or a runtime message the cut mistook for one). Rows are copied
     only when they are marked; the log is never rewritten.
     """
-    out = list(entries)
+    expanded = _unpack_legacy_post_compact_tool_results(entries)
+    out = list(expanded)
     window_start = 0
-    for pos, entry in enumerate(entries):
-        if entry.get("type") != "compact_boundary":
+    seen_results: set[str] = set()
+    for pos, entry in enumerate(expanded):
+        kind_pos = entry.get("type")
+        if kind_pos == "user" and not is_window_replay(out[pos]) and classify_user(entry).starts_turn:
+            seen_results.clear()
+        elif kind_pos in ("tool", "tool_audit"):
+            tc_id = str(entry.get("tool_call_id") or "")
+            if tc_id:
+                seen_results.add(tc_id)
+        if kind_pos != "compact_boundary":
             continue
-        seen = {i for e in entries[window_start:pos] for i in _call_ids(e) if i}
+        seen_calls = {i for e in expanded[window_start:pos] for i in _call_ids(e) if i}
         window_start = pos + 1
         tail_user: Optional[int] = None
         replayed = False
-        for k in range(pos + 1, len(entries)):
-            row = entries[k]
+        for k in range(pos + 1, len(expanded)):
+            row = expanded[k]
             kind = row.get("type")
             if kind == "compact_boundary":
                 break
             if kind == "user":
-                legacy_blocks = legacy_tool_result_blocks(row)
-                if legacy_blocks:
-                    ids = [str(block["tool_use_id"]) for block in legacy_blocks]
-                    if all(i in seen for i in ids):
-                        out[k] = {**row, "window_replay": True}
-                        replayed = True
-                        continue
-                    break
                 if tail_user is not None:
                     break
                 tail_user = k
                 continue
-            ids = _call_ids(row)
-            if ids and all(i and i in seen for i in ids):
-                out[k] = {**row, "window_replay": True}
-                replayed = True
-            elif kind in ("assistant", "tool", "tool_audit"):
-                break
-        if replayed and tail_user is not None and not is_window_replay(entries[tail_user]):
-            out[tail_user] = {**entries[tail_user], "window_replay": True}
+            if kind == "assistant":
+                ids = _call_ids(row)
+                if ids and all(i and i in seen_calls for i in ids):
+                    out[k] = {**row, "window_replay": True}
+                    replayed = True
+                else:
+                    break
+            elif kind in ("tool", "tool_audit"):
+                tc_id = str(row.get("tool_call_id") or "")
+                if tc_id and tc_id in seen_results:
+                    out[k] = {**row, "window_replay": True}
+                    replayed = True
+                else:
+                    break
+        if replayed and tail_user is not None and not is_window_replay(expanded[tail_user]):
+            out[tail_user] = {**expanded[tail_user], "window_replay": True}
     return out
 
 
 def classify_user(entry: Mapping[str, Any]) -> RowView:
     """Read a ``type == "user"`` row. The order is fixed here, once."""
-    if legacy_tool_result_blocks(entry):
-        return RowView(False, False, "", tool_result=True)
     content = entry.get("content")
     content = content if isinstance(content, str) else ("" if content is None else str(content))
     if is_window_replay(entry):
