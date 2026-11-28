@@ -9,12 +9,36 @@
  * `app.name` alone on purpose: that drives `userData`, and renaming it would
  * move the dev profile onto the managed-runtime root
  * (`~/Library/Application Support/Agentica`).
+ *
+ * Editing Info.plist invalidates Electron.app's ad-hoc/linker signature, which
+ * makes macOS `usernotificationsd` reject local notifications. Re-signing the
+ * bundle with `--deep --sign -` binds Info.plist so notifications work in
+ * `npm start` too.
  */
 const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
 const NAME = "Agentica";
+const ENTITLEMENTS = path.resolve(__dirname, "..", "build", "entitlements.mac.plist");
+
+function isBundleSigned(bundle) {
+  try {
+    execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function signBundle(bundle, entitlements = ENTITLEMENTS) {
+  const args = ["--force", "--deep", "--sign", "-"];
+  if (entitlements && fs.existsSync(entitlements)) {
+    args.push("--entitlements", entitlements);
+  }
+  args.push(bundle);
+  execFileSync("/usr/bin/codesign", args, { stdio: "ignore" });
+}
 
 function main() {
   if (process.platform !== "darwin") return;
@@ -29,13 +53,21 @@ function main() {
       return "";
     }
   };
-  if (read("CFBundleName") === NAME && read("CFBundleDisplayName") === NAME) return;
-  for (const key of ["CFBundleName", "CFBundleDisplayName"]) {
-    execFileSync("/usr/bin/plutil", ["-replace", key, "-string", NAME, plist]);
+  const renamed = read("CFBundleName") === NAME && read("CFBundleDisplayName") === NAME;
+  if (renamed && isBundleSigned(bundle)) return;
+  if (!renamed) {
+    for (const key of ["CFBundleName", "CFBundleDisplayName"]) {
+      execFileSync("/usr/bin/plutil", ["-replace", key, "-string", NAME, plist]);
+    }
   }
+  signBundle(bundle);
   const lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
   if (fs.existsSync(lsregister)) execFileSync(lsregister, ["-f", bundle]);
-  console.log(`dev bundle renamed to ${NAME}: ${bundle}`);
+  console.log(`dev bundle prepared (${NAME}, signed): ${bundle}`);
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = { NAME, isBundleSigned, signBundle, main };

@@ -455,3 +455,25 @@ test("cli-shim inspectCommand and uninstallCommand manage only Agentica Desktop 
   assert.throws(() => uninstallCommand("darwin", foreign), /Agentica Desktop/);
   assert.equal(fs.existsSync(foreign), true);
 });
+
+test("dev-bundle-name module loads without mutating on import and runs prestart cleanly", () => {
+  const devBundle = require("./scripts/dev-bundle-name");
+  assert.equal(devBundle.NAME, "Agentica");
+  assert.equal(typeof devBundle.isBundleSigned, "function");
+  assert.equal(typeof devBundle.signBundle, "function");
+  if (process.platform === "darwin") {
+    let electronExe = null;
+    try {
+      electronExe = require("electron");
+    } catch {
+      electronExe = null;
+    }
+    if (electronExe) {
+      const bundle = path.resolve(path.dirname(electronExe), "..", "..");
+      if (fs.existsSync(bundle)) {
+        devBundle.main();
+        assert.equal(devBundle.isBundleSigned(bundle), true);
+      }
+    }
+  }
+});
