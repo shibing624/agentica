@@ -372,14 +372,14 @@ async def _start_chat_run(body: ChatRequest, request: Request, svc: AgentService
     )
 
 
-def start_background_report_run(svc: AgentService, session_id: str, owner: str, report: str) -> None:
+def start_background_report_run(svc: AgentService, session_id: str, owner: str, report: str) -> live_turn.LiveTurn:
     """Run a finished background command's report as an automated turn.
 
     Same live run as a typed message, so an open page attaches to it through
     the activity pulse; the report itself is logged as automated and shows as
     a notice, not as something the user said.
     """
-    _spawn_live(
+    return _spawn_live(
         session_id, _chat_turn(svc, session_id, owner, report, None, automated=True),
         owner=owner, kind="chat", automated_message=report,
     )
@@ -432,6 +432,7 @@ def _chat_turn(
             media=media,
             automated=automated,
             input_meta=input_meta,
+            on_user_logged=turn.user_logged.set,
         )
         if result_box is not None:
             result_box["result"] = result

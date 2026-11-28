@@ -7,7 +7,9 @@ like the CLI's and each report runs as an automated turn once the session is
 idle — in the IM chat bound to it, else as a live web run.
 """
 import asyncio
+import json
 import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -78,6 +80,49 @@ def test_a_command_the_user_stopped_is_not_reported(tmp_path):
 
     _run(scenario())
     assert got == []
+
+
+def test_a_job_that_outlived_its_gateway_is_still_reported(tmp_path):
+    """The gateway that started the job died before the job ended: nobody was
+    left to record an exit code, but the record on disk says the job ended. The
+    user is told so, with the output tail, instead of the record being marked
+    delivered with nothing sent."""
+    got = []
+    records_dir = tmp_path / "records"
+
+    async def scenario():
+        nonlocal records_dir
+        done = asyncio.Event()
+
+        async def handler(session_id, owner, report):
+            got.append(report)
+            done.set()
+
+        svc = _svc(tmp_path, handler)
+        await svc._ensure_initialized()
+        records_dir = svc._session_bg_records_dir("s1", None)
+        records_dir.mkdir(parents=True)
+        output = tmp_path / "job.log"
+        output.write_text("$ train.sh\n\nverify epoch 3 done\n", encoding="utf-8")
+        (records_dir / "term_1.json").write_text(json.dumps({
+            "id": "term_1", "num": 1, "pid": 999_999, "owner_pid": 4242, "session_id": "s1",
+            "ticket_id": "", "delivered_at": None, "delivery_owner": None, "delivery_attempts": 0,
+            "kind": "command", "label": "", "command": "train.sh", "cwd": str(tmp_path),
+            "log_path": str(output), "started_at": time.time() - 60, "finished_at": time.time() - 30,
+            "returncode": None, "stop_requested": False,
+        }), encoding="utf-8")
+        # A new gateway process binds the session: nothing is in memory, the
+        # record is all that is left.
+        svc._background_registry("s1", None)
+        await asyncio.wait_for(done.wait(), timeout=20)
+        svc.stop_all_background_jobs()
+
+    _run(scenario())
+    assert len(got) == 1, got
+    report, = got
+    assert "ended while nobody was watching" in report
+    assert "epoch 3 done" in report
+    assert json.loads((records_dir / "term_1.json").read_text(encoding="utf-8"))["delivered_at"]
 
 
 def test_the_report_waits_until_the_session_is_idle(tmp_path):
@@ -339,12 +384,29 @@ def test_a_report_queued_behind_user_lines_runs_as_its_own_turn(tmp_path):
 
 # ------------------------------------------------------------ main wiring
 
-def test_main_runs_the_report_on_the_web_when_no_im_chat_takes_it(monkeypatch):
+def test_main_runs_the_report_on_the_web_when_no_im_chat_takes_it(tmp_path, monkeypatch):
     from agentica_gateway import deps, main
     from agentica_gateway.routes import chat
 
+    svc = AgentService(workspace_path=str(tmp_path / "ws"))
     started = []
-    monkeypatch.setattr(chat, "start_background_report_run", lambda svc, sid, owner, rep: started.append((sid, owner, rep)))
+
+    def start(svc, sid, owner, rep):
+        turn = live_turn.LiveTurn(sid, owner)
+        turn.automated_message = rep
+        started.append((sid, owner, rep))
+
+        async def run():
+            await asyncio.sleep(0.05)
+            svc.session_log_for(sid, owner=owner).append("user", rep, automated=True)
+            turn.user_logged.set()
+            await asyncio.sleep(0.05)
+            turn.finish("completed")
+
+        turn.task = asyncio.create_task(run())
+        return turn
+
+    monkeypatch.setattr(chat, "start_background_report_run", start)
 
     class Bot:
         def __init__(self, takes):
@@ -354,13 +416,157 @@ def test_main_runs_the_report_on_the_web_when_no_im_chat_takes_it(monkeypatch):
             self.asked.append((owner, sid))
             return self.takes
 
-    svc = SimpleNamespace()
     deliver = main._background_report_handler(svc)
     for takes in (True, False):
         monkeypatch.setattr(deps, "im_bot", Bot(takes))
         _run(deliver("s1", "alice", "r"))
         assert deps.im_bot.asked == [("alice", "s1")]
     assert started == [("s1", "alice", "r")]
+    entries = [json.loads(line) for line in svc.session_log_for("s1", owner="alice").path.read_text(encoding="utf-8").splitlines()]
+    assert [(e["type"], e["automated"], e["content"]) for e in entries] == [("user", True, "r")]
+
+
+def test_the_web_report_is_waited_for_in_the_log_and_not_forever(tmp_path, monkeypatch):
+    """The record is marked delivered when the handler returns. It must not
+    return before the user entry is logged, it does not wait for the model's
+    reply, it fails immediately if the run dies early, and on timeout it cancels
+    the stalled turn so it cannot double-deliver later."""
+    from agentica_gateway import deps, main
+    from agentica_gateway.routes import chat
+
+    class Bot:
+        async def deliver_background_report(self, owner, sid, rep):
+            return False
+
+    monkeypatch.setattr(deps, "im_bot", Bot())
+
+    async def scenario():
+        svc = AgentService(workspace_path=str(tmp_path / "ws"))
+        await svc._ensure_initialized()
+        deliver = main._background_report_handler(svc)
+
+        # 1. Unblocks once user_logged fires, even while the model turn keeps running.
+        reply_gate = asyncio.Event()
+
+        def start_slow_reply(svc_arg, sid, owner, rep):
+            turn = live_turn.start(sid, owner)
+            turn.automated_message = rep
+
+            async def run():
+                try:
+                    await reply_gate.wait()
+                    turn.finish("completed")
+                except asyncio.CancelledError:
+                    turn.finish("cancelled")
+
+            turn.task = asyncio.create_task(run())
+            return turn
+
+        slow_turn = []
+        monkeypatch.setattr(chat, "start_background_report_run", lambda *a: (t := start_slow_reply(*a), slow_turn.append(t), t)[0])
+        pending = asyncio.ensure_future(deliver("s1", "alice", "the report"))
+        await asyncio.sleep(0.05)
+        assert not pending.done()
+        slow_turn[0].user_logged.set()
+        await asyncio.wait_for(pending, timeout=5)
+        assert not slow_turn[0].task.done()
+        reply_gate.set()
+        await slow_turn[0].task
+
+        # 2. Fails immediately if the turn exits before persisting (no 45s hang).
+        def start_early_fail(svc_arg, sid, owner, rep):
+            turn = live_turn.start(sid, owner)
+            turn.automated_message = rep
+
+            async def run():
+                turn.finish("failed")
+
+            turn.task = asyncio.create_task(run())
+            return turn
+
+        monkeypatch.setattr(chat, "start_background_report_run", start_early_fail)
+        with pytest.raises(RuntimeError):
+            await asyncio.wait_for(deliver("s2", "alice", "early fail"), timeout=1.0)
+
+        # 3. On timeout, cancels the stalled turn so it cannot log a duplicate later.
+        stalled_turns = []
+
+        def start_stalled(svc_arg, sid, owner, rep):
+            turn = live_turn.start(sid, owner)
+            turn.automated_message = rep
+
+            async def run():
+                try:
+                    await asyncio.sleep(60)
+                except asyncio.CancelledError:
+                    turn.finish("cancelled")
+                    raise
+
+            turn.task = asyncio.create_task(run())
+            stalled_turns.append(turn)
+            return turn
+
+        monkeypatch.setattr(chat, "start_background_report_run", start_stalled)
+        monkeypatch.setattr(main, "REPORT_LOGGED_TIMEOUT_S", 0.1)
+        with pytest.raises(RuntimeError):
+            await deliver("s3", "alice", "stalled")
+        assert stalled_turns[0].done and stalled_turns[0].status == "cancelled"
+        live_turn.reset()
+
+    _run(scenario())
+
+
+def test_chat_stream_fires_on_user_logged_before_llm_reply_finishes(tmp_path, monkeypatch):
+    """End-to-end wiring: Runner._persist_and_notify_user_message fires the
+    RunConfig.on_user_logged callback right when SessionLog appends the report,
+    while the model call itself is still suspended."""
+    from agentica.model.openai import OpenAIChat
+    from agentica.model.response import ModelResponse
+
+    monkeypatch.setattr(svc_mod, "get_profiles", lambda: {})
+    monkeypatch.setattr(svc_mod, "get_project_profile", lambda wd: None)
+    monkeypatch.setattr(svc_mod, "get_active_profile_name", lambda: "")
+    monkeypatch.setattr(svc_mod, "get_profile", lambda name: None)
+    monkeypatch.setattr(svc_mod, "usage_payload", lambda *a, **k: asyncio.sleep(0, None))
+    monkeypatch.setattr(svc_mod, "turn_usage_payload", lambda *a: None)
+    monkeypatch.setenv("AGENTICA_HOME", str(tmp_path / "home"))
+
+    llm_gate = asyncio.Event()
+
+    class _WaitModel(OpenAIChat):
+        async def response_stream(self, messages, **kwargs):
+            await llm_gate.wait()
+            yield ModelResponse(content="ok")
+
+    async def scenario():
+        svc = AgentService(workspace_path=str(tmp_path / "ws"))
+        svc.model_provider = "openai"
+        svc.model_name = "gpt-4o-mini"
+        svc.api_key = "sk-test"
+        await svc._ensure_initialized()
+
+        work = tmp_path / "proj"
+        work.mkdir()
+        svc.set_session_work_dir("s-wire", str(work))
+        agent = await svc._get_agent("s-wire", for_run=True)
+        agent.model = _WaitModel(id="gpt-4o-mini", api_key="sk-test")
+        agent.auxiliary_model = agent.model
+
+        logged = asyncio.Event()
+        task = asyncio.create_task(svc.chat_stream(
+            "[Background terminal #1 (term_1) finished]",
+            "s-wire",
+            automated=True,
+            on_user_logged=logged.set,
+        ))
+        await asyncio.wait_for(logged.wait(), timeout=10)
+        assert not task.done()
+        rows = [json.loads(line) for line in agent._session_log.path.read_text(encoding="utf-8").splitlines()]
+        assert any(r.get("type") == "user" and r.get("automated") is True for r in rows)
+        llm_gate.set()
+        await asyncio.wait_for(task, timeout=10)
+
+    _run(scenario())
 
 
 def test_a_gateway_that_loses_the_im_lock_never_connects_a_channel(monkeypatch):

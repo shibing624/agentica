@@ -217,6 +217,7 @@ class StreamMixin:
         self.agent._run_channel = config.channel
         self.agent._run_input_meta = config.input_meta
         self.agent._run_ticket_id = config.ticket_id
+        self.agent._run_on_user_logged = config.on_user_logged
         self.agent._run_max_api_retry = self._resolve_max_api_retry(
             self.agent,
             config,
@@ -312,6 +313,7 @@ class StreamMixin:
         self.agent._run_channel = config.channel
         self.agent._run_input_meta = config.input_meta
         self.agent._run_ticket_id = config.ticket_id
+        self.agent._run_on_user_logged = config.on_user_logged
         self.agent._run_max_api_retry = self._resolve_max_api_retry(
             self.agent,
             config,

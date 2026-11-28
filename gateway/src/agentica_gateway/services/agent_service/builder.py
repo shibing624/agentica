@@ -132,7 +132,7 @@ class AgentBuilderMixin:
             )
             raise RuntimeError(f"AgentService init failed: {e}") from e
 
-    def _build_agent(self, session_id: str, owner: Optional[str] = None) -> DeepAgent:
+    def _build_agent(self, session_id: str, owner: Optional[str] = None, under_own_lock: bool = False) -> DeepAgent:
         """Build a new DeepAgent instance (sync, runs in thread)."""
         pkg = _pkg()
         cfg = self.session_model_config(session_id, owner)
@@ -271,7 +271,13 @@ class AgentBuilderMixin:
             and len(agent.working_memory.runs) == 0
             and len(agent.working_memory.messages) == 0
         ):
-            if not self.is_session_active(session_id, owner):
+            # A run builds under the session lock it holds itself, and that lock
+            # is not another live turn. Without ``under_own_lock`` the seal only
+            # happened when the session was opened before anyone wrote to it. A
+            # message sent straight after a crash then found a log ending on a
+            # tool result or an automated notice and added a second user turn in
+            # a row.
+            if under_own_lock or not self.is_session_active(session_id, owner):
                 agent._session_log.seal_incomplete_turn()
             resumed_messages = agent._session_log.load(
                 model=model.id if model is not None else None
@@ -310,7 +316,9 @@ class AgentBuilderMixin:
                     return agent
             build = self._agent_builds.get(key)
             if build is None:
-                build = asyncio.ensure_future(self._build_and_cache_agent(key, session_id, owner))
+                build = asyncio.ensure_future(
+                    self._build_and_cache_agent(key, session_id, owner, under_own_lock=for_run)
+                )
                 self._agent_builds[key] = build
 
                 def _forget(done: asyncio.Future) -> None:
@@ -324,13 +332,15 @@ class AgentBuilderMixin:
                 return agent
         raise RuntimeError("Session model changed repeatedly while it was being prepared. Please retry.")
 
-    async def _build_and_cache_agent(self, key: str, session_id: str, owner: Optional[str]) -> DeepAgent:
+    async def _build_and_cache_agent(
+        self, key: str, session_id: str, owner: Optional[str], under_own_lock: bool = False,
+    ) -> DeepAgent:
         self._stale_agents.discard(key)
         selection = self.session_log_for(session_id, owner).model_selection()
 
         try:
             agent = await asyncio.wait_for(
-                asyncio.to_thread(self._build_agent, session_id, owner),
+                asyncio.to_thread(self._build_agent, session_id, owner, under_own_lock),
                 timeout=_AGENT_BUILD_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -600,8 +610,9 @@ class AgentBuilderMixin:
         stream_intermediate_steps: bool = False,
         automated: bool = False,
         input_meta: Optional[Dict[str, Any]] = None,
+        on_user_logged: Optional[Callable[[], None]] = None,
     ) -> RunConfig:
         return RunConfig(
             stream_intermediate_steps=stream_intermediate_steps, source=source, channel=channel,
-            automated_input=automated, input_meta=input_meta,
+            automated_input=automated, input_meta=input_meta, on_user_logged=on_user_logged,
         )

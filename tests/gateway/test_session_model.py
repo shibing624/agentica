@@ -135,7 +135,7 @@ def test_a_deleted_profile_falls_back_instead_of_breaking_the_chat(svc):
 
 def test_a_pick_rebuilds_only_that_chats_agent(svc, monkeypatch):
     built = []
-    def build(sid, owner=None):
+    def build(sid, owner=None, under_own_lock=False):
         built.append(sid)
         agent = SimpleNamespace(user_id=svc._owner(owner))
         agent.set_permission_mode = lambda mode: None
@@ -158,7 +158,7 @@ def test_concurrent_lookups_share_one_agent_so_steer_reaches_the_run(svc, monkey
     built = []
     release = threading.Event()
 
-    def build(sid, owner=None):
+    def build(sid, owner=None, under_own_lock=False):
         release.wait(5)
         agent = Agent(user_id=svc._owner(owner))
         built.append(agent)
@@ -251,7 +251,7 @@ def test_build_agent_creates_the_main_model_from_the_session_profile(svc, monkey
 
 def test_a_pick_mid_run_waits_for_the_run(svc, monkeypatch):
     built = []
-    def build(sid, owner=None):
+    def build(sid, owner=None, under_own_lock=False):
         built.append(sid)
         agent = SimpleNamespace(user_id=svc._owner(owner))
         agent.set_permission_mode = lambda mode: None
@@ -343,7 +343,7 @@ def test_effort_and_cached_agent_are_isolated_by_owner_for_the_same_session_id(s
     for owner in ("alice", "bob"):
         svc.set_session_work_dir(sid, work_dir, owner=owner)
 
-    monkeypatch.setattr(svc, "_build_agent", lambda sid, owner: SimpleNamespace(
+    monkeypatch.setattr(svc, "_build_agent", lambda sid, owner, under_own_lock=False: SimpleNamespace(
         user_id=svc._owner(owner), set_permission_mode=lambda mode: None,
         effort=svc.session_model_config(sid, owner)["reasoning_effort"],
     ))
@@ -377,7 +377,7 @@ def test_claude_off_uses_same_mode_as_the_cli(svc):
 
 
 def test_effort_written_by_cli_rebuilds_cached_agent(svc, monkeypatch):
-    monkeypatch.setattr(svc, "_build_agent", lambda sid, owner: SimpleNamespace(
+    monkeypatch.setattr(svc, "_build_agent", lambda sid, owner, under_own_lock=False: SimpleNamespace(
         user_id=svc._owner(owner), set_permission_mode=lambda mode: None,
         effort=svc.session_model_config(sid, owner)["reasoning_effort"],
     ))
@@ -398,7 +398,7 @@ def test_new_run_waits_for_latest_effort_if_old_agent_is_building(svc, monkeypat
     started = threading.Event()
     finish = threading.Event()
 
-    def build(sid, owner):
+    def build(sid, owner, under_own_lock=False):
         effort = svc.session_model_config(sid, owner)["reasoning_effort"]
         started.set()
         assert finish.wait(5)
@@ -423,7 +423,7 @@ def test_new_run_waits_for_latest_effort_if_old_agent_is_building(svc, monkeypat
 def test_new_run_stops_rebuilding_when_effort_keeps_changing(svc, monkeypatch):
     built = []
 
-    def build(sid, owner):
+    def build(sid, owner, under_own_lock=False):
         effort = svc.session_model_config(sid, owner)["reasoning_effort"]
         built.append(effort)
         # Make the first two builds stale, then stop changing the sidecar.

@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **后台任务在网关宕机期间结束，现在也会报告**：启动任务的网关进程被杀之后任务才跑完，记录里没有退出码。网关的补送逻辑把这类记录算出报告就标成「已送达」然后丢掉，CLI 那条路径是送的。实测（`evaluation/demo_track/e1_crash_recovery.py`）12 次里 12 次用户收不到任何消息，任务列表里显示 stopped、退出码为空。现在网关同样送达，报告写明「任务在没人看着的时候结束了」并附日志尾部；退出码仍然拿不回来，状态照旧显示 stopped。测试 `tests/gateway/test_background_reports.py`。
+
+- **崩溃后直接发消息，中断的回合也会封口**：构建会话 agent 时用「会话锁是否被占」判断有没有别的回合在跑，而发起回合的运行自己就持有这把锁，于是只有先打开会话再发消息才会补上 `[Session ended before the assistant replied]`。实测网关在回合中途被 SIGKILL 后，直接发消息 6 次都不封口，先打开会话 6 次都封口；现在两条路都封口（重跑 6/6）。封口管的是转录可回放和把中断标出来，不管模型会不会接着干：封口前后，一句「只回复 OK」之后模型都会把旧任务剩下的步骤做完（6/6、5/6），这一点没有变。不是由回合触发的构建（如用量查询）照旧不碰正在跑的回合。测试 `tests/gateway/test_session_sealing.py`。
+
+- **后台报告的送达标记改为在报告写进日志之后**：此前标记在报告回合刚排上队就写，网关若在这之后、日志落盘之前被杀，记录写着已送达，日志里却没有报告（实测只在记录落定后的几十毫秒内命中，8 次里 1 次）。现在 `RunConfig.on_user_logged` 在 `SessionLog.append` 落盘时立即触发 `LiveTurn.user_logged` 事件（不轮询日志、也不等模型那一轮），网关报告处理等待该事件后才标记已送达；若回合在落盘前结束则立刻报错，若超时则取消该回合再报错，避免超时后原回合继续跑导致重复送达。测试 `tests/gateway/test_background_reports.py`。
+
+- **Demo Track 评测脚本**：`evaluation/demo_track/` 新增三份，都对着一次性的测试网关跑（独立数据根、独立端口、不登录 IM）：`e1_crash_recovery.py` 强杀网关后看后台任务、报告和中断回合；`e2_continuity.py` 网关与 CLI `resume` 轮流在同一会话里干活并经审批 API 放行；`e3_provider_matrix.py` 同一组 12 个工具调用任务跑多个 profile，按文件内容和工具记录核对。
+
 - **桌面端回合结束发系统通知**：此前 Agentica 从没调用过系统通知接口，macOS「设置 → 通知」里根本没有这个 app，后台跑完一轮只能自己切回去看。现在窗口不在前台时，活动会话从「运行中」变成「已结束」会发一条系统横幅（标题是会话名，点击回到窗口）；首次会弹系统授权，授权后 app 出现在通知设置里。触发不靠轮询：页面本来就在标题前加 `● ` 前缀表示运行中，主进程监听标题变化再读一次 `<html data-session-running>` 即可；帮助菜单加了「Send Test Notification」用于验证，`AGENTICA_DESKTOP_NOTIFY_TEST=1` 也能在启动时发一条。
 
 - **macOS 桌面端支持 Homebrew Cask 一键安装**：在 [`shibing624/homebrew-tap`](https://github.com/shibing624/homebrew-tap) 新增 `Casks/agentica.rb`（覆盖 Apple Silicon 与 Intel 双架构）及 Release 自动同步工作流。原先未签名的 macOS 安装包每次下载或升级都要手动拖进「应用程序」再跑 `sudo xattr -rd com.apple.quarantine`；现在可运行 `brew install --cask shibing624/tap/agentica` 自动清理隔离属性，并用 `brew upgrade --cask shibing624/tap/agentica` 升级。下载页 `docs/desktop/index.html` 与 `docs/advanced/gateway.md` 已同步补充该方式。

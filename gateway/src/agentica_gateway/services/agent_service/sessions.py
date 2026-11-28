@@ -401,35 +401,43 @@ class AgentSessionsMixin:
         # Same pacing as the CLI sweep: a session that comes back after downtime
         # can owe several reports, and they are handed over as ONE turn so the
         # phone and the page get one summary instead of one per job.
-        claimed: List[tuple[Path, Dict[str, Any], BackgroundProcessCompleted]] = []
+        claimed: List[Path] = []
+        events: List[BackgroundProcessCompleted] = []
+        texts: List[str] = []
         for path, rec in undelivered_job_records(records_dir)[:5]:
             if not claim_job_delivery(path, who):
                 continue
             report = background_report_from_record(rec)
             if report is None:
-                # Settled with nothing to say (stopped, or no exit code): mark
-                # it rather than leaving it permanently owed.
+                # Settled with nothing to say (the user stopped it): mark it
+                # rather than leaving it permanently owed.
                 mark_job_delivered(path, who)
                 continue
+            claimed.append(path)
             event = completed_from_record(rec)
-            if event is None or event.stop_requested:
-                mark_job_delivered(path, who)
-                continue
-            claimed.append((path, rec, event))
+            if event is None:
+                # The process that started this job is gone, so its exit code was
+                # never recorded. It still ended and the log still says what it
+                # printed: that is a report. Marking the record without sending
+                # it, as this branch used to, is the loss the sweep exists to stop.
+                texts.append(report)
+            else:
+                events.append(event)
         if not claimed:
             return
+        if events:
+            texts.insert(0, render_batch_report(events))
         try:
             await handler(
-                session_id, self._owner(owner),
-                render_batch_report([event for _, _, event in claimed]),
+                session_id, self._owner(owner), "\n\n".join(texts),
             )
         except Exception as exc:  # noqa: BLE001 - the batch stays owed, not marked
             logger.warning(f"batched background report delivery failed: {exc}")
-            for path, _, _ in claimed:
+            for path in claimed:
                 note_job_delivery_failure(path)
                 release_job_claim(path)
             return
-        for path, _, _ in claimed:
+        for path in claimed:
             mark_job_delivered(path, who)
 
     @staticmethod
