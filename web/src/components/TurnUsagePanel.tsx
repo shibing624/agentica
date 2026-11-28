@@ -93,7 +93,6 @@ export function TurnUsagePanel({ m, onOpenChange }: { m: ChatMsg; onOpenChange?:
               </div>
             ))}
           </dl>
-          <div className="turn-usage-note">{S.chat.usageTip}</div>
         </div>,
         document.body,
       )}

@@ -573,7 +573,6 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .turn-usage-rows dt{color:var(--fg3)}
 .turn-usage-rows dd{margin:0;text-align:right;color:var(--fg);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .turn-usage-rows dd.mono{font-family:var(--mono);font-size:11.5px}
-.turn-usage-note{margin-top:10px;padding-top:8px;border-top:var(--hair) solid var(--border2);font-size:11px;color:var(--fg3)}
 /* `/skill args` turn in a user bubble: name as a link, dotted until hovered. */
 .skill-ref{display:inline;border:none;background:transparent;padding:0;margin-right:6px;color:var(--skill-ref);font:inherit;font-family:var(--mono);font-size:.94em;font-weight:500;cursor:pointer;text-decoration:underline dotted;text-decoration-color:var(--skill-ref);text-underline-offset:3px;text-decoration-thickness:1px}
 .skill-ref:hover,.skill-ref:focus-visible{text-decoration-style:solid;outline:none}

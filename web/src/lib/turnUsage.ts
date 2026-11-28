@@ -43,6 +43,7 @@ export type TurnUsageLabels = {
 export type TurnUsageRow = { label: string; value: string; mono?: boolean };
 
 const exact = (n: number) => Math.round(n).toLocaleString("en-US");
+const tok = (n: number) => `${exact(n)} tok`;
 
 function fmtCost(cost: number) {
   if (cost > 0 && cost < 0.00005) return "<$0.0001";
@@ -64,10 +65,10 @@ export function turnUsageRows(m: TurnUsageInput, L: TurnUsageLabels): { total: s
   const rows: TurnUsageRow[] = [];
   if (m.model) rows.push({ label: L.turnUsageModel, value: m.model, mono: true });
   if (m.cacheHitPercent != null) rows.push({ label: L.cacheHitTip, value: `${m.cacheHitPercent.toFixed(1)}%` });
-  rows.push({ label: L.turnUsageInput, value: exact(Math.max(prompt - cacheRead - cacheWrite, 0)) });
-  if (m.cacheRead != null) rows.push({ label: L.turnUsageCacheRead, value: exact(cacheRead) });
-  if (cacheWrite) rows.push({ label: L.turnUsageCacheWrite, value: exact(cacheWrite) });
-  rows.push({ label: L.ctxOutput, value: exact(output) });
+  rows.push({ label: L.turnUsageInput, value: tok(Math.max(prompt - cacheRead - cacheWrite, 0)) });
+  if (m.cacheRead != null) rows.push({ label: L.turnUsageCacheRead, value: tok(cacheRead) });
+  if (cacheWrite) rows.push({ label: L.turnUsageCacheWrite, value: tok(cacheWrite) });
+  rows.push({ label: L.ctxOutput, value: tok(output) });
   if (m.requests) rows.push({ label: L.turnUsageRequests, value: String(m.requests) });
   if (m.llmMs && output) rows.push({ label: L.turnUsageSpeed, value: `${(output / (m.llmMs / 1000)).toFixed(1)} tok/s` });
   if ((m.costUsd || 0) > 0) rows.push({ label: L.costUsdTip, value: fmtCost(m.costUsd || 0) });

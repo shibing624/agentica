@@ -26,11 +26,11 @@ const view = (m) => {
 test("uncached input is the prompt minus both cache buckets, totals are exact", () => {
   const v = view({ tokIn: 470_000, tokOut: 7_700, cacheRead: 440_000, cacheWrite: 5_000, cacheHitPercent: 93.6 });
   assert.equal(v.total, "477,700");
-  assert.equal(v.rows["Input (uncached)"], "25,000");
-  assert.equal(v.rows["Cache read"], "440,000");
-  assert.equal(v.rows["Cache write"], "5,000");
+  assert.equal(v.rows["Input (uncached)"], "25,000 tok");
+  assert.equal(v.rows["Cache read"], "440,000 tok");
+  assert.equal(v.rows["Cache write"], "5,000 tok");
   assert.equal(v.rows["Cache hit"], "93.6%");
-  assert.equal(v.rows.Output, "7,700");
+  assert.equal(v.rows.Output, "7,700 tok");
 });
 
 test("rows the provider never reported are left out, not shown as 0", () => {
