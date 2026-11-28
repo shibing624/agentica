@@ -511,6 +511,7 @@ class SessionLog:
         # See ``begin_turn`` and agentica/runner/persist.py.
         self._turn_start_uuid: Optional[str] = None
         self._turn_user_uuid: Optional[str] = None
+        self._last_append_ok: bool = True
         self._turn_written_tool_call_ids: set = set()
         self._turn_written_tool_call_rounds: set = set()
         # What ``append_trace_prelude`` last wrote, so the same header is not
@@ -608,7 +609,7 @@ class SessionLog:
             "content": content,
             **meta,
         }
-        self._append(entry)
+        self._last_append_ok = self._append(entry)
         self._last_uuid = entry_uuid
         self._index_user_row(entry)
         return entry_uuid
@@ -2981,7 +2982,7 @@ class SessionLog:
             return 0
         return sum(1 for line in self.path.read_text(encoding="utf-8").splitlines() if line.strip())
 
-    def _append(self, entry: Dict) -> None:
+    def _append(self, entry: Dict) -> bool:
         """Append a single JSON entry as a new line (atomic write).
 
         Disk errors are logged but not propagated — session logging is non-critical.
@@ -2989,8 +2990,10 @@ class SessionLog:
         try:
             with open(self.path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            return True
         except OSError as e:
             logger.warning(f"SessionLog write failed ({self.path}): {e}")
+            return False
 
     def _index_user_row(self, entry: Dict[str, Any]) -> None:
         """Best-effort dual-write of a human ``user`` row to the cross-session index.

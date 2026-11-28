@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import (
     Any,
+    Callable,
     Dict,
     List,
     Optional,
@@ -103,3 +104,8 @@ class RunConfig:
     # fallback that answered. Only loop-breaks trigger this — a raised exception
     # is left to the caller. Defaults to False (opt-in, no behavior change).
     fallback_on_break: bool = False
+    # Invoked once on the event loop as soon as this run's ``user`` entry is
+    # written to ``SessionLog``. Used by gateway background report delivery to
+    # mark a job delivered right after the report lands on disk without polling
+    # the transcript or waiting for the full model turn.
+    on_user_logged: Optional[Callable[[], None]] = None

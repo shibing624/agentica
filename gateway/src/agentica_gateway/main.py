@@ -45,6 +45,7 @@ from .card_page import (
 )
 from agentica.version import __version__
 from .config import settings
+from .services import live_turn
 from .services.agent_service import AgentService
 from .services.scheduler_service import GatewayCronRunner, GatewayScheduler
 from .services.channel_manager import ChannelManager
@@ -517,6 +518,48 @@ app.include_router(ws.router)
 IM_TAKEOVER_POLL_S = 5.0
 
 
+REPORT_LOGGED_TIMEOUT_S = 45.0
+
+
+async def _wait_for_logged_report(agent_svc: AgentService, turn: live_turn.LiveTurn) -> None:
+    """Return once the report run has persisted its user entry to ``SessionLog``.
+
+    The sweep marks the job's record delivered as soon as the handler returns.
+    Returning right after spawning left a window where ``delivered_at`` was set
+    before the run had written anything; waiting for the full model turn would
+    turn any crash during the reply into a duplicate report. Waiting on the
+    in-process ``user_logged`` event + ``turn.task`` does no file polling, fails
+    immediately if the run exits before persisting, and cancels a stalled run
+    on timeout so it cannot wake up and double-deliver after the claim drops.
+    """
+    if turn.user_logged.is_set():
+        return
+    if turn.task is None:
+        raise RuntimeError("background report turn has no task")
+    logged_task = asyncio.create_task(turn.user_logged.wait())
+    try:
+        await asyncio.wait(
+            {logged_task, turn.task},
+            timeout=REPORT_LOGGED_TIMEOUT_S,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+    finally:
+        if not logged_task.done():
+            logged_task.cancel()
+            try:
+                await logged_task
+            except asyncio.CancelledError:
+                pass
+    if turn.user_logged.is_set():
+        return
+    if turn.task.done():
+        raise RuntimeError(f"background report turn {turn.status} before logging report")
+    await live_turn.cancel_and_wait(agent_svc, run_id=turn.run_id)
+    raise RuntimeError(
+        f"the report run did not log its report within {REPORT_LOGGED_TIMEOUT_S:.0f}s"
+    )
+
+
 def _background_report_handler(agent_svc: AgentService):
     """Where a finished background command's report goes.
 
@@ -537,7 +580,8 @@ def _background_report_handler(agent_svc: AgentService):
         if quiet:
             await asyncio.to_thread(_record_quiet_report, agent_svc, session_id, owner, report)
             return
-        chat.start_background_report_run(agent_svc, session_id, owner, report)
+        turn = chat.start_background_report_run(agent_svc, session_id, owner, report)
+        await _wait_for_logged_report(agent_svc, turn)
 
     return deliver
 
@@ -550,8 +594,6 @@ def _record_quiet_report(agent_svc: AgentService, session_id: str, owner: str, r
     page's completion card and the model's next request read the same text — one
     artifact, two readers, and no extra model call for either.
     """
-    from agentica_gateway.services import live_turn
-
     try:
         log = agent_svc.session_log_for(session_id, owner=owner)
         log.append("user", report, automated=True)

@@ -84,6 +84,7 @@ class LiveTurn:
         self.seq = 0
         self.events: list[dict] = []
         self.task: Optional[asyncio.Task] = None
+        self.user_logged: asyncio.Event = asyncio.Event()
         self.done = False
         self.started_wall = time.time()
         self.finished_at = 0.0

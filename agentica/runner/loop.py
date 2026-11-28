@@ -604,6 +604,23 @@ class LoopMixin:
         finally:
             model.format_tool_results(function_call_results, messages, provider_metadata)
 
+    def _persist_and_notify_user_message(
+        self,
+        agent: "Agent",
+        message: Any,
+        user_messages: List[Message],
+    ) -> None:
+        self._persist_turn_user_message(agent, message, user_messages)
+        cb = agent._run_on_user_logged
+        if (
+            cb is not None
+            and agent._session_log is not None
+            and agent._session_log._turn_user_uuid is not None
+            and agent._session_log._last_append_ok
+        ):
+            agent._run_on_user_logged = None
+            cb()
+
     async def _run_impl(
         self,
         message: Optional[Union[str, List, Dict, Message]] = None,
@@ -1120,7 +1137,7 @@ class LoopMixin:
                         # end-of-turn write backfills a turn that never reached
                         # an LLM call.
                         if messages is None:
-                            self._persist_turn_user_message(agent, message, user_messages)
+                            self._persist_and_notify_user_message(agent, message, user_messages)
 
                         # Mid-run steering: flush any guidance pushed since the last
                         # inference so the model sees it on THIS call.
@@ -1532,7 +1549,7 @@ class LoopMixin:
                             break
 
                         if messages is None:
-                            self._persist_turn_user_message(agent, message, user_messages)
+                            self._persist_and_notify_user_message(agent, message, user_messages)
 
                         # Mid-run steering: flush any guidance pushed since the last
                         # inference so the model sees it on THIS call.
@@ -1836,7 +1853,7 @@ class LoopMixin:
                     # preceded THIS turn's first write.
                     _turn_start_uuid = agent._session_log._turn_start_uuid
                     # 1. Log user input (no-op if an in-turn flush wrote it)
-                    self._persist_turn_user_message(agent, message, user_messages)
+                    self._persist_and_notify_user_message(agent, message, user_messages)
 
                     # 2. Log assistant tool-call messages AND their tool results in
                     #    the exact interleaved order, so /resume rebuilds a valid
@@ -2044,6 +2061,7 @@ class LoopMixin:
             # Per-run by definition: the next dispatch resolves its own value
             # from its own session, never from whatever this agent ran last.
             agent._run_ticket_id = None
+            agent._run_on_user_logged = None
             Model.reset_run_state(run_state_token)
             # Release async HTTP clients on the (still-alive) run loop so they
             # are not garbage-collected later on a closed loop — httpx raises

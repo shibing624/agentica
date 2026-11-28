@@ -20,7 +20,7 @@ def _service(tmp_path, monkeypatch):
     svc = AgentService(workspace_path=str(tmp_path))
     built = []
 
-    def build(session_id, owner=None):
+    def build(session_id, owner=None, under_own_lock=False):
         agent = SimpleNamespace(user_id=svc._owner(owner), session_id=session_id, n=len(built))
         agent.set_permission_mode = lambda mode: None
         built.append(agent)

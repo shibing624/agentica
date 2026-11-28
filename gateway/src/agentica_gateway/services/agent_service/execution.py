@@ -315,8 +315,10 @@ class AgentExecutionMixin:
         channel: Optional[str] = None,
         automated: bool = False,
         input_meta: Optional[Dict[str, Any]] = None,
+        on_user_logged: Optional[Callable[[], None]] = None,
     ) -> ChatResult:
         """Send a message and stream the response via callbacks."""
+        await self._ensure_initialized()
         lock = self._get_session_lock(session_id, owner)
         if lock.locked():
             raise RuntimeError(
@@ -329,7 +331,7 @@ class AgentExecutionMixin:
                 message, session_id, user_id,
                 source, on_content, on_tool_call, on_tool_result, on_thinking,
                 owner, media, include_usage=include_usage, channel=channel,
-                automated=automated, input_meta=input_meta,
+                automated=automated, input_meta=input_meta, on_user_logged=on_user_logged,
             )
 
     async def _chat_stream_impl(
@@ -349,9 +351,9 @@ class AgentExecutionMixin:
         channel: Optional[str] = None,
         automated: bool = False,
         input_meta: Optional[Dict[str, Any]] = None,
+        on_user_logged: Optional[Callable[[], None]] = None,
     ) -> ChatResult:
         """Internal stream implementation (called under per-session lock)."""
-        await self._ensure_initialized()
         agent = await self._get_agent(session_id, owner, for_run=True)
         message = replace_invalid_utf8(message)
         message, run_images, run_audio, media_notes = await self._prepare_run_media(
@@ -379,6 +381,7 @@ class AgentExecutionMixin:
                     stream_intermediate_steps=True,
                     automated=automated,
                     input_meta=input_meta,
+                    on_user_logged=on_user_logged,
                 ),
                 images=run_images,
                 audio=run_audio,
